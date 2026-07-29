@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "xploresoweto",
+    "slug": "xploresoweto",
+    "version": "1.0.3.beta",
+    "orientation": "portrait",
+    "icon": "./assets/Sowetoicon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/Sowetoicon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/Sowetoicon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.sbudamalloya.xploresoweto"
+    },
+    "web": {
+      "favicon": "./assets/Sowetoicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "11d35109-de68-4eaa-aea3-a399fd3626a7"
+      }
+    },
+    "owner": "sbudamalloya",
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      "expo-web-browser",
+      "expo-font"
+    ]
+  }
+}

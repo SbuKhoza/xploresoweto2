@@ -1,0 +1,66 @@
+[
+  {
+    "suburb": "Thulani",
+    "schedule": {
+      "stage_1": {
+        "monday": ["06:00 - 08:30", "14:00 - 16:30"],
+        "tuesday": [],
+        "wednesday": [],
+        "thursday": [],
+        "friday": [],
+        "saturday": [],
+        "sunday": []
+      },
+      "stage_2": {
+        "monday": ["06:00 - 08:30", "14:00 - 16:30"],
+        "tuesday": ["08:00 - 10:30"],
+        "wednesday": ["10:00 - 12:30"],
+        "thursday": [],
+        "friday": [],
+        "saturday": [],
+        "sunday": []
+      },
+      "stage_3": {
+        "monday": [],
+        "tuesday": [],
+        "wednesday": [],
+        "thursday": [],
+        "friday": [],
+        "saturday": [],
+        "sunday": []
+      }
+    }
+  },
+  {
+    "suburb": "Dobsonville",
+    "schedule": {
+      "stage_1": {
+        "monday": ["10:00 - 12:30"],
+        "tuesday": [],
+        "wednesday": [],
+        "thursday": [],
+        "friday": [],
+        "saturday": [],
+        "sunday": []
+      },
+      "stage_2": {
+        "monday": ["10:00 - 12:30"],
+        "tuesday": ["18:00 - 20:30"],
+        "wednesday": [["18:00 - 20:30"]],
+        "thursday": [],
+        "friday": [],
+        "saturday": [],
+        "sunday": []
+      },
+      "stage_3": {
+        "monday": [],
+        "tuesday": [],
+        "wednesday": [],
+        "thursday": [],
+        "friday": [],
+        "saturday": [],
+        "sunday": []
+      }
+    }
+  }
+]
