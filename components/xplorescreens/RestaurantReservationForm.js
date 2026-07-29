@@ -2,21 +2,10 @@
 
 import { useState, useEffect } from "react"
 import {
-  StyleSheet,
-  Text,
-  View,
-  ScrollView,
-  TouchableOpacity,
-  Modal,
-  TextInput,
-  Alert,
-  Dimensions,
-  FlatList,
+  Text, View, ScrollView, TouchableOpacity, Modal, TextInput, Alert, FlatList,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import DateTimePicker from "@react-native-community/datetimepicker"
-
-const { width } = Dimensions.get("window")
 
 const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
   const [reservationDate, setReservationDate] = useState(new Date())
@@ -44,50 +33,34 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
     const now = new Date()
     const currentHour = now.getHours()
     const currentMinute = now.getMinutes()
-
-    // Restaurant hours (assuming 11:00 - 22:00)
     const openingHour = 11
     const closingHour = 22
 
     for (let hour = openingHour; hour < closingHour; hour++) {
       for (let minute = 0; minute < 60; minute += 30) {
-        // For today, only show times from current time onwards
         const isToday = reservationDate.toDateString() === now.toDateString()
-        if (isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute))) {
-          continue
-        }
-
-        const timeString = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`
-        times.push(timeString)
+        if (isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute))) continue
+        times.push(`${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`)
       }
     }
     return times
   }
 
   useEffect(() => {
-    // Set default time to 19:00 or next available time slot if today
     const now = new Date()
     const isToday = reservationDate.toDateString() === now.toDateString()
 
     if (isToday) {
       const currentHour = now.getHours()
       const currentMinute = now.getMinutes()
-
-      // If current time is before 19:00, set default to 19:00
       if (currentHour < 19) {
         setReservationTimeString("19:00")
       } else {
-        // Set to next available 30-minute slot
         const roundedMinute = currentMinute <= 30 ? 30 : 0
         const adjustedHour = currentMinute > 30 ? currentHour + 1 : currentHour
-
         if (adjustedHour < 22) {
-          // Assuming restaurant closes at 22:00
-          setReservationTimeString(
-            `${adjustedHour.toString().padStart(2, "0")}:${roundedMinute.toString().padStart(2, "0")}`,
-          )
+          setReservationTimeString(`${adjustedHour.toString().padStart(2, "0")}:${roundedMinute.toString().padStart(2, "0")}`)
         } else {
-          // If after closing time, set to first slot next day
           setReservationTimeString("11:00")
           const tomorrow = new Date(now)
           tomorrow.setDate(tomorrow.getDate() + 1)
@@ -95,105 +68,74 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
         }
       }
     } else {
-      // For future dates, default to 19:00
       setReservationTimeString("19:00")
     }
   }, [reservationDate])
 
-  const formatDate = (date) => {
-    return date.toLocaleDateString("en-ZA", {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
-  }
+  const formatDate = (date) =>
+    date.toLocaleDateString("en-ZA", { weekday: "short", year: "numeric", month: "short", day: "numeric" })
 
   const handleSubmitReservation = () => {
     if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim() || !selectedTable) {
-      Alert.alert("Error", "Please fill in all required fields and select a table")
+      Alert.alert("Missing info", "Please fill in all required fields and select a table")
       return
     }
 
-    const selectedOccasion = occasionOptions.find((option) => option.value === occasion)
-
+    const selectedOccasion = occasionOptions.find((o) => o.value === occasion)
     const reservationData = {
       restaurant: restaurant?.name,
-      date: formatDate(reservationDate),
-      time: reservationTimeString,
-      guests,
-      table: selectedTable,
-      guestName,
-      guestEmail,
-      guestPhone,
-      occasion: selectedOccasion.label,
-      specialRequests,
+      date: formatDate(reservationDate), time: reservationTimeString,
+      guests, table: selectedTable, guestName, guestEmail, guestPhone,
+      occasion: selectedOccasion.label, specialRequests,
     }
 
     Alert.alert(
       "Reservation Submitted",
       `Thank you ${guestName}! Your reservation at ${restaurant?.name} for ${formatDate(reservationDate)} at ${reservationTimeString} has been submitted. You will receive a confirmation email shortly.`,
-      [
-        {
-          text: "OK",
-          onPress: () => {
-            onClose()
-            // Reset form
-            setGuestName("")
-            setGuestEmail("")
-            setGuestPhone("")
-            setSpecialRequests("")
-            setGuests(2)
-            setOccasion("none")
-            setSelectedTable(null)
-          },
-        },
-      ],
+      [{ text: "OK", onPress: () => {
+        onClose()
+        setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
+        setGuests(2); setOccasion("none"); setSelectedTable(null)
+      }}],
     )
   }
 
   const onDateChange = (event, selectedDate) => {
     setShowDatePicker(false)
-    if (selectedDate) {
-      setReservationDate(selectedDate)
-    }
+    if (selectedDate) setReservationDate(selectedDate)
   }
 
+  // ── Bottom-sheet time picker ──
   const renderTimeDropdown = () => {
     const timeOptions = generateTimeOptions()
-
     if (!showTimeDropdown) return null
 
     return (
-      <Modal transparent={true} visible={showTimeDropdown} onRequestClose={() => setShowTimeDropdown(false)}>
-        <TouchableOpacity style={styles.timeDropdownOverlay} onPress={() => setShowTimeDropdown(false)}>
-          <View style={styles.timeDropdownContainer}>
-            <View style={styles.timeDropdownHeader}>
-              <Text style={styles.timeDropdownTitle}>Select Time</Text>
-              <TouchableOpacity onPress={() => setShowTimeDropdown(false)}>
-                <Ionicons name="close" size={24} color="#666" />
+      <Modal transparent visible={showTimeDropdown} animationType="fade" onRequestClose={() => setShowTimeDropdown(false)}>
+        <TouchableOpacity className="flex-1 bg-black/40 justify-end" activeOpacity={1} onPress={() => setShowTimeDropdown(false)}>
+          <View className="bg-surface rounded-t-3xl max-h-[65%]" onStartShouldSetResponder={() => true}>
+            <View className="flex-row justify-between items-center px-5 py-4 border-b border-line">
+              <Text className="text-[15px] font-extrabold text-ink">Select Time</Text>
+              <TouchableOpacity onPress={() => setShowTimeDropdown(false)} className="w-8 h-8 rounded-full bg-bg justify-center items-center">
+                <Ionicons name="close" size={17} color="#7A8A8F" />
               </TouchableOpacity>
             </View>
             <FlatList
               data={timeOptions}
               keyExtractor={(item) => item}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[styles.timeOption, reservationTimeString === item && styles.selectedTimeOption]}
-                  onPress={() => {
-                    setReservationTimeString(item)
-                    setShowTimeDropdown(false)
-                  }}
-                >
-                  <Text
-                    style={[styles.timeOptionText, reservationTimeString === item && styles.selectedTimeOptionText]}
+              style={{ maxHeight: 320 }}
+              renderItem={({ item }) => {
+                const isSelected = reservationTimeString === item
+                return (
+                  <TouchableOpacity
+                    className={`flex-row justify-between items-center px-5 py-3 border-b border-line ${isSelected ? "bg-teal-light" : ""}`}
+                    onPress={() => { setReservationTimeString(item); setShowTimeDropdown(false) }}
                   >
-                    {item}
-                  </Text>
-                  {reservationTimeString === item && <Ionicons name="checkmark" size={20} color="#FF6B6B" />}
-                </TouchableOpacity>
-              )}
-              style={styles.timeOptionsList}
+                    <Text className={`text-[14px] ${isSelected ? "text-teal font-bold" : "text-ink"}`}>{item}</Text>
+                    {isSelected && <Ionicons name="checkmark" size={18} color="#1B4D5C" />}
+                  </TouchableOpacity>
+                )
+              }}
             />
           </View>
         </TouchableOpacity>
@@ -205,518 +147,168 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
 
   return (
     <Modal animationType="slide" transparent={false} visible={visible} onRequestClose={onClose}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Ionicons name="close" size={24} color="#000" />
+      <View className="flex-1 bg-bg">
+        {/* Header */}
+        <View className="flex-row items-center justify-between px-4 pt-14 pb-3 bg-surface border-b border-line">
+          <TouchableOpacity className="w-9 h-9 rounded-full bg-bg justify-center items-center" onPress={onClose}>
+            <Ionicons name="close" size={18} color="#1A1A1A" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Reserve at {restaurant.name}</Text>
-          <View style={styles.placeholder} />
+          <Text className="flex-1 text-center text-[16px] font-extrabold text-ink" numberOfLines={1}>Reserve at {restaurant.name}</Text>
+          <View className="w-9" />
         </View>
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Restaurant Summary */}
-          <View style={styles.summaryCard}>
-            <Text style={styles.restaurantName}>{restaurant.name}</Text>
-            <Text style={styles.restaurantLocation}>{restaurant.location}</Text>
-            <Text style={styles.cuisineText}>
-              {restaurant.cuisine} • {restaurant.price}
-            </Text>
+        <ScrollView className="flex-1 px-4 pt-4" showsVerticalScrollIndicator={false}>
+          {/* Summary */}
+          <View className="bg-surface rounded-2xl p-4 border border-line mb-4">
+            <Text className="text-lg font-extrabold text-ink mb-0.5">{restaurant.name}</Text>
+            <Text className="text-sm text-muted mb-2">{restaurant.location}</Text>
+            <Text className="text-[15px] font-semibold text-teal">{restaurant.cuisine} · {restaurant.price}</Text>
           </View>
 
-          {/* Date & Time Selection */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Date & Time</Text>
-
-            <View style={styles.dateTimeRow}>
-              <View style={styles.dateTimeItem}>
-                <Text style={styles.label}>Date</Text>
-                <TouchableOpacity style={styles.dateTimeButton} onPress={() => setShowDatePicker(true)}>
-                  <Ionicons name="calendar-outline" size={20} color="#666" />
-                  <Text style={styles.dateTimeText}>{formatDate(reservationDate)}</Text>
+          {/* Date & Time */}
+          <View className="bg-surface rounded-2xl p-4 border border-line mb-4">
+            <Text className="text-[15px] font-extrabold text-ink mb-3">Date & Time</Text>
+            <View className="flex-row gap-2.5">
+              <View className="flex-1">
+                <Text className="text-xs font-semibold text-muted mb-1.5">Date</Text>
+                <TouchableOpacity className="flex-row items-center gap-2 bg-bg rounded-xl px-3 py-2.5 border border-line" onPress={() => setShowDatePicker(true)}>
+                  <Ionicons name="calendar-outline" size={16} color="#1B4D5C" />
+                  <Text className="text-[13px] text-ink flex-1" numberOfLines={1}>{formatDate(reservationDate)}</Text>
                 </TouchableOpacity>
               </View>
-
-              <View style={styles.dateTimeItem}>
-                <Text style={styles.label}>Time</Text>
-                <TouchableOpacity style={styles.dateTimeButton} onPress={() => setShowTimeDropdown(true)}>
-                  <Ionicons name="time-outline" size={20} color="#666" />
-                  <Text style={styles.dateTimeText}>{reservationTimeString}</Text>
+              <View className="flex-1">
+                <Text className="text-xs font-semibold text-muted mb-1.5">Time</Text>
+                <TouchableOpacity className="flex-row items-center gap-2 bg-bg rounded-xl px-3 py-2.5 border border-line" onPress={() => setShowTimeDropdown(true)}>
+                  <Ionicons name="time-outline" size={16} color="#1B4D5C" />
+                  <Text className="text-[13px] text-ink flex-1">{reservationTimeString}</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
 
-          {/* Party Size & Table Selection */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Party Size & Table</Text>
+          {/* Party size & table */}
+          <View className="bg-surface rounded-2xl p-4 border border-line mb-4">
+            <Text className="text-[15px] font-extrabold text-ink mb-3">Party Size & Table</Text>
 
-            <Text style={styles.label}>Number of Guests</Text>
-            <View style={styles.guestCounter}>
+            <Text className="text-xs font-semibold text-muted mb-1.5">Number of Guests</Text>
+            <View className="flex-row items-center justify-center mb-4">
               <TouchableOpacity
-                style={[styles.counterButton, guests <= 1 && styles.counterButtonDisabled]}
+                className={`w-9 h-9 rounded-full justify-center items-center border ${guests <= 1 ? "bg-bg border-line" : "bg-teal-light border-teal"}`}
                 onPress={() => guests > 1 && setGuests(guests - 1)}
                 disabled={guests <= 1}
               >
-                <Ionicons name="remove" size={20} color={guests <= 1 ? "#ccc" : "#666"} />
+                <Ionicons name="remove" size={17} color={guests <= 1 ? "#C0C4D6" : "#1B4D5C"} />
               </TouchableOpacity>
-              <Text style={styles.guestCount}>{guests}</Text>
+              <Text className="text-lg font-extrabold text-ink mx-6 min-w-[24px] text-center">{guests}</Text>
               <TouchableOpacity
-                style={[styles.counterButton, guests >= 10 && styles.counterButtonDisabled]}
+                className={`w-9 h-9 rounded-full justify-center items-center border ${guests >= 10 ? "bg-bg border-line" : "bg-teal-light border-teal"}`}
                 onPress={() => guests < 10 && setGuests(guests + 1)}
                 disabled={guests >= 10}
               >
-                <Ionicons name="add" size={20} color={guests >= 10 ? "#ccc" : "#666"} />
+                <Ionicons name="add" size={17} color={guests >= 10 ? "#C0C4D6" : "#1B4D5C"} />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.label}>Select Table</Text>
-            <View style={styles.tableOptions}>
-              {restaurant.tableOptions.map((size) => (
-                <TouchableOpacity
-                  key={size}
-                  style={[
-                    styles.tableOption,
-                    selectedTable === size && styles.selectedTableOption,
-                    guests > size && styles.disabledTableOption,
-                  ]}
-                  onPress={() => guests <= size && setSelectedTable(size)}
-                  disabled={guests > size}
-                >
-                  <Ionicons
-                    name="people"
-                    size={20}
-                    color={guests > size ? "#ccc" : selectedTable === size ? "#FFF" : "#666"}
-                  />
-                  <Text
-                    style={[
-                      styles.tableOptionText,
-                      guests > size && styles.disabledTableOptionText,
-                      selectedTable === size && styles.selectedTableOptionText,
-                    ]}
+            <Text className="text-xs font-semibold text-muted mb-2">Select Table</Text>
+            <View className="flex-row flex-wrap gap-2">
+              {(restaurant.tableOptions || []).map((size) => {
+                const isDisabled = guests > size
+                const isSelected = selectedTable === size
+                return (
+                  <TouchableOpacity
+                    key={size}
+                    className={`flex-row items-center gap-1.5 px-3 py-2.5 rounded-xl border ${
+                      isDisabled ? "bg-bg border-line opacity-40" : isSelected ? "bg-teal border-teal" : "bg-bg border-line"
+                    }`}
+                    onPress={() => !isDisabled && setSelectedTable(size)}
+                    disabled={isDisabled}
                   >
-                    Table for {size}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Ionicons name="people-outline" size={14} color={isSelected ? "#FFFFFF" : "#7A8A8F"} />
+                    <Text className={`text-[13px] font-semibold ${isSelected ? "text-surface" : "text-ink"}`}>{size} seats</Text>
+                  </TouchableOpacity>
+                )
+              })}
             </View>
           </View>
 
-          {/* Occasion Selection */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Occasion</Text>
-            <View style={styles.occasionOptions}>
-              {occasionOptions.map((option) => (
+          {/* Occasion */}
+          <View className="bg-surface rounded-2xl p-4 border border-line mb-4">
+            <Text className="text-[15px] font-extrabold text-ink mb-3">Special Occasion</Text>
+            {occasionOptions.map((option) => {
+              const isSelected = occasion === option.value
+              return (
                 <TouchableOpacity
                   key={option.value}
-                  style={[styles.occasionOption, occasion === option.value && styles.selectedOccasionOption]}
+                  className={`flex-row items-center justify-between p-3 rounded-xl border mb-2 ${isSelected ? "border-teal bg-teal-light" : "border-line bg-bg"}`}
                   onPress={() => setOccasion(option.value)}
                 >
-                  <View style={styles.occasionOptionContent}>
-                    <Text
-                      style={[
-                        styles.occasionOptionLabel,
-                        occasion === option.value && styles.selectedOccasionOptionLabel,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                    <View style={[styles.radioButton, occasion === option.value && styles.selectedRadioButton]}>
-                      {occasion === option.value && <View style={styles.radioButtonInner} />}
-                    </View>
+                  <Text className={`text-[14px] font-semibold ${isSelected ? "text-teal" : "text-ink"}`}>{option.label}</Text>
+                  <View className={`w-5 h-5 rounded-full border-2 justify-center items-center ${isSelected ? "border-teal" : "border-line"}`}>
+                    {isSelected && <View className="w-2.5 h-2.5 rounded-full bg-teal" />}
                   </View>
                 </TouchableOpacity>
-              ))}
-            </View>
+              )
+            })}
           </View>
 
-          {/* Guest Information */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Guest Information</Text>
+          {/* Guest info */}
+          <View className="bg-surface rounded-2xl p-4 border border-line mb-4">
+            <Text className="text-[15px] font-extrabold text-ink mb-3">Guest Information</Text>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Full Name *</Text>
+            <View className="mb-3.5">
+              <Text className="text-xs font-semibold text-muted mb-1.5">Full Name *</Text>
               <TextInput
-                style={styles.textInput}
-                value={guestName}
-                onChangeText={setGuestName}
-                placeholder="Enter your full name"
-                placeholderTextColor="#999"
+                className="border border-line rounded-xl px-3.5 py-2.5 text-sm text-ink bg-bg"
+                value={guestName} onChangeText={setGuestName}
+                placeholder="Enter your full name" placeholderTextColor="#AAAAAA"
               />
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email Address *</Text>
+            <View className="mb-3.5">
+              <Text className="text-xs font-semibold text-muted mb-1.5">Email Address *</Text>
               <TextInput
-                style={styles.textInput}
-                value={guestEmail}
-                onChangeText={setGuestEmail}
-                placeholder="Enter your email"
-                placeholderTextColor="#999"
-                keyboardType="email-address"
-                autoCapitalize="none"
+                className="border border-line rounded-xl px-3.5 py-2.5 text-sm text-ink bg-bg"
+                value={guestEmail} onChangeText={setGuestEmail}
+                placeholder="Enter your email" placeholderTextColor="#AAAAAA"
+                keyboardType="email-address" autoCapitalize="none"
               />
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Phone Number *</Text>
+            <View className="mb-3.5">
+              <Text className="text-xs font-semibold text-muted mb-1.5">Phone Number *</Text>
               <TextInput
-                style={styles.textInput}
-                value={guestPhone}
-                onChangeText={setGuestPhone}
-                placeholder="Enter your phone number"
-                placeholderTextColor="#999"
+                className="border border-line rounded-xl px-3.5 py-2.5 text-sm text-ink bg-bg"
+                value={guestPhone} onChangeText={setGuestPhone}
+                placeholder="Enter your phone number" placeholderTextColor="#AAAAAA"
                 keyboardType="phone-pad"
               />
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Special Requests (Optional)</Text>
+            <View>
+              <Text className="text-xs font-semibold text-muted mb-1.5">Special Requests (Optional)</Text>
               <TextInput
-                style={[styles.textInput, styles.textArea]}
-                value={specialRequests}
-                onChangeText={setSpecialRequests}
-                placeholder="Dietary restrictions, allergies, special occasions..."
-                placeholderTextColor="#999"
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
+                className="border border-line rounded-xl px-3.5 py-2.5 text-sm text-ink bg-bg h-20"
+                value={specialRequests} onChangeText={setSpecialRequests}
+                placeholder="Any special requests or requirements…" placeholderTextColor="#AAAAAA"
+                multiline numberOfLines={3} textAlignVertical="top"
               />
             </View>
           </View>
 
-          {/* Submit Button */}
-          <TouchableOpacity style={styles.submitButton} onPress={handleSubmitReservation}>
-            <Text style={styles.submitButtonText}>Confirm Reservation</Text>
+          {/* Submit — deliberately modest size, not a giant CTA */}
+          <TouchableOpacity className="bg-teal py-3 rounded-2xl items-center mb-8" onPress={handleSubmitReservation} activeOpacity={0.88}>
+            <Text className="text-surface text-[15px] font-bold">Confirm Reservation</Text>
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Date Picker */}
         {showDatePicker && (
-          <DateTimePicker
-            value={reservationDate}
-            mode="date"
-            display="default"
-            minimumDate={new Date()}
-            onChange={onDateChange}
-          />
+          <DateTimePicker value={reservationDate} mode="date" display="default" minimumDate={new Date()} onChange={onDateChange} />
         )}
 
-        {/* Time Dropdown */}
         {renderTimeDropdown()}
       </View>
     </Modal>
   )
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F8F9FA",
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#FFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0E0E0",
-    paddingTop: 50,
-  },
-  closeButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-    flex: 1,
-    textAlign: "center",
-  },
-  placeholder: {
-    width: 40,
-  },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
-  summaryCard: {
-    backgroundColor: "#FFF",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  restaurantName: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#333",
-    marginBottom: 4,
-  },
-  restaurantLocation: {
-    fontSize: 16,
-    color: "#666",
-    marginBottom: 8,
-  },
-  cuisineText: {
-    fontSize: 16,
-    color: "#FF6B6B",
-    fontWeight: "500",
-  },
-  section: {
-    backgroundColor: "#FFF",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 16,
-  },
-  dateTimeRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  dateTimeItem: {
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#666",
-    marginBottom: 8,
-  },
-  dateTimeButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 12,
-    backgroundColor: "#F8F9FA",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-  },
-  dateTimeText: {
-    fontSize: 14,
-    color: "#333",
-    marginLeft: 8,
-    flex: 1,
-  },
-  guestCounter: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  counterButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F8F9FA",
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  counterButtonDisabled: {
-    backgroundColor: "#F0F0F0",
-    borderColor: "#D0D0D0",
-  },
-  guestCount: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-    marginHorizontal: 20,
-    minWidth: 30,
-    textAlign: "center",
-  },
-  tableOptions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginBottom: 8,
-  },
-  tableOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    backgroundColor: "#F8F9FA",
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  selectedTableOption: {
-    backgroundColor: "#FF6B6B",
-    borderColor: "#FF6B6B",
-  },
-  disabledTableOption: {
-    backgroundColor: "#F0F0F0",
-    borderColor: "#D0D0D0",
-  },
-  tableOptionText: {
-    fontSize: 14,
-    color: "#333",
-    marginLeft: 8,
-  },
-  selectedTableOptionText: {
-    color: "#FFF",
-    fontWeight: "500",
-  },
-  disabledTableOptionText: {
-    color: "#999",
-  },
-  occasionOptions: {
-    marginBottom: 8,
-  },
-  occasionOption: {
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    marginBottom: 12,
-    backgroundColor: "#F8F9FA",
-  },
-  selectedOccasionOption: {
-    borderColor: "#FF6B6B",
-    backgroundColor: "#FFF0F0",
-  },
-  occasionOptionContent: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  occasionOptionLabel: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#333",
-  },
-  selectedOccasionOptionLabel: {
-    color: "#FF6B6B",
-  },
-  radioButton: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "#E0E0E0",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  selectedRadioButton: {
-    borderColor: "#FF6B6B",
-  },
-  radioButtonInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#FF6B6B",
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#333",
-    marginBottom: 8,
-  },
-  textInput: {
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: "#333",
-    backgroundColor: "#FFF",
-  },
-  textArea: {
-    height: 80,
-    textAlignVertical: "top",
-  },
-  submitButton: {
-    backgroundColor: "#FF6B6B",
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-    marginBottom: 20,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  submitButtonText: {
-    color: "#FFF",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  timeDropdownOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  timeDropdownContainer: {
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    width: width * 0.8,
-    maxHeight: 400,
-    elevation: 5,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-  },
-  timeDropdownHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0E0E0",
-  },
-  timeDropdownTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-  },
-  timeOptionsList: {
-    maxHeight: 300,
-  },
-  timeOption: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-  },
-  selectedTimeOption: {
-    backgroundColor: "#FFF0F0",
-  },
-  timeOptionText: {
-    fontSize: 16,
-    color: "#333",
-  },
-  selectedTimeOptionText: {
-    color: "#FF6B6B",
-    fontWeight: "500",
-  },
-})
 
 export default RestaurantReservationForm

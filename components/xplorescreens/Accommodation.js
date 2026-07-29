@@ -1,19 +1,7 @@
 import { useState, useEffect } from "react"
 import {
-  StyleSheet,
-  Text,
-  View,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  Dimensions,
-  Modal,
-  Linking,
-  Alert,
-  ActionSheetIOS,
-  Platform,
-  RefreshControl,
-  ActivityIndicator,
+  Text, View, ScrollView, TouchableOpacity, Image, Dimensions, Modal,
+  Linking, Alert, ActionSheetIOS, Platform, RefreshControl, ActivityIndicator,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { collection, getDocs } from "firebase/firestore"
@@ -23,19 +11,16 @@ import ReservationForm from "./ReservationForm"
 
 const { width } = Dimensions.get("window")
 
-// ── Design tokens (mirrors Xplore) ──────────────────────────────────────────
-const ACCENT = "#1A1A2E"
-const HIGHLIGHT = "#E94560"
-const BG = "#F4F6FB"
-const SURFACE = "#FFFFFF"
-const SUCCESS = "#22C55E"
-const WARNING = "#F59E0B"
-
-const ICON_BG_COLORS = [
-  "#EEF2FF", "#FFF0F3", "#F0FFF4", "#FFFBEB",
-  "#F5F3FF", "#FFF7ED", "#F0F9FF", "#FDF2F8",
+// Same rotating tile-color scheme used across Xplore/Community, so this
+// screen reads as part of the same family instead of its own thing.
+const TILE_THEMES = [
+  { bgClass: "bg-teal-light",    hex: "#1B4D5C" },
+  { bgClass: "bg-brand-light",   hex: "#E8600A" },
+  { bgClass: "bg-success-light", hex: "#22C55E" },
+  { bgClass: "bg-warning-light", hex: "#F59E0B" },
+  { bgClass: "bg-danger-light",  hex: "#EF4444" },
 ]
-// ─────────────────────────────────────────────────────────────────────────────
+const TYPE_ICONS = ["bed", "home", "business", "cafe", "leaf", "water"]
 
 const Accommodation = () => {
   const [activeTab, setActiveTab] = useState("")
@@ -137,79 +122,91 @@ const Accommodation = () => {
     setReservationModalVisible(true)
   }
 
-  const renderStars = (rating) => {
+  const renderStars = (rating, size = 12) => {
     const stars = []
     const full = Math.floor(rating)
     const half = rating % 1 !== 0
-    for (let i = 0; i < full; i++) stars.push(<Ionicons key={i} name="star" size={14} color="#F59E0B" />)
-    if (half) stars.push(<Ionicons key="half" name="star-half" size={14} color="#F59E0B" />)
+    for (let i = 0; i < full; i++) stars.push(<Ionicons key={i} name="star" size={size} color="#F59E0B" />)
+    if (half) stars.push(<Ionicons key="half" name="star-half" size={size} color="#F59E0B" />)
     const empty = 5 - Math.ceil(rating)
-    for (let i = 0; i < empty; i++) stars.push(<Ionicons key={`e-${i}`} name="star-outline" size={14} color="#F59E0B" />)
+    for (let i = 0; i < empty; i++) stars.push(<Ionicons key={`e-${i}`} name="star-outline" size={size} color="#F59E0B" />)
     return stars
   }
 
-  // ── Accommodation Card ───────────────────────────────────────────────────
+  // ── Accommodation Card — compact ─────────────────────────────────────────
   const renderAccommodationCard = ({ item, index }) => {
     const isAvailable = item.availability === "Available"
+    const theme = TILE_THEMES[index % TILE_THEMES.length]
     return (
-      <TouchableOpacity style={styles.card} onPress={() => openAccommodationDetails(item)} activeOpacity={0.88}>
-        {/* Image section */}
-        <View style={styles.cardImageWrap}>
-          <Image source={{ uri: item.images[0] }} style={styles.cardImage} />
-          <View style={styles.imageGradient} />
+      <TouchableOpacity
+        className="bg-surface rounded-2xl mb-3.5 overflow-hidden border border-line"
+        onPress={() => openAccommodationDetails(item)}
+        activeOpacity={0.9}
+      >
+        {/* Image */}
+        <View className="relative">
+          <Image source={{ uri: item.images[0] }} className="w-full h-[150px]" />
+          <View className="absolute bottom-0 left-0 right-0 h-10 bg-black/30" />
 
-          <TouchableOpacity style={styles.favoriteBtn} onPress={() => toggleFavorite(item.id)}>
-            <Ionicons name={favorites.has(item.id) ? "heart" : "heart-outline"} size={20} color={favorites.has(item.id) ? HIGHLIGHT : "#FFF"} />
+          <TouchableOpacity
+            className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-black/35 justify-center items-center"
+            onPress={() => toggleFavorite(item.id)}
+          >
+            <Ionicons name={favorites.has(item.id) ? "heart" : "heart-outline"} size={16} color={favorites.has(item.id) ? "#EF4444" : "#FFFFFF"} />
           </TouchableOpacity>
 
-          <View style={[styles.availabilityBadge, { backgroundColor: isAvailable ? SUCCESS : WARNING }]}>
-            <View style={styles.badgeDot} />
-            <Text style={styles.badgeText}>{item.availability}</Text>
+          <View className={`absolute top-2.5 left-2.5 flex-row items-center gap-1 px-2 py-1 rounded-full ${isAvailable ? "bg-success" : "bg-warning"}`}>
+            <View className="w-1.5 h-1.5 rounded-full bg-white/80" />
+            <Text className="text-[10px] font-bold text-white">{item.availability}</Text>
           </View>
 
-          {/* Price pill overlaid on image */}
-          <View style={styles.pricePill}>
-            <Text style={styles.pricePillAmount}>R{item.price}</Text>
-            <Text style={styles.pricePillLabel}>/night</Text>
+          <View className="absolute bottom-2.5 left-2.5 flex-row items-baseline bg-white/95 px-2.5 py-1 rounded-full">
+            <Text className="text-[14px] font-extrabold text-ink">R{item.price}</Text>
+            <Text className="text-[10px] text-muted font-medium ml-0.5">/night</Text>
           </View>
         </View>
 
-        {/* Content section */}
-        <View style={styles.cardBody}>
-          <View style={styles.cardBodyTop}>
-            <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={styles.cardName} numberOfLines={1}>{item.name}</Text>
-              <View style={styles.locationRow}>
-                <Ionicons name="location-outline" size={13} color="#888" />
-                <Text style={styles.locationText} numberOfLines={1}>{item.location}</Text>
+        {/* Body */}
+        <View className="p-3">
+          <View className="flex-row items-start justify-between mb-1.5">
+            <View className="flex-1 mr-2">
+              <Text className="text-[14px] font-extrabold text-ink -tracking-tight" numberOfLines={1}>{item.name}</Text>
+              <View className="flex-row items-center gap-1 mt-0.5">
+                <Ionicons name="location-outline" size={11} color="#7A8A8F" />
+                <Text className="text-[11px] text-muted flex-1" numberOfLines={1}>{item.location}</Text>
               </View>
             </View>
-            <View style={[styles.typeTag, { backgroundColor: ICON_BG_COLORS[index % ICON_BG_COLORS.length] }]}>
-              <Text style={styles.typeTagText}>{item.type}</Text>
+            <View className={`px-2 py-0.5 rounded-lg ${theme.bgClass}`}>
+              <Text className="text-[9px] font-extrabold uppercase tracking-wide" style={{ color: theme.hex }}>{item.type}</Text>
             </View>
           </View>
 
-          <View style={styles.cardMeta}>
-            <View style={styles.starsRow}>
+          <View className="flex-row items-center justify-between mb-2.5">
+            <View className="flex-row items-center gap-1">
               {renderStars(item.rating)}
-              <Text style={styles.ratingNum}>{item.rating}</Text>
-              <Text style={styles.reviewNum}>({item.reviews})</Text>
+              <Text className="text-[11px] font-bold text-ink ml-1">{item.rating}</Text>
+              <Text className="text-[10px] text-muted">({item.reviews})</Text>
             </View>
-            <View style={styles.guestsChip}>
-              <Ionicons name="people-outline" size={13} color={ACCENT} />
-              <Text style={styles.guestsText}>{item.maxGuests} guests</Text>
+            <View className="flex-row items-center gap-1 bg-teal-light px-2 py-1 rounded-full">
+              <Ionicons name="people-outline" size={11} color="#1B4D5C" />
+              <Text className="text-[10px] text-teal font-bold">{item.maxGuests} guests</Text>
             </View>
           </View>
 
-          {/* Actions */}
-          <View style={styles.cardActions}>
-            <TouchableOpacity style={styles.directionsBtn} onPress={(e) => { e.stopPropagation(); openDirections(item.coordinates, item.name) }}>
-              <Ionicons name="navigate-outline" size={15} color={ACCENT} />
-              <Text style={styles.directionsBtnText}>Directions</Text>
+          <View className="flex-row gap-2">
+            <TouchableOpacity
+              className="flex-1 flex-row items-center justify-center gap-1.5 border border-line py-2 rounded-xl"
+              onPress={(e) => { e.stopPropagation(); openDirections(item.coordinates, item.name) }}
+            >
+              <Ionicons name="navigate-outline" size={13} color="#1B4D5C" />
+              <Text className="text-[12px] font-bold text-ink">Directions</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.reserveBtn} onPress={(e) => { e.stopPropagation(); openReservationForm(item) }}>
-              <Text style={styles.reserveBtnText}>Reserve</Text>
-              <Ionicons name="arrow-forward" size={14} color="#FFF" />
+            <TouchableOpacity
+              className="flex-1 flex-row items-center justify-center gap-1.5 bg-brand py-2 rounded-xl"
+              onPress={(e) => { e.stopPropagation(); openReservationForm(item) }}
+            >
+              <Text className="text-[12px] font-bold text-surface">Reserve</Text>
+              <Ionicons name="arrow-forward" size={12} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -217,7 +214,7 @@ const Accommodation = () => {
     )
   }
 
-  // ── Image carousel (in modal) ────────────────────────────────────────────
+  // ── Image carousel (in modal) ─────────────────────────────────────────────
   const renderImageCarousel = () => {
     if (!selectedAccommodation) return null
     return (
@@ -226,88 +223,81 @@ const Accommodation = () => {
           onMomentumScrollEnd={(e) => setCurrentImageIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
         >
           {selectedAccommodation.images.map((img, i) => (
-            <View key={i} style={{ position: "relative" }}>
-              <Image source={{ uri: img }} style={styles.carouselImg} />
-              <View style={styles.carouselGradient} />
+            <View key={i} className="relative">
+              <Image source={{ uri: img }} style={{ width, height: 240 }} />
+              <View className="absolute bottom-0 left-0 right-0 h-20 bg-black/30" />
             </View>
           ))}
         </ScrollView>
-        <View style={styles.carouselDots}>
+        <View className="flex-row justify-center py-2.5 gap-1.5">
           {selectedAccommodation.images.map((_, i) => (
-            <View key={i} style={[styles.dot, i === currentImageIndex && styles.dotActive]} />
+            <View key={i} className={`h-1.5 rounded-full ${i === currentImageIndex ? "w-5 bg-brand" : "w-1.5 bg-line"}`} />
           ))}
         </View>
       </View>
     )
   }
 
-  // ── Loading / Empty states ───────────────────────────────────────────────
+  // ── Loading / Empty states ────────────────────────────────────────────────
   if (dataLoading) {
     return (
-      <View style={styles.stateScreen}>
-        <View style={styles.stateIconWrap}><Ionicons name="bed-outline" size={36} color={ACCENT} /></View>
-        <ActivityIndicator size="large" color={HIGHLIGHT} style={{ marginTop: 20 }} />
-        <Text style={styles.stateText}>Loading accommodations…</Text>
-      </View>
-    )
-  }
-
-  if (Object.keys(accommodationsData).length === 0) {
-    return (
-      <View style={styles.stateScreen}>
-        <View style={styles.stateIconWrap}><Ionicons name="bed-outline" size={36} color={ACCENT} /></View>
-        <Text style={styles.stateText}>No accommodations available</Text>
-        <Text style={styles.stateSubText}>Please add some accommodations to get started</Text>
-      </View>
-    )
-  }
-
-  if (accommodationTypes.length === 0) {
-    return (
-      <View style={styles.stateScreen}>
-        <View style={styles.stateIconWrap}><Ionicons name="bed-outline" size={36} color={ACCENT} /></View>
-        <Text style={styles.stateText}>No accommodation types found</Text>
-        <Text style={styles.stateSubText}>Please ensure accommodations have a "type" field</Text>
-      </View>
-    )
-  }
-
-  // ── Main render ──────────────────────────────────────────────────────────
-  return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Stay</Text>
-          <Text style={styles.headerSubtitle}>Find your perfect place</Text>
+      <View className="flex-1 bg-bg justify-center items-center px-10">
+        <View className="w-20 h-20 rounded-3xl bg-teal-light justify-center items-center mb-4">
+          <Ionicons name="bed-outline" size={32} color="#1B4D5C" />
         </View>
-        <View style={styles.headerBadge}>
-          <Ionicons name="bed-outline" size={18} color={ACCENT} />
+        <ActivityIndicator size="large" color="#E8600A" style={{ marginTop: 8 }} />
+        <Text className="text-[15px] font-bold text-ink mt-3">Loading accommodations…</Text>
+      </View>
+    )
+  }
+
+  if (Object.keys(accommodationsData).length === 0 || accommodationTypes.length === 0) {
+    return (
+      <View className="flex-1 bg-bg justify-center items-center px-10">
+        <View className="w-20 h-20 rounded-3xl bg-teal-light justify-center items-center mb-4">
+          <Ionicons name="bed-outline" size={32} color="#1B4D5C" />
+        </View>
+        <Text className="text-[16px] font-bold text-ink text-center">No accommodations available</Text>
+        <Text className="text-[13px] text-muted mt-1.5 text-center">Please add some accommodations to get started</Text>
+      </View>
+    )
+  }
+
+  // ── Main render ───────────────────────────────────────────────────────────
+  return (
+    <View className="flex-1 bg-bg">
+      {/* Header */}
+      <View className="flex-row justify-between items-center px-[22px] pt-3.5 pb-2.5">
+        <View>
+          <Text className="text-lg font-extrabold text-ink -tracking-tight">Stay</Text>
+          <Text className="text-[13px] text-muted font-medium mt-0.5">Find your perfect place</Text>
+        </View>
+        <View className="w-11 h-11 rounded-2xl bg-surface justify-center items-center border border-line">
+          <Ionicons name="bed-outline" size={18} color="#1B4D5C" />
         </View>
       </View>
 
       {/* Type tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabsContent}>
-        {accommodationTypes.map((type, i) => (
-          <TouchableOpacity key={type} style={[styles.tab, activeTab === type && styles.tabActive]} onPress={() => setActiveTab(type)} activeOpacity={0.8}>
-            <View style={[styles.tabIconWrap, { backgroundColor: activeTab === type ? "#FFF0F3" : ICON_BG_COLORS[i % ICON_BG_COLORS.length] }]}>
-              <Ionicons
-                name={["bed", "home", "business", "cafe", "leaf", "water"][i % 6]}
-                size={16}
-                color={activeTab === type ? HIGHLIGHT : ACCENT}
-              />
-            </View>
-            <Text style={[styles.tabText, activeTab === type && styles.tabTextActive]}>{type}</Text>
-            {activeTab === type && <View style={styles.tabActiveLine} />}
-          </TouchableOpacity>
-        ))}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} className="bg-surface border-b border-line"
+        contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 10, gap: 6 }}>
+        {accommodationTypes.map((type, i) => {
+          const isActive = activeTab === type
+          return (
+            <TouchableOpacity key={type} className="items-center px-3 py-1.5 relative" onPress={() => setActiveTab(type)} activeOpacity={0.8}>
+              <View className={`w-8 h-8 rounded-xl justify-center items-center mb-1 ${isActive ? "bg-brand-light" : TILE_THEMES[i % TILE_THEMES.length].bgClass}`}>
+                <Ionicons name={TYPE_ICONS[i % TYPE_ICONS.length]} size={14} color={isActive ? "#E8600A" : "#1B4D5C"} />
+              </View>
+              <Text className={`text-[10px] font-semibold ${isActive ? "text-brand" : "text-muted"}`}>{type}</Text>
+              {isActive && <View className="absolute -bottom-1 left-[30%] right-[30%] h-[2.5px] rounded bg-brand" />}
+            </TouchableOpacity>
+          )
+        })}
       </ScrollView>
 
       {/* Count bar */}
-      <View style={styles.countBar}>
-        <Text style={styles.countText}>
-          <Text style={styles.countNum}>{(accommodationsData[activeTab] || []).length}</Text>
-          {" "}properties found
+      <View className="px-5 py-2">
+        <Text className="text-[12px] text-muted font-medium">
+          <Text className="font-extrabold text-ink">{(accommodationsData[activeTab] || []).length}</Text> properties found
         </Text>
       </View>
 
@@ -316,14 +306,16 @@ const Accommodation = () => {
         data={accommodationsData[activeTab] || []}
         renderItem={renderAccommodationCard}
         keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[HIGHLIGHT]} tintColor={HIGHLIGHT} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#E8600A"]} tintColor="#E8600A" />}
         ListEmptyComponent={() => (
-          <View style={styles.emptyContainer}>
-            <View style={styles.emptyIconWrap}><Ionicons name="bed-outline" size={40} color={ACCENT} /></View>
-            <Text style={styles.emptyText}>No {activeTab.toLowerCase()} found</Text>
-            <Text style={styles.emptySubText}>Try a different category or pull to refresh</Text>
+          <View className="items-center py-16">
+            <View className="w-20 h-20 rounded-3xl bg-teal-light justify-center items-center mb-4">
+              <Ionicons name="bed-outline" size={36} color="#1B4D5C" />
+            </View>
+            <Text className="text-[15px] font-bold text-ink">No {activeTab?.toLowerCase()} found</Text>
+            <Text className="text-[12px] text-muted mt-1.5 text-center">Try a different category or pull to refresh</Text>
           </View>
         )}
         {...scrollProps}
@@ -331,96 +323,102 @@ const Accommodation = () => {
 
       {/* Detail Modal */}
       <Modal animationType="slide" transparent={false} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
-        <View style={styles.modalContainer}>
-          {/* Floating header over carousel */}
-          <View style={styles.modalFloatHeader}>
-            <TouchableOpacity style={styles.modalBackBtn} onPress={() => setModalVisible(false)}>
-              <Ionicons name="chevron-down" size={22} color="#FFF" />
+        <View className="flex-1 bg-bg">
+          <View className="absolute top-12 left-0 right-0 flex-row justify-between px-4 z-10">
+            <TouchableOpacity className="w-10 h-10 rounded-2xl bg-black/35 justify-center items-center" onPress={() => setModalVisible(false)}>
+              <Ionicons name="chevron-down" size={20} color="#FFFFFF" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.modalFavBtn} onPress={() => toggleFavorite(selectedAccommodation?.id)}>
+            <TouchableOpacity className="w-10 h-10 rounded-2xl bg-black/35 justify-center items-center" onPress={() => toggleFavorite(selectedAccommodation?.id)}>
               <Ionicons
                 name={favorites.has(selectedAccommodation?.id) ? "heart" : "heart-outline"}
-                size={22}
-                color={favorites.has(selectedAccommodation?.id) ? HIGHLIGHT : "#FFF"}
+                size={20}
+                color={favorites.has(selectedAccommodation?.id) ? "#EF4444" : "#FFFFFF"}
               />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+          <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
             {renderImageCarousel()}
 
             {selectedAccommodation && (
-              <View style={styles.modalBody}>
+              <View className="p-5">
                 {/* Title row */}
-                <View style={styles.modalTitleRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.modalTitle}>{selectedAccommodation.name}</Text>
-                    <View style={styles.modalLocationRow}>
-                      <Ionicons name="location-outline" size={14} color="#888" />
-                      <Text style={styles.modalLocation}>{selectedAccommodation.location}</Text>
+                <View className="flex-row items-start mb-3">
+                  <View className="flex-1">
+                    <Text className="text-[20px] font-extrabold text-ink -tracking-tight mb-1">{selectedAccommodation.name}</Text>
+                    <View className="flex-row items-center gap-1">
+                      <Ionicons name="location-outline" size={13} color="#7A8A8F" />
+                      <Text className="text-[13px] text-muted">{selectedAccommodation.location}</Text>
                     </View>
                   </View>
-                  <View style={[styles.modalAvailBadge, { backgroundColor: selectedAccommodation.availability === "Available" ? SUCCESS : WARNING }]}>
-                    <Text style={styles.modalAvailText}>{selectedAccommodation.availability}</Text>
+                  <View className={`px-2.5 py-1.5 rounded-full mt-1 ${selectedAccommodation.availability === "Available" ? "bg-success" : "bg-warning"}`}>
+                    <Text className="text-[11px] font-bold text-white">{selectedAccommodation.availability}</Text>
                   </View>
                 </View>
 
                 {/* Price + rating row */}
-                <View style={styles.modalMetaRow}>
-                  <View style={styles.modalPriceBox}>
-                    <Text style={styles.modalPrice}>R{selectedAccommodation.price}</Text>
-                    <Text style={styles.modalPriceLabel}>per night</Text>
+                <View className="flex-row items-center justify-between bg-surface rounded-2xl p-4 mb-3 border border-line">
+                  <View>
+                    <Text className="text-[22px] font-extrabold text-ink">R{selectedAccommodation.price}</Text>
+                    <Text className="text-[11px] text-muted mt-0.5">per night</Text>
                   </View>
-                  <View style={styles.modalRatingBox}>
-                    <View style={styles.starsRow}>{renderStars(selectedAccommodation.rating)}</View>
-                    <Text style={styles.modalRatingText}>{selectedAccommodation.rating} · {selectedAccommodation.reviews} reviews</Text>
-                  </View>
-                </View>
-
-                {/* Quick stats chips */}
-                <View style={styles.statsRow}>
-                  <View style={styles.statChip}>
-                    <Ionicons name="people-outline" size={16} color={ACCENT} />
-                    <Text style={styles.statText}>Up to {selectedAccommodation.maxGuests} guests</Text>
-                  </View>
-                  <View style={styles.statChip}>
-                    <Ionicons name="calendar-outline" size={16} color={ACCENT} />
-                    <Text style={styles.statText}>Min. 1 night</Text>
+                  <View className="items-end">
+                    <View className="flex-row items-center gap-0.5">{renderStars(selectedAccommodation.rating, 13)}</View>
+                    <Text className="text-[11px] text-muted mt-1">{selectedAccommodation.rating} · {selectedAccommodation.reviews} reviews</Text>
                   </View>
                 </View>
 
-                {/* Directions CTA */}
-                <TouchableOpacity style={styles.directionsCTA} onPress={() => openDirections(selectedAccommodation.coordinates, selectedAccommodation.name)}>
-                  <Ionicons name="navigate" size={18} color="#FFF" />
-                  <Text style={styles.directionsCTAText}>Get Directions</Text>
+                {/* Quick stats */}
+                <View className="flex-row gap-2.5 mb-3">
+                  <View className="flex-1 flex-row items-center gap-1.5 bg-surface px-3 py-2.5 rounded-xl border border-line">
+                    <Ionicons name="people-outline" size={15} color="#1B4D5C" />
+                    <Text className="text-[12px] font-semibold text-ink">Up to {selectedAccommodation.maxGuests} guests</Text>
+                  </View>
+                  <View className="flex-1 flex-row items-center gap-1.5 bg-surface px-3 py-2.5 rounded-xl border border-line">
+                    <Ionicons name="calendar-outline" size={15} color="#1B4D5C" />
+                    <Text className="text-[12px] font-semibold text-ink">Min. 1 night</Text>
+                  </View>
+                </View>
+
+                {/* Directions */}
+                <TouchableOpacity
+                  className="flex-row items-center justify-center gap-2 bg-teal-light py-2.5 rounded-2xl mb-4 border border-teal/20"
+                  onPress={() => openDirections(selectedAccommodation.coordinates, selectedAccommodation.name)}
+                >
+                  <Ionicons name="navigate" size={15} color="#1B4D5C" />
+                  <Text className="text-[13px] font-bold text-teal">Get Directions</Text>
                 </TouchableOpacity>
 
                 {/* Description */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>About this place</Text>
-                  <Text style={styles.sectionBody}>{selectedAccommodation.description}</Text>
+                <View className="mb-4">
+                  <Text className="text-[11px] font-extrabold text-muted uppercase tracking-wider mb-2">About this place</Text>
+                  <Text className="text-[14px] text-ink leading-5">{selectedAccommodation.description}</Text>
                 </View>
 
                 {/* Amenities */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Amenities</Text>
-                  <View style={styles.amenitiesGrid}>
+                <View className="mb-4">
+                  <Text className="text-[11px] font-extrabold text-muted uppercase tracking-wider mb-2">Amenities</Text>
+                  <View className="flex-row flex-wrap gap-2">
                     {selectedAccommodation.amenities.map((a, i) => (
-                      <View key={i} style={styles.amenityChip}>
-                        <View style={[styles.amenityIcon, { backgroundColor: ICON_BG_COLORS[i % ICON_BG_COLORS.length] }]}>
-                          <Ionicons name="checkmark" size={14} color={ACCENT} />
+                      <View key={i} className="flex-row items-center gap-1.5 bg-surface px-2.5 py-1.5 rounded-xl border border-line">
+                        <View className={`w-5 h-5 rounded-md justify-center items-center ${TILE_THEMES[i % TILE_THEMES.length].bgClass}`}>
+                          <Ionicons name="checkmark" size={12} color={TILE_THEMES[i % TILE_THEMES.length].hex} />
                         </View>
-                        <Text style={styles.amenityText}>{a}</Text>
+                        <Text className="text-[12px] text-ink font-medium">{a}</Text>
                       </View>
                     ))}
                   </View>
                 </View>
 
-                {/* Reserve button */}
-                <TouchableOpacity style={styles.reserveCTA} onPress={() => openReservationForm(selectedAccommodation)} activeOpacity={0.88}>
-                  <Text style={styles.reserveCTAText}>Reserve Now</Text>
-                  <View style={styles.reserveCTAArrow}>
-                    <Ionicons name="arrow-forward" size={18} color={ACCENT} />
+                {/* Reserve button — modest size, not a giant CTA */}
+                <TouchableOpacity
+                  className="flex-row items-center justify-between bg-brand px-5 py-3 rounded-2xl"
+                  onPress={() => openReservationForm(selectedAccommodation)}
+                  activeOpacity={0.88}
+                >
+                  <Text className="text-[15px] font-bold text-surface -tracking-tight">Reserve Now</Text>
+                  <View className="w-8 h-8 rounded-xl bg-white/25 justify-center items-center">
+                    <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
                   </View>
                 </TouchableOpacity>
               </View>
@@ -434,116 +432,5 @@ const Accommodation = () => {
     </View>
   )
 }
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
-
-  // State screens
-  stateScreen: { flex: 1, backgroundColor: BG, justifyContent: "center", alignItems: "center", paddingHorizontal: 40 },
-  stateIconWrap: { width: 80, height: 80, borderRadius: 24, backgroundColor: "#EEF2FF", justifyContent: "center", alignItems: "center", marginBottom: 16 },
-  stateText: { fontSize: 18, fontWeight: "700", color: ACCENT, marginTop: 10 },
-  stateSubText: { fontSize: 14, color: "#999", textAlign: "center", marginTop: 6 },
-
-  // Header
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 22, paddingTop: 14, paddingBottom: 10 },
-  headerTitle: { fontSize: 18, fontWeight: "800", color: ACCENT, letterSpacing: -0.5 },
-  headerSubtitle: { fontSize: 13, color: "#888", fontWeight: "500", marginTop: 1 },
-  headerBadge: { width: 44, height: 44, borderRadius: 14, backgroundColor: SURFACE, justifyContent: "center", alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2 },
-
-  // Type tabs
-  tabsScroll: { backgroundColor: SURFACE, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  tabsContent: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
-  tab: { alignItems: "center", paddingHorizontal: 14, paddingVertical: 6, position: "relative" },
-  tabActive: {},
-  tabIconWrap: { width: 38, height: 38, borderRadius: 12, justifyContent: "center", alignItems: "center", marginBottom: 4 },
-  tabText: { fontSize: 11, fontWeight: "600", color: "#999" },
-  tabTextActive: { color: HIGHLIGHT, fontWeight: "700" },
-  tabActiveLine: { position: "absolute", bottom: -10, left: "20%", right: "20%", height: 2.5, backgroundColor: HIGHLIGHT, borderRadius: 2 },
-
-  // Count bar
-  countBar: { paddingHorizontal: 20, paddingVertical: 10 },
-  countText: { fontSize: 13, color: "#888", fontWeight: "500" },
-  countNum: { color: ACCENT, fontWeight: "800" },
-
-  // List
-  listContainer: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 120 },
-
-  // Card
-  card: { backgroundColor: SURFACE, borderRadius: 22, marginBottom: 18, overflow: "hidden", shadowColor: ACCENT, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.09, shadowRadius: 12, elevation: 4 },
-  cardImageWrap: { position: "relative" },
-  cardImage: { width: "100%", height: 210 },
-  imageGradient: { position: "absolute", bottom: 0, left: 0, right: 0, height: 90, backgroundColor: "rgba(0,0,0,0.4)" },
-  favoriteBtn: { position: "absolute", top: 14, right: 14, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
-  availabilityBadge: { position: "absolute", top: 14, left: 14, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, gap: 5 },
-  badgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.8)" },
-  badgeText: { fontSize: 11, fontWeight: "700", color: "#FFF" },
-  pricePill: { position: "absolute", bottom: 14, left: 14, flexDirection: "row", alignItems: "baseline", backgroundColor: "rgba(255,255,255,0.95)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, gap: 2 },
-  pricePillAmount: { fontSize: 17, fontWeight: "900", color: ACCENT },
-  pricePillLabel: { fontSize: 11, color: "#888", fontWeight: "500" },
-  cardBody: { padding: 14 },
-  cardBodyTop: { flexDirection: "row", alignItems: "flex-start", marginBottom: 10 },
-  cardName: { fontSize: 17, fontWeight: "800", color: ACCENT, marginBottom: 3 },
-  locationRow: { flexDirection: "row", alignItems: "center", gap: 3 },
-  locationText: { fontSize: 12, color: "#888", flex: 1 },
-  typeTag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  typeTagText: { fontSize: 10, fontWeight: "700", color: ACCENT, textTransform: "uppercase", letterSpacing: 0.5 },
-  cardMeta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
-  starsRow: { flexDirection: "row", alignItems: "center", gap: 2 },
-  ratingNum: { fontSize: 12, color: ACCENT, fontWeight: "700", marginLeft: 5 },
-  reviewNum: { fontSize: 11, color: "#AAA" },
-  guestsChip: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#EEF2FF", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  guestsText: { fontSize: 11, color: ACCENT, fontWeight: "600" },
-  cardActions: { flexDirection: "row", gap: 10 },
-  directionsBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1.5, borderColor: "#E8ECF4", paddingVertical: 10, borderRadius: 14 },
-  directionsBtnText: { fontSize: 13, fontWeight: "700", color: ACCENT },
-  reserveBtn: { flex: 1.4, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: ACCENT, paddingVertical: 10, borderRadius: 14 },
-  reserveBtnText: { fontSize: 13, fontWeight: "700", color: "#FFF" },
-
-  // Modal
-  modalContainer: { flex: 1, backgroundColor: BG },
-  modalFloatHeader: { position: "absolute", top: 50, left: 0, right: 0, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 18, zIndex: 10 },
-  modalBackBtn: { width: 42, height: 42, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", alignItems: "center" },
-  modalFavBtn: { width: 42, height: 42, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", alignItems: "center" },
-  carouselImg: { width, height: 300 },
-  carouselGradient: { position: "absolute", bottom: 0, left: 0, right: 0, height: 100, backgroundColor: "rgba(0,0,0,0.3)" },
-  carouselDots: { flexDirection: "row", justifyContent: "center", paddingVertical: 10, gap: 5 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#DDD" },
-  dotActive: { width: 20, borderRadius: 3, backgroundColor: HIGHLIGHT },
-  modalBody: { padding: 20, paddingBottom: 60 },
-  modalTitleRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: 14 },
-  modalTitle: { fontSize: 24, fontWeight: "900", color: ACCENT, letterSpacing: -0.5, marginBottom: 4 },
-  modalLocationRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  modalLocation: { fontSize: 13, color: "#888" },
-  modalAvailBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginTop: 4 },
-  modalAvailText: { fontSize: 12, fontWeight: "700", color: "#FFF" },
-  modalMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: SURFACE, borderRadius: 18, padding: 16, marginBottom: 12, shadowColor: ACCENT, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 1 },
-  modalPriceBox: {},
-  modalPrice: { fontSize: 30, fontWeight: "900", color: ACCENT },
-  modalPriceLabel: { fontSize: 12, color: "#AAA", marginTop: 2 },
-  modalRatingBox: { alignItems: "flex-end" },
-  modalRatingText: { fontSize: 12, color: "#888", marginTop: 4 },
-  statsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
-  statChip: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: SURFACE, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 14, shadowColor: ACCENT, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
-  statText: { fontSize: 12, fontWeight: "600", color: ACCENT },
-  directionsCTA: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: ACCENT, paddingVertical: 15, borderRadius: 18, marginBottom: 18, shadowColor: ACCENT, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 5 },
-  directionsCTAText: { fontSize: 15, fontWeight: "800", color: "#FFF" },
-  section: { marginBottom: 20 },
-  sectionTitle: { fontSize: 14, fontWeight: "800", color: "#AAA", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 },
-  sectionBody: { fontSize: 15, color: "#555", lineHeight: 24 },
-  amenitiesGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  amenityChip: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: SURFACE, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, shadowColor: ACCENT, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
-  amenityIcon: { width: 26, height: 26, borderRadius: 8, justifyContent: "center", alignItems: "center" },
-  amenityText: { fontSize: 13, color: ACCENT, fontWeight: "500" },
-  reserveCTA: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: HIGHLIGHT, paddingVertical: 18, paddingHorizontal: 24, borderRadius: 20, shadowColor: HIGHLIGHT, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6 },
-  reserveCTAText: { fontSize: 18, fontWeight: "900", color: "#FFF", letterSpacing: -0.3 },
-  reserveCTAArrow: { width: 38, height: 38, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.25)", justifyContent: "center", alignItems: "center" },
-
-  // Empty
-  emptyContainer: { alignItems: "center", paddingVertical: 60 },
-  emptyIconWrap: { width: 80, height: 80, borderRadius: 24, backgroundColor: "#EEF2FF", justifyContent: "center", alignItems: "center", marginBottom: 16 },
-  emptyText: { fontSize: 17, fontWeight: "700", color: ACCENT },
-  emptySubText: { fontSize: 13, color: "#999", marginTop: 6, textAlign: "center" },
-})
 
 export default Accommodation
