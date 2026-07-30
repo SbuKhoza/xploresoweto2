@@ -277,18 +277,55 @@ const Accommodation = () => {
         </View>
       </View>
 
-      {/* Type tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} className="bg-surface border-b border-line"
-        contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 10, gap: 6 }}>
+      {/* Type tabs — inline flexGrow/flexShrink 0 forces this horizontal bar to
+          size to its content so it can never stretch and vertically center the
+          tabs when the list is short. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        className="bg-surface border-b border-line"
+        style={{ flexGrow: 0, flexShrink: 0 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingVertical: 8,
+        }}
+      >
         {accommodationTypes.map((type, i) => {
           const isActive = activeTab === type
           return (
-            <TouchableOpacity key={type} className="items-center px-3 py-1.5 relative" onPress={() => setActiveTab(type)} activeOpacity={0.8}>
-              <View className={`w-8 h-8 rounded-xl justify-center items-center mb-1 ${isActive ? "bg-brand-light" : TILE_THEMES[i % TILE_THEMES.length].bgClass}`}>
-                <Ionicons name={TYPE_ICONS[i % TYPE_ICONS.length]} size={14} color={isActive ? "#E8600A" : "#1B4D5C"} />
+            <TouchableOpacity
+              key={type}
+              className="items-center px-3 pt-2 mr-4"
+              onPress={() => setActiveTab(type)}
+              activeOpacity={0.8}
+            >
+              <View
+                className={`w-8 h-8 rounded-xl justify-center items-center mb-1 ${
+                  isActive
+                    ? "bg-brand-light"
+                    : TILE_THEMES[i % TILE_THEMES.length].bgClass
+                }`}
+              >
+                <Ionicons
+                  name={TYPE_ICONS[i % TYPE_ICONS.length]}
+                  size={14}
+                  color={isActive ? "#E8600A" : "#1B4D5C"}
+                />
               </View>
-              <Text className={`text-[10px] font-semibold ${isActive ? "text-brand" : "text-muted"}`}>{type}</Text>
-              {isActive && <View className="absolute -bottom-1 left-[30%] right-[30%] h-[2.5px] rounded bg-brand" />}
+
+              <Text
+                className={`text-[10px] font-semibold ${
+                  isActive ? "text-brand" : "text-muted"
+                }`}
+              >
+                {type}
+              </Text>
+
+              <View
+                className={`mt-1 h-[2.5px] rounded-full ${
+                  isActive ? "bg-brand w-10" : "bg-transparent w-10"
+                }`}
+              />
             </TouchableOpacity>
           )
         })}
@@ -301,18 +338,20 @@ const Accommodation = () => {
         </Text>
       </View>
 
-      {/* List */}
+      {/* List — flex-1 makes it fill the remaining space, so layout stays
+          identical whether there is 1 listing or many. */}
       <AnimatedFlatList
         data={accommodationsData[activeTab] || []}
         renderItem={renderAccommodationCard}
         keyExtractor={(item) => item.id.toString()}
+        style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#E8600A"]} tintColor="#E8600A" />}
         ListEmptyComponent={() => (
           <View className="items-center py-16">
             <View className="w-20 h-20 rounded-3xl bg-teal-light justify-center items-center mb-4">
-              <Ionicons name="bed-outline" size={36} color="#1B4D5C" />
+              <Ionicons name="bed-outline" size={40} color="#1B4D5C" />
             </View>
             <Text className="text-[15px] font-bold text-ink">No {activeTab?.toLowerCase()} found</Text>
             <Text className="text-[12px] text-muted mt-1.5 text-center">Try a different category or pull to refresh</Text>
@@ -410,7 +449,7 @@ const Accommodation = () => {
                   </View>
                 </View>
 
-                {/* Reserve button — modest size, not a giant CTA */}
+                {/* Reserve button */}
                 <TouchableOpacity
                   className="flex-row items-center justify-between bg-brand px-5 py-3 rounded-2xl"
                   onPress={() => openReservationForm(selectedAccommodation)}
