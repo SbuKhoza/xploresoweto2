@@ -438,9 +438,9 @@ const Home = () => {
         {/* ── Hero: faded Orlando Towers backdrop, greeting, search ── */}
         <View className="relative px-[22px]" style={{ paddingTop: insets.top + 10 }}>
           <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 235 }}>
-            <Image source={require("../assets/home/hero-towers.jpg")} style={{ width: "100%", height: "100%", opacity: 0.5 }} resizeMode="cover" />
+            <Image source={require("../assets/home/hero-towers.png")} style={{ width: "100%", height: "100%", opacity: 0.5 }} resizeMode="cover" />
             <LinearGradient colors={["rgba(250,247,242,0.15)", "rgba(250,247,242,0.82)", BG]} locations={[0, 0.65, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
-            <LinearGradient colors={["rgba(250,247,242,0.95)", "rgba(250,247,242,0)"]} start={{ x: 0, y: 0 }} end={{ x: 0.75, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+            <LinearGradient colors={["rgba(250,247,242,0.95)", "rgba(250, 247, 242, 0.71)"]} start={{ x: 0, y: 0 }} end={{ x: 0.75, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
           </View>
 
           <View className="flex-row justify-between items-start mb-4">
