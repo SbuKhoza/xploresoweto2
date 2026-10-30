@@ -11,6 +11,7 @@ import { SafeAreaView } from "react-native-safe-area-context"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import * as ImagePicker from "expo-image-picker"
 import { auth, db, storage } from "../../Firebase/config"
+import { uriToBlob } from "../../utils/uriToBlob"
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
 import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, onSnapshot, arrayUnion } from "firebase/firestore"
 import { onAuthStateChanged } from "firebase/auth"
@@ -89,11 +90,11 @@ const PersonOfInterest = () => {
   useEffect(() => { if (currentUser) fetchPosts() }, [currentUser])
 
   const uploadImageToStorage = async (imageUri, folder = "person-of-interest") => {
-    const response = await fetch(imageUri)
-    const blob = await response.blob()
+    const blob = await uriToBlob(imageUri)
     const filename = `${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`
     const storageRef = ref(storage, `${folder}/${filename}`)
-    await uploadBytes(storageRef, blob)
+    await uploadBytes(storageRef, blob, { contentType: blob.type || "image/jpeg" })
+    blob.close?.()
     return await getDownloadURL(storageRef)
   }
 

@@ -129,22 +129,22 @@ const describeWeather = (code, isDay) => {
   return { label: "Cloudy", kind: "cloud" }
 }
 
-const iconShadow = { textShadowColor: "rgba(27,77,92,0.22)", textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 6 }
+const iconShadow = { textShadowColor: "rgba(27,77,92,0.22)", textShadowOffset: { width: 0, height: 3 }, textShadowRadius: 5 }
 
 const WeatherIcon = ({ kind }) => (
-  <View style={{ width: 100, height: 86 }}>
-    {kind === "sun"   && <Ionicons name="sunny"  size={80} color="#FFB020" style={[{ position: "absolute", right: 6, top: 3 }, iconShadow]} />}
-    {kind === "moon"  && <Ionicons name="moon"   size={74}  color="#F5C542" style={[{ position: "absolute", right: 10, top: 6 }, iconShadow]} />}
+  <View style={{ width: 76, height: 66 }}>
+    {kind === "sun"   && <Ionicons name="sunny"  size={60} color="#FFB020" style={[{ position: "absolute", right: 4, top: 2 }, iconShadow]} />}
+    {kind === "moon"  && <Ionicons name="moon"   size={56}  color="#F5C542" style={[{ position: "absolute", right: 8, top: 4 }, iconShadow]} />}
     {kind === "partly" && (
       <>
-        <Ionicons name="sunny" size={60} color="#FFB020" style={[{ position: "absolute", left: 3, top: 0 }, iconShadow]} />
-        <Ionicons name="cloud" size={70} color="#FFFFFF" style={[{ position: "absolute", right: 0, bottom: 0 }, iconShadow]} />
+        <Ionicons name="sunny" size={46} color="#FFB020" style={[{ position: "absolute", left: 2, top: 0 }, iconShadow]} />
+        <Ionicons name="cloud" size={54} color="#FFFFFF" style={[{ position: "absolute", right: 0, bottom: 0 }, iconShadow]} />
       </>
     )}
-    {kind === "cloud" && <Ionicons name="cloud"        size={80} color="#FFFFFF" style={[{ position: "absolute", right: 6, top: 4 }, iconShadow]} />}
-    {kind === "rain"  && <Ionicons name="rainy"        size={78} color="#5B8DB8" style={[{ position: "absolute", right: 6, top: 4 }, iconShadow]} />}
-    {kind === "snow"  && <Ionicons name="snow"         size={78} color="#7FB2D9" style={[{ position: "absolute", right: 6, top: 4 }, iconShadow]} />}
-    {kind === "storm" && <Ionicons name="thunderstorm" size={78} color="#5B6B8C" style={[{ position: "absolute", right: 6, top: 4 }, iconShadow]} />}
+    {kind === "cloud" && <Ionicons name="cloud"        size={60} color="#FFFFFF" style={[{ position: "absolute", right: 4, top: 3 }, iconShadow]} />}
+    {kind === "rain"  && <Ionicons name="rainy"        size={58} color="#5B8DB8" style={[{ position: "absolute", right: 4, top: 3 }, iconShadow]} />}
+    {kind === "snow"  && <Ionicons name="snow"         size={58} color="#7FB2D9" style={[{ position: "absolute", right: 4, top: 3 }, iconShadow]} />}
+    {kind === "storm" && <Ionicons name="thunderstorm" size={58} color="#5B6B8C" style={[{ position: "absolute", right: 4, top: 3 }, iconShadow]} />}
   </View>
 )
 
@@ -445,9 +445,9 @@ const Home = () => {
 
           <View className="flex-row justify-between items-start mb-4">
             <View className="flex-1">
-              <Text className="text-[15px] text-ink font-medium mb-0.5">{getGreeting()} 👋</Text>
-              <Text className="text-[24px] font-extrabold text-ink -tracking-[0.5px]" numberOfLines={1}>Aweh, {loading ? "User" : userDisplayName}!</Text>
-              <Text className="text-[12.5px] text-muted font-medium mt-0.5">Soweto  •  Gauteng</Text>
+              <Text className="text-[13px] text-ink font-medium mb-0.5">{getGreeting()} 👋</Text>
+              <Text className="text-[19px] font-extrabold text-ink -tracking-[0.3px]" numberOfLines={1}>Aweh, {loading ? "User" : userDisplayName}!</Text>
+              <Text className="text-[11.5px] text-muted font-medium mt-0.5">Soweto  •  Gauteng</Text>
             </View>
             <TouchableOpacity className="w-[42px] h-[42px] justify-center items-center rounded-full bg-surface" style={cardShadow} activeOpacity={0.8}>
               <Ionicons name="notifications-outline" size={20} color={TEAL} />
@@ -467,63 +467,63 @@ const Home = () => {
         </View>
 
         {/* ── Weather card ── */}
-        <View className="px-[22px] mt-4 mb-5">
-          <LinearGradient colors={["#DDF1F8", "#CDE8F2"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[{ borderRadius: 20, padding: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.7)" }, cardShadow]}>
+        <View className="px-[22px] mt-3 mb-4">
+          <LinearGradient colors={["#DDF1F8", "#CDE8F2"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[{ borderRadius: 16, padding: 11, borderWidth: 1, borderColor: "rgba(255,255,255,0.7)" }, cardShadow]}>
             {weather.status === "ready" ? (
               <>
                 <View className="flex-row justify-between">
                   <View className="flex-1">
-                    <Text className="text-[10px] font-bold text-ink tracking-[1px] uppercase mb-1">Today's Weather</Text>
-                    <Text className="text-[17px] font-extrabold text-ink -tracking-[0.3px]">Soweto, Gauteng</Text>
-                    <Text className="text-[11.5px] text-muted mt-0.5">{dayjs().format("dddd, D MMM YYYY")}</Text>
-                    <View className="flex-row items-center mt-1">
-                      <Text className="text-[50px] font-extrabold text-[#12495C] -tracking-[1.5px]" style={{ lineHeight: 58 }}>{weather.temp}°</Text>
-                      <View className="ml-3 flex-1">
-                        <Text className="text-[13.5px] font-bold text-ink" numberOfLines={1}>{weather.label}</Text>
-                        <Text className="text-[12px] text-muted mt-0.5">Feels like {weather.feelsLike}°</Text>
+                    <Text className="text-[8.5px] font-bold text-ink tracking-[0.9px] uppercase mb-0.5">Today's Weather</Text>
+                    <Text className="text-[14px] font-extrabold text-ink -tracking-[0.2px]">Soweto, Gauteng</Text>
+                    <Text className="text-[10px] text-muted">{dayjs().format("dddd, D MMM YYYY")}</Text>
+                    <View className="flex-row items-center">
+                      <Text className="text-[38px] font-extrabold text-[#12495C] -tracking-[1px]" style={{ lineHeight: 44 }}>{weather.temp}°</Text>
+                      <View className="ml-2.5 flex-1">
+                        <Text className="text-[12px] font-bold text-ink" numberOfLines={1}>{weather.label}</Text>
+                        <Text className="text-[10.5px] text-muted mt-0.5">Feels like {weather.feelsLike}°</Text>
                       </View>
                     </View>
                   </View>
-                  <View className="justify-center -mr-1 -mt-2">
+                  <View className="justify-center -mr-1 -mt-1">
                     <WeatherIcon kind={weather.kind} />
                   </View>
                 </View>
 
-                <View className="h-px bg-[#B9D9E4] mt-2.5 mb-3" />
+                <View className="h-px bg-[#B9D9E4] mt-1.5 mb-2.5" />
 
                 <View className="flex-row items-center">
                   <View className="flex-1 flex-row items-center gap-2">
-                    <Ionicons name="thermometer-outline" size={20} color={TEAL} />
+                    <Ionicons name="thermometer-outline" size={16} color={TEAL} />
                     <View>
-                      <Text className="text-[12px] text-muted">High / Low</Text>
-                      <Text className="text-[15px] font-extrabold text-ink">{weather.high}° / {weather.low}°</Text>
+                      <Text className="text-[9.5px] text-muted">High / Low</Text>
+                      <Text className="text-[11.5px] font-extrabold text-ink">{weather.high}° / {weather.low}°</Text>
                     </View>
                   </View>
-                  <View className="w-px h-7 bg-[#B9D9E4]" />
+                  <View className="w-px h-6 bg-[#B9D9E4]" />
                   <View className="flex-1 flex-row items-center justify-center gap-2">
-                    <MaterialCommunityIcons name="weather-windy" size={20} color={TEAL} />
+                    <MaterialCommunityIcons name="weather-windy" size={16} color={TEAL} />
                     <View>
-                      <Text className="text-[12px] text-muted">Wind</Text>
-                      <Text className="text-[15px] font-extrabold text-ink">{weather.wind} km/h</Text>
+                      <Text className="text-[9.5px] text-muted">Wind</Text>
+                      <Text className="text-[11.5px] font-extrabold text-ink">{weather.wind} km/h</Text>
                     </View>
                   </View>
-                  <View className="w-px h-7 bg-[#B9D9E4]" />
+                  <View className="w-px h-6 bg-[#B9D9E4]" />
                   <View className="flex-1 flex-row items-center justify-end gap-2">
-                    <Ionicons name="water-outline" size={20} color={TEAL} />
+                    <Ionicons name="water-outline" size={16} color={TEAL} />
                     <View>
-                      <Text className="text-[12px] text-muted">Humidity</Text>
-                      <Text className="text-[15px] font-extrabold text-ink">{weather.humidity}%</Text>
+                      <Text className="text-[9.5px] text-muted">Humidity</Text>
+                      <Text className="text-[11.5px] font-extrabold text-ink">{weather.humidity}%</Text>
                     </View>
                   </View>
                 </View>
               </>
             ) : weather.status === "loading" ? (
-              <View className="h-[110px] justify-center items-center">
+              <View className="h-[84px] justify-center items-center">
                 <ActivityIndicator color={TEAL} />
                 <Text className="text-[12px] text-muted mt-2">Loading Soweto weather…</Text>
               </View>
             ) : (
-              <TouchableOpacity className="h-[110px] justify-center items-center" onPress={fetchWeather} activeOpacity={0.8}>
+              <TouchableOpacity className="h-[84px] justify-center items-center" onPress={fetchWeather} activeOpacity={0.8}>
                 <Ionicons name="cloud-offline-outline" size={30} color={TEAL} />
                 <Text className="text-[13.5px] font-bold text-ink mt-2">Weather unavailable</Text>
                 <Text className="text-[12px] text-muted mt-0.5">Tap to try again</Text>

@@ -118,9 +118,9 @@ const XploreWithHeader = () => (
   </SafeScreen>
 )
 
-const ProfileWithHeader = () => (
-  <SafeScreen>
-    <Header title="Profile" />
+// Profile draws its own gradient hero edge-to-edge, so no Header / top padding.
+const ProfileWithoutHeader = () => (
+  <SafeScreen style={{ paddingTop: 0 }}>
     <Profile />
   </SafeScreen>
 )
@@ -220,7 +220,7 @@ const MainTabNavigator = () => (
   <Tab.Navigator tabBar={(props) => <BottomNav {...props} />} screenOptions={{ headerShown: false }}>
     <Tab.Screen name="Home"      component={HomeWithoutHeader}       />
     <Tab.Screen name="Xplore"    component={XploreStackNavigator}    />
-    <Tab.Screen name="Profile"   component={ProfileWithHeader}       />
+    <Tab.Screen name="Profile"   component={ProfileWithoutHeader}    />
     <Tab.Screen name="Community" component={CommunityStackNavigator} />
   </Tab.Navigator>
 )
