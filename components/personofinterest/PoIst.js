@@ -2,11 +2,12 @@
 
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity, TextInput,
-  Image, Alert, SafeAreaView, StatusBar, Modal, FlatList,
+  Image, Alert, StatusBar, Modal, FlatList,
   Dimensions, ActivityIndicator,
 } from "react-native"
 import { useState, useEffect } from "react"
 import { useNavigation } from "@react-navigation/native"
+import { SafeAreaView } from "react-native-safe-area-context"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import * as ImagePicker from "expo-image-picker"
 import { auth, db, storage } from "../../Firebase/config"

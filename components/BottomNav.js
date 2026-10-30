@@ -3,6 +3,7 @@
 import { StyleSheet, Text, View, TouchableOpacity, Animated } from "react-native"
 import { useRef, createContext, useContext, useEffect } from "react"
 import { Ionicons } from "@expo/vector-icons"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 // ── Design tokens — must match Home.js ──────────────────────────────────────
 const ACCENT    = "#1B4D5C"   // Deep teal
@@ -46,15 +47,16 @@ export const useScrollTracking = () => {
 
 // ── Tab config ────────────────────────────────────────────────────────────────
 const TABS = {
-  Home:      { outline: "home-outline",    filled: "home"    },
-  Xplore:    { outline: "compass-outline", filled: "compass" },
-  Profile:   { outline: "person-outline",  filled: "person"  },
-  Community: { outline: "grid-outline",    filled: "grid"    },
+  Home:      { outline: "home-outline",    filled: "home",    label: "Home"      },
+  Xplore:    { outline: "compass-outline", filled: "compass", label: "Explore"   },
+  Profile:   { outline: "person-outline",  filled: "person",  label: "Profile"   },
+  Community: { outline: "grid-outline",    filled: "grid",    label: "Community" },
 }
 
 // ── BottomNav ─────────────────────────────────────────────────────────────────
 const BottomNav = ({ state, descriptors, navigation }) => {
   const { scrollY } = useScrollContext()
+  const insets = useSafeAreaInsets()
   const opacity        = useRef(new Animated.Value(1)).current
   const scrollYPrev    = useRef(0)
 
@@ -79,15 +81,12 @@ const BottomNav = ({ state, descriptors, navigation }) => {
   }, [state.index])
 
   return (
-    <Animated.View style={[styles.navContainer, { opacity }]}>
-      {/* Decorative top accent line */}
-      <View style={styles.topAccent} />
-
+    <Animated.View style={[styles.navContainer, { opacity, bottom: Math.max(insets.bottom, 8) + 6 }]}>
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key]
         const isFocused   = state.index === index
         const iconName    = isFocused ? TABS[route.name]?.filled : TABS[route.name]?.outline
-        const label       = options.tabBarLabel ?? options.title ?? route.name
+        const label       = TABS[route.name]?.label ?? options.tabBarLabel ?? options.title ?? route.name
 
         const onPress = () => {
           const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true })
@@ -117,16 +116,17 @@ const BottomNav = ({ state, descriptors, navigation }) => {
             {/* Active pill background */}
             {isFocused && <View style={styles.activePill} />}
 
-            <View style={[styles.iconWrap, isFocused && styles.iconWrapActive]}>
+            <View style={styles.iconWrap}>
               <Ionicons
                 name={iconName}
                 size={21}
-                color={ACCENT}
+                color={isFocused ? ACCENT : MUTED}
               />
             </View>
             <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
               {label}
             </Text>
+            {isFocused && <View style={styles.activeBar} />}
           </TouchableOpacity>
         )
       })}
@@ -142,80 +142,71 @@ const scrollStyles = StyleSheet.create({
 })
 
 const styles = StyleSheet.create({
+  // Floating, fully-rounded bar inset from the screen edges
   navContainer: {
     flexDirection: "row",
     backgroundColor: SURFACE,
-    width: "100%",
-    height: 66,
-    borderRadius: 10,
-    justifyContent: "space-around",
+    height: 62,
+    borderRadius: 26,
     alignItems: "center",
     position: "absolute",
-    bottom: 0,
-    alignSelf: "center",
-    paddingHorizontal: 8,
-    paddingTop: 6,
-    paddingBottom: 4,
-    // Shadow — matches Home card shadow style
+    left: 12,
+    right: 12,
+    padding: 5,
     shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.14,
-    shadowRadius: 16,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    elevation: 12,
     borderWidth: 1,
-    borderColor: "#E8DDD5",   // Warm-toned border matching Home township cards
-  },
-
-  // Subtle orange top-left accent sliver inside the pill
-  topAccent: {
-    position: "absolute",
-    top: 0,
-    left: "20%",
-    right: "20%",
-    height: 2.5,
-    borderRadius: 2,
-    backgroundColor: ACCENT,
-    opacity: 1,
+    borderColor: "#EFE9E0",
   },
 
   tabButton: {
     flex: 1,
+    height: "100%",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 6,
     position: "relative",
   },
 
-  // Soft pill that appears behind the active icon
+  // Soft teal tint behind the active tab
   activePill: {
     position: "absolute",
-    top: 2,
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: "#ffffff",   // Warm orange tint — matches Home guideBadge
+    top: 0,
+    bottom: 0,
+    left: 2,
+    right: 2,
+    borderRadius: 21,
+    backgroundColor: "#E8F4F7",
   },
 
   iconWrap: {
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 24,
     justifyContent: "center",
     alignItems: "center",
   },
-  iconWrapActive: {
-    // Slight upward nudge on active item for a lively feel
-    transform: [{ translateY: -1 }],
-  },
 
   tabLabel: {
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: "600",
     color: MUTED,
-    marginTop: 1,
-    letterSpacing: 0.2,
+    marginTop: 2,
+    letterSpacing: 0.1,
   },
   tabLabelActive: {
     color: ACCENT,
     fontWeight: "800",
+  },
+
+  // Small underline beneath the active label
+  activeBar: {
+    position: "absolute",
+    bottom: 4,
+    width: 30,
+    height: 2.5,
+    borderRadius: 2,
+    backgroundColor: ACCENT,
   },
 })

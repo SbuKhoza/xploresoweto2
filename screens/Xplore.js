@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
-import { Text, View, TouchableOpacity, SafeAreaView, StatusBar } from "react-native"
+import { Text, View, TouchableOpacity, StatusBar } from "react-native"
+import { SafeAreaView } from "react-native-safe-area-context"
 import { useNavigation } from "@react-navigation/native"
 import FontAwesome from "react-native-vector-icons/FontAwesome"
 import MaterialIcons from "react-native-vector-icons/MaterialIcons"
@@ -188,6 +189,7 @@ export default function Xplore() {
       {/* Content */}
       {viewMode === "grid" ? (
         <AnimatedFlatList
+          key="xplore-grid"
           data={exploreItems}
           keyExtractor={(item) => item.id}
           renderItem={({ item, index }) => <GridItem item={item} index={index} />}
@@ -199,6 +201,7 @@ export default function Xplore() {
         />
       ) : (
         <AnimatedFlatList
+          key="xplore-list"
           data={exploreItems}
           keyExtractor={(item) => item.id}
           renderItem={({ item, index }) => <ListItem item={item} index={index} />}

@@ -1,13 +1,18 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { StyleSheet, StatusBar, Platform } from "react-native"
+import { StyleSheet, StatusBar, Platform, LogBox } from "react-native"
 import { NavigationContainer } from "@react-navigation/native"
 import { createStackNavigator } from "@react-navigation/stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context"
 import GlobalLoader from "./components/loader/GlobalLoader"
 import { LoadingProvider, useLoading } from "./components/context/LoadingContext"
+
+// @react-navigation/stack's Card still calls InteractionManager internally,
+// which React Native now flags as deprecated. It is a library-internal call
+// (not app code), so hide the warning until the library drops it.
+LogBox.ignoreLogs(["InteractionManager has been deprecated"])
 
 // Import screens
 import Splash from "./screens/Splash"
@@ -98,10 +103,10 @@ const CommunityStackNavigator = () => (
 )
 
 // ── Screen wrappers ───────────────────────────────────────────────────────────
-// Home has its own hero banner that butts against the top — no Header component,
-// but we still respect the safe area inset.
+// Home has its own hero that draws edge-to-edge under the status bar — no Header
+// component and no SafeScreen top padding; Home applies the top inset itself.
 const HomeWithoutHeader = () => (
-  <SafeScreen>
+  <SafeScreen style={{ paddingTop: 0 }}>
     <Home />
   </SafeScreen>
 )
