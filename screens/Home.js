@@ -11,7 +11,7 @@ import relativeTime from "dayjs/plugin/relativeTime"
 import { onAuthStateChanged } from "firebase/auth"
 import { doc, getDoc, collection, getDocs } from "firebase/firestore"
 import { auth, db } from "../Firebase/config"
-import { useNavigation } from "@react-navigation/native"
+import { useNavigation, CommonActions } from "@react-navigation/native"
 import { useOfflineData } from "../hooks/useOfflineData"
 
 dayjs.extend(relativeTime)
@@ -227,14 +227,29 @@ const Home = () => {
       .slice(0, 3)
   }, [eventsData])
 
-  const goXploreItem = (screenName) => {
-    try { navigation.navigate("Xplore", { screen: screenName }) }
-    catch (e) { console.error(`Navigation error to ${screenName}:`, e) }
+  // Opens `screenName` inside another tab's stack so that "back" returns to Home.
+  // The tab's nested stack stays mounted after the first visit, so a plain
+  // navigate() would push on top of whatever was opened last (e.g. Restaurants).
+  // Resetting that stack to just the target screen avoids this.
+  const openInTab = (tabName, screenName) => {
+    try {
+      const tabRoute = navigation.getState()?.routes?.find(r => r.name === tabName)
+      const stackKey = tabRoute?.state?.key // undefined until the tab has been visited
+      if (stackKey) {
+        navigation.dispatch({
+          ...CommonActions.reset({ index: 0, routes: [{ name: screenName }] }),
+          target: stackKey,
+        })
+      }
+      // `from: "Home"` lets the shared Header send the back button straight to Home.
+      navigation.navigate(tabName, { screen: screenName, params: { from: "Home" } })
+    } catch (e) {
+      console.error(`Navigation error to ${tabName}/${screenName}:`, e)
+    }
   }
-  const goCommunity = (screenName) => {
-    try { navigation.navigate("Community", screenName ? { screen: screenName } : undefined) }
-    catch (e) { console.error("Navigation error to Community:", e) }
-  }
+
+  const goXploreItem = (screenName) => openInTab("Xplore", screenName)
+  const goCommunity  = (screenName) => openInTab("Community", screenName || "CommunityMain")
 
   const getGreeting = () => {
     const h = new Date().getHours()
@@ -384,8 +399,7 @@ const Home = () => {
   const handleResultPress = (item) => {
     closeSearch()
     if (item.screen) {
-      try { navigation.navigate("Xplore", { screen: item.screen }) }
-      catch { navigation.navigate(item.screen) }
+      goXploreItem(item.screen)
     }
   }
 
@@ -536,7 +550,7 @@ const Home = () => {
         <View className="px-[22px] mb-6">
           <View className="flex-row items-center justify-between mb-3">
             <Text className="text-[11px] font-extrabold text-[#12495C] tracking-[1.4px] uppercase">Quick Access</Text>
-            <TouchableOpacity className="flex-row items-center gap-0.5" onPress={() => navigation.navigate("Xplore", { screen: "XploreMain" })} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <TouchableOpacity className="flex-row items-center gap-0.5" onPress={() => goXploreItem("XploreMain")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text className="text-[12px] font-bold text-brand">See All</Text>
               <Ionicons name="chevron-forward" size={13} color={BRAND} />
             </TouchableOpacity>
@@ -675,7 +689,7 @@ const Home = () => {
         {/* ── The Ultimate Guide to Soweto ── */}
         <View className="px-[22px] mb-5">
           <SectionHeader icon="book-outline" title={featuredImage?.title || "The Ultimate Guide to Soweto"} subtitle="Discover places, people and experiences." />
-          <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate("Xplore", { screen: "XploreMain" })}
+          <TouchableOpacity activeOpacity={0.9} onPress={() => goXploreItem("XploreMain")}
             className="rounded-2xl bg-surface" style={cardShadow}>
             <View style={{ height: 92, borderRadius: 16, overflow: "hidden" }}>
               {dataLoading ? (
@@ -695,7 +709,7 @@ const Home = () => {
 
         {/* ── Soweto Townships ── */}
         <View className="px-[22px]">
-          <SectionHeader title="Soweto Townships" onSeeAll={() => navigation.navigate("Xplore", { screen: "XploreMain" })} />
+          <SectionHeader title="Soweto Townships" onSeeAll={() => goXploreItem("XploreMain")} />
           <View className="flex-row flex-wrap" style={{ gap: 8 }}>
             {dataLoading
               ? Array.from({ length: 6 }).map((_, i) => (
