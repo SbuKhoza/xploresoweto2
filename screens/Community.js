@@ -6,6 +6,7 @@ import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-ic
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import { useOfflineData } from "../hooks/useOfflineData"
+import { toDate } from "../utils/content"
 
 dayjs.extend(relativeTime)
 
@@ -18,11 +19,33 @@ const Community = () => {
     ? [...news].sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))[0]
     : null
 
+  const eventsOptions = useMemo(() => ({ maxAgeMinutes: 20 }), [])
+  const { data: events } = useOfflineData("events", eventsOptions)
+  const nextEvent = useMemo(() => {
+    const today = dayjs().startOf("day")
+    return (events || [])
+      .filter(e => e.isActive !== false && (e.title || e.name))
+      .map(e => ({ ...e, _date: toDate(e.date || e.startDate) }))
+      .filter(e => e._date && !dayjs(e._date).isBefore(today))
+      .sort((a, b) => a._date - b._date)[0] || null
+  }, [events])
+
   const poiOptions = useMemo(() => ({ maxAgeMinutes: 20 }), [])
   const { data: personsOfInterest } = useOfflineData("Person-Of-Interest", poiOptions)
   const activeCasesCount = personsOfInterest ? personsOfInterest.length : null
 
   const cards = [
+    {
+      key: "events",
+      label: "Events",
+      desc: "What's on in Soweto, this week and beyond",
+      icon: "calendar",
+      iconType: "Ionicons",
+      bg: "bg-brand-light",
+      color: "#E8600A",
+      preview: nextEvent ? `Next: ${nextEvent.title || nextEvent.name} · ${dayjs(nextEvent._date).format("D MMM")}` : "Tap to see upcoming events",
+      onPress: () => navigation.navigate("Events"),
+    },
     {
       key: "news",
       label: "News",

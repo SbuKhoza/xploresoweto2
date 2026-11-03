@@ -76,7 +76,7 @@ const XploreStackNavigator = () => (
   <XploreStack.Navigator screenOptions={{ headerShown: false }}>
     <XploreStack.Screen name="XploreMain"    component={XploreWithHeader}       />
     <XploreStack.Screen name="Accommodation" component={AccommodationWithHeader} />
-    <XploreStack.Screen name="Restaurants"   component={RestaurantsWithHeader}   />
+    <XploreStack.Screen name="Restaurants"   component={RestaurantsWithoutHeader} />
     <XploreStack.Screen name="Emergency"     component={EmergencyWithHeader}     />
     <XploreStack.Screen name="Recreation"    component={RecreationWithHeader}    />
     <XploreStack.Screen name="Attraction"    component={AttractionWithHeader}    />
@@ -154,9 +154,10 @@ const AccommodationWithHeader = () => (
   </SafeScreen>
 )
 
-const RestaurantsWithHeader = () => (
-  <SafeScreen>
-    <Header title="Restaurants" />
+// Restaurants draws its own hero (with back / search / bell buttons) edge-to-edge
+// under the status bar, so no Header component and no SafeScreen top padding.
+const RestaurantsWithoutHeader = () => (
+  <SafeScreen style={{ paddingTop: 0 }}>
     <Restaurants />
   </SafeScreen>
 )
