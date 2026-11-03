@@ -1,6 +1,7 @@
 import {
   Text, View, ScrollView, TextInput, TouchableOpacity,
   Image, Dimensions, Modal, FlatList, ActivityIndicator, Keyboard,
+  Animated, Easing,
 } from "react-native"
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
@@ -22,6 +23,9 @@ const BRAND  = "#E8600A"
 const BG     = "#FAF7F2"
 const MUTED  = "#7A8A8F"
 
+// Horizontal page margin shared by every section on Home
+const PAD = 16
+
 // Soweto, Gauteng — used for the weather lookup
 const SOWETO = { latitude: -26.2485, longitude: 27.854 }
 
@@ -32,6 +36,14 @@ const cardShadow = {
   shadowOpacity: 0.08,
   shadowRadius: 12,
   elevation: 3,
+}
+
+const weatherShadow = {
+  shadowColor: "#0E3441",
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.22,
+  shadowRadius: 14,
+  elevation: 5,
 }
 
 // Maps each collection to a display label, icon, and nav destination
@@ -129,24 +141,138 @@ const describeWeather = (code, isDay) => {
   return { label: "Cloudy", kind: "cloud" }
 }
 
-const iconShadow = { textShadowColor: "rgba(27,77,92,0.22)", textShadowOffset: { width: 0, height: 3 }, textShadowRadius: 5 }
+// ── Weather illustration ────────────────────────────────────────────────────
+// Built from plain Views (no extra native deps): a sun with rays, a layered
+// white cloud, rain / snow / lightning variants. All motion is native-driven
+// and deliberately subtle — slow-turning rays, a breathing glow, a floating cloud.
+const useAnimLoop = (mode, duration) => {
+  const v = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    const step = (toValue) =>
+      Animated.timing(v, { toValue, duration, easing: mode === "spin" ? Easing.linear : Easing.inOut(Easing.sin), useNativeDriver: true })
+    const loop = Animated.loop(mode === "spin" ? step(1) : Animated.sequence([step(1), step(0)]))
+    loop.start()
+    return () => loop.stop()
+  }, [v, mode, duration])
+  return v
+}
 
-const WeatherIcon = ({ kind }) => (
-  <View style={{ width: 76, height: 66 }}>
-    {kind === "sun"   && <Ionicons name="sunny"  size={60} color="#FFB020" style={[{ position: "absolute", right: 4, top: 2 }, iconShadow]} />}
-    {kind === "moon"  && <Ionicons name="moon"   size={56}  color="#F5C542" style={[{ position: "absolute", right: 8, top: 4 }, iconShadow]} />}
-    {kind === "partly" && (
+const SUN_RAYS = Array.from({ length: 12 }, (_, i) => i * 30)
+
+const Sun = () => {
+  const spin   = useAnimLoop("spin", 28000)
+  const pulse  = useAnimLoop("float", 2400)
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] })
+  const glow   = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.14] })
+  return (
+    <View style={{ width: 66, height: 66, alignItems: "center", justifyContent: "center" }}>
+      <Animated.View style={{ position: "absolute", width: 54, height: 54, borderRadius: 27, backgroundColor: "rgba(255,196,60,0.30)", transform: [{ scale: glow }] }} />
+      <Animated.View style={{ position: "absolute", width: 66, height: 66, transform: [{ rotate }] }}>
+        {SUN_RAYS.map((deg) => (
+          <View key={deg} style={{ position: "absolute", width: 66, height: 66, alignItems: "center", transform: [{ rotate: `${deg}deg` }] }}>
+            <View style={{ width: 4.5, height: 10, borderRadius: 3, backgroundColor: "#FFC933" }} />
+          </View>
+        ))}
+      </Animated.View>
+      <LinearGradient colors={["#FFE46B", "#FFA726"]} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+    </View>
+  )
+}
+
+// Cloud drawn twice (a soft shade copy underneath, white on top) for a bit of depth
+const Cloud = ({ fill = "#FFFFFF", shade = "#B9D6E2" }) => {
+  const puffs = (c, dy) => (
+    <>
+      <View style={{ position: "absolute", left: 0,  top: 16 + dy, width: 68, height: 24, borderRadius: 12,   backgroundColor: c }} />
+      <View style={{ position: "absolute", left: 5,  top: 8 + dy,  width: 24, height: 24, borderRadius: 12,   backgroundColor: c }} />
+      <View style={{ position: "absolute", left: 21, top: dy,      width: 33, height: 33, borderRadius: 16.5, backgroundColor: c }} />
+      <View style={{ position: "absolute", left: 42, top: 10 + dy, width: 24, height: 24, borderRadius: 12,   backgroundColor: c }} />
+    </>
+  )
+  return <View style={{ width: 68, height: 44 }}>{puffs(shade, 3)}{puffs(fill, 0)}</View>
+}
+
+// Falling rain drop / snow flake
+const Drop = ({ left, delay = 0, flake }) => {
+  const v = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.delay(delay),
+      Animated.timing(v, { toValue: 1, duration: flake ? 1600 : 900, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+    ]))
+    loop.start()
+    return () => loop.stop()
+  }, [v, delay, flake])
+  const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [0, flake ? 12 : 14] })
+  const opacity    = v.interpolate({ inputRange: [0, 0.15, 0.8, 1], outputRange: [0, 1, 1, 0] })
+  return (
+    <Animated.View style={{
+      position: "absolute", left, top: 0, opacity, transform: [{ translateY }, { rotate: flake ? "0deg" : "18deg" }],
+      width: flake ? 6 : 3.5, height: flake ? 6 : 10, borderRadius: 5,
+      backgroundColor: flake ? "#FFFFFF" : "#7CC8F2",
+    }} />
+  )
+}
+
+const WeatherIcon = ({ kind }) => {
+  const float = useAnimLoop("float", 3000)
+  const bob   = float.interpolate({ inputRange: [0, 1], outputRange: [0, -3] })
+  const drift = float.interpolate({ inputRange: [0, 1], outputRange: [0, 2.5] })
+  const cloudMove = { transform: [{ translateY: bob }, { translateX: drift }] }
+
+  let art = null
+  if (kind === "partly") {
+    art = (
       <>
-        <Ionicons name="sunny" size={46} color="#FFB020" style={[{ position: "absolute", left: 2, top: 0 }, iconShadow]} />
-        <Ionicons name="cloud" size={54} color="#FFFFFF" style={[{ position: "absolute", right: 0, bottom: 0 }, iconShadow]} />
+        <View style={{ position: "absolute", left: 0, top: 0 }}><Sun /></View>
+        <Animated.View style={[{ position: "absolute", left: 28, top: 34 }, cloudMove]}><Cloud /></Animated.View>
       </>
-    )}
-    {kind === "cloud" && <Ionicons name="cloud"        size={60} color="#FFFFFF" style={[{ position: "absolute", right: 4, top: 3 }, iconShadow]} />}
-    {kind === "rain"  && <Ionicons name="rainy"        size={58} color="#5B8DB8" style={[{ position: "absolute", right: 4, top: 3 }, iconShadow]} />}
-    {kind === "snow"  && <Ionicons name="snow"         size={58} color="#7FB2D9" style={[{ position: "absolute", right: 4, top: 3 }, iconShadow]} />}
-    {kind === "storm" && <Ionicons name="thunderstorm" size={58} color="#5B6B8C" style={[{ position: "absolute", right: 4, top: 3 }, iconShadow]} />}
+    )
+  } else if (kind === "sun") {
+    art = <View style={{ position: "absolute", left: 15, top: 6, transform: [{ scale: 1.15 }] }}><Sun /></View>
+  } else if (kind === "moon") {
+    art = (
+      <Animated.View style={{ position: "absolute", left: 22, top: 10, width: 52, height: 52, alignItems: "center", justifyContent: "center", transform: [{ translateY: bob }] }}>
+        <View style={{ position: "absolute", width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(255,226,120,0.22)" }} />
+        <Ionicons name="moon" size={40} color="#FFE27A" />
+      </Animated.View>
+    )
+  } else if (kind === "cloud") {
+    art = <Animated.View style={[{ position: "absolute", left: 14, top: 16, transform: [{ scale: 1.2 }] }, cloudMove]}><Cloud /></Animated.View>
+  } else {
+    // rain / snow / storm — slightly greyer cloud with something falling from it
+    const dark = kind === "storm"
+    art = (
+      <>
+        <Animated.View style={[{ position: "absolute", left: 14, top: 4 }, cloudMove]}>
+          <Cloud fill={dark ? "#C9D3E3" : "#EEF4F8"} shade={dark ? "#7E8FB0" : "#A9C4D3"} />
+        </Animated.View>
+        <View style={{ position: "absolute", left: 14, top: 50, width: 68, height: 26 }}>
+          {kind === "rain" && [14, 30, 46].map((l, i) => <Drop key={l} left={l} delay={i * 280} />)}
+          {kind === "snow" && [12, 31, 50].map((l, i) => <Drop key={l} left={l} delay={i * 450} flake />)}
+          {kind === "storm" && <Ionicons name="flash" size={28} color="#FFD23F" style={{ position: "absolute", left: 22, top: -4 }} />}
+        </View>
+      </>
+    )
+  }
+
+  // 96×78 artboard scaled down into an 80×68 slot so the card stays compact
+  return (
+    <View style={{ width: 80, height: 68 }}>
+      <View style={{ position: "absolute", left: -8, top: -5, width: 96, height: 78, transform: [{ scale: 0.84 }] }}>{art}</View>
+    </View>
+  )
+}
+
+const WeatherStat = ({ icon, label, value }) => (
+  <View style={{ flex: 1, alignItems: "center" }}>
+    <MaterialCommunityIcons name={icon} size={20} color="#FFFFFF" />
+    <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.82)", marginTop: 1 }}>{label}</Text>
+    <Text style={{ fontSize: 14.5, fontWeight: "800", color: "#FFFFFF" }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{value}</Text>
   </View>
 )
+
+const WEATHER_DIVIDER = { width: 1, height: 54, backgroundColor: "rgba(255,255,255,0.28)" }
 
 // Image that quietly falls back to a gradient + icon if it fails to load
 const CoverImage = ({ source, fallbackIcon = "image-outline", colors = ["#DCEBEF", "#EAF3F5"], style, iconSize = 24 }) => {
@@ -428,10 +554,12 @@ const Home = () => {
 
   // ── Derived layout values ────────────────────────────────────────────────
   const screenW    = screenData.width
+  const HERO_H     = insets.top + 175                 // backdrop reaches into the top of the weather card
+  const HERO_SHIFT = Math.round(screenW * 0)         // nudge the artwork to the right
   const STORY_W    = Math.min(Math.round(screenW * 0.66), 270)
   const STORY_GAP  = 12
   const townshipsToShow = (townships.length > 0 ? townships : FALLBACK_TOWNSHIPS).slice(0, 6)
-  const townshipW  = (screenW - 44 - 16) / 3
+  const townshipW  = (screenW - PAD * 2 - 16) / 3
 
   const handleStoryScroll = (e) => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / (STORY_W + STORY_GAP))
@@ -449,105 +577,95 @@ const Home = () => {
     <>
       <ScrollView className="flex-1 bg-bg" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
 
-        {/* ── Hero: faded Orlando Towers backdrop, greeting, search ── */}
-        <View className="relative px-[22px]" style={{ paddingTop: insets.top + 10 }}>
-          <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 235 }}>
-            <Image source={require("../assets/home/hero-towers.png")} style={{ width: "100%", height: "60%", opacity: 0.5 }} resizeMode="fill" />
-            <LinearGradient colors={["rgba(250, 247, 242, 0)", "rgba(250, 247, 242, 0)", BG]} locations={[0, 0.65, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
-            <LinearGradient colors={["rgb(254, 254, 253)", "rgba(250, 247, 242, 0)"]} start={{ x: 0, y: 0 }} end={{ x: 0.75, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+        {/* ── Hero: Orlando Towers backdrop, greeting, weather, search ── */}
+        <View style={{ paddingTop: insets.top + 10 }}>
+          {/* Backdrop — shifted right so the towers sit on the right-hand side */}
+          <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: HERO_H, overflow: "hidden" }}>
+            <Image
+              source={require("../assets/home/hero-towers.png")}
+              style={{ position: "absolute", top: 0, left: HERO_SHIFT, width: screenW, height: HERO_H, opacity: 0.92 }}
+              resizeMode="cover"
+            />
+            {/* fade the left so the greeting stays readable */}
+            <LinearGradient colors={["rgba(250, 247, 242, 0.65)", "rgba(250,247,242,0.55)", "rgba(250,247,242,0)"]} locations={[0, 0.4, 0.75]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+            {/* fade the bottom into the page background */}
+            <LinearGradient colors={["rgba(250,247,242,0)", BG]} locations={[0.55, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
           </View>
 
-          <View className="flex-row justify-between items-start mb-4">
+          {/* Greeting + bell */}
+          <View className="flex-row justify-between items-start" style={{ paddingHorizontal: PAD + 4 }}>
             <View className="flex-1">
-              <Text className="text-[13px] text-ink font-medium mb-0.5">{getGreeting()} 👋</Text>
-              <Text className="text-[19px] font-extrabold text-ink -tracking-[0.3px]" numberOfLines={1}>Aweh, {loading ? "User" : userDisplayName}!</Text>
-              <Text className="text-[11.5px] text-muted font-medium mt-0.5">Soweto  •  Gauteng</Text>
+              {/* <Text className="text-[15px] text-ink font-medium mb-0.5">{getGreeting()} 👋</Text> */}
+              <Text className="text-[18px] font-extrabold text-ink -tracking-[0.4px]" numberOfLines={1}>👋Aweh, {loading ? "User" : userDisplayName}!</Text>
+              <View style={{ width: 62, height: 3, borderRadius: 2, backgroundColor: BRAND, marginTop: 1, marginBottom: 5 }} />
+              <View className="flex-row items-center">
+                <Ionicons name="location" size={13} color="#14213D" />
+                <Text className="text-[12px] text-ink font-medium ml-1">Soweto, Gauteng</Text>
+              </View>
             </View>
-            <TouchableOpacity className="w-[42px] h-[42px] justify-center items-center rounded-full bg-surface" style={cardShadow} activeOpacity={0.8}>
-              <Ionicons name="notifications-outline" size={20} color={TEAL} />
-              <View className="absolute top-2.5 right-3 w-2 h-2 rounded-full bg-brand border-[1.5px] border-surface" />
+            <TouchableOpacity className="w-[42px] h-[42px] justify-center items-center rounded-[14px] bg-surface" style={cardShadow} activeOpacity={0.8}>
+              <Ionicons name="notifications-outline" size={21} color={TEAL} />
+              <View className="absolute top-2.5 right-[11px] w-2 h-2 rounded-full bg-brand border-[1.5px] border-surface" />
             </TouchableOpacity>
           </View>
 
-          {/* Search bar — tap to open modal */}
-          <TouchableOpacity className="flex-row items-center pl-3.5 pr-1.5 h-[46px] bg-surface rounded-full" style={cardShadow} onPress={openSearch} activeOpacity={0.9}>
-            <Ionicons name="search" size={17} color={MUTED} style={{ marginRight: 10 }} />
-            <Text className="flex-1 text-[13.5px] text-[#9AA9AE]" numberOfLines={1}>Search places, events, etc.</Text>
-            <View className="w-px h-5 bg-line mx-2" />
-            <View className="w-[32px] h-[32px] rounded-xl bg-teal-light justify-center items-center">
-              <Ionicons name="options-outline" size={16} color={TEAL} />
-            </View>
-          </TouchableOpacity>
-        </View>
+          {/* ── Weather card ── */}
+          <View style={{ paddingHorizontal: PAD, marginTop: 14 }}>
+            <LinearGradient
+              colors={["rgba(36,96,112,0.94)", "rgba(20,64,80,0.96)"]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={[{ borderRadius: 24, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.22)", minHeight: 92, justifyContent: "center" }, weatherShadow]}
+            >
+              {weather.status === "ready" ? (
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <WeatherIcon kind={weather.kind} />
 
-        {/* ── Weather card ── */}
-        <View className="px-[22px] mt-3 mb-4">
-          <LinearGradient colors={["#DDF1F8", "#CDE8F2"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[{ borderRadius: 16, padding: 11, borderWidth: 1, borderColor: "rgba(255,255,255,0.7)" }, cardShadow]}>
-            {weather.status === "ready" ? (
-              <>
-                <View className="flex-row justify-between">
-                  <View className="flex-1">
-                    <Text className="text-[8.5px] font-bold text-ink tracking-[0.9px] uppercase mb-0.5">Today's Weather</Text>
-                    <Text className="text-[14px] font-extrabold text-ink -tracking-[0.2px]">Soweto, Gauteng</Text>
-                    <Text className="text-[10px] text-muted">{dayjs().format("dddd, D MMM YYYY")}</Text>
-                    <View className="flex-row items-center">
-                      <Text className="text-[38px] font-extrabold text-[#12495C] -tracking-[1px]" style={{ lineHeight: 44 }}>{weather.temp}°</Text>
-                      <View className="ml-2.5 flex-1">
-                        <Text className="text-[12px] font-bold text-ink" numberOfLines={1}>{weather.label}</Text>
-                        <Text className="text-[10.5px] text-muted mt-0.5">Feels like {weather.feelsLike}°</Text>
-                      </View>
+                  <View style={{ flex: 1.15, marginLeft: 4, marginRight: 6 }}>
+                    <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+                      <Text style={{ fontSize: 38, lineHeight: 42, fontWeight: "800", color: "#FFFFFF", letterSpacing: -1 }}>{weather.temp}</Text>
+                      <Text style={{ fontSize: 18, lineHeight: 22, fontWeight: "700", color: "#FFFFFF", marginTop: 5 }}>°C</Text>
                     </View>
+                    <Text style={{ fontSize: 14, fontWeight: "800", color: "#FFFFFF" }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{weather.label}</Text>
+                    <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.82)", marginTop: 1 }} numberOfLines={1}>Feels like {weather.feelsLike}°</Text>
                   </View>
-                  <View className="justify-center -mr-1 -mt-1">
-                    <WeatherIcon kind={weather.kind} />
+
+                  <View style={WEATHER_DIVIDER} />
+                  <View style={{ flex: 1.6, flexDirection: "row", alignItems: "center" }}>
+                    <WeatherStat icon="thermometer-high" label="High" value={`${weather.high}°`} />
+                    <View style={[WEATHER_DIVIDER, { height: 40 }]} />
+                    <WeatherStat icon="thermometer-low" label="Low" value={`${weather.low}°`} />
+                    <View style={[WEATHER_DIVIDER, { height: 40 }]} />
+                    <WeatherStat icon="weather-windy" label="Wind" value={`${weather.wind} km/h`} />
                   </View>
                 </View>
-
-                <View className="h-px bg-[#B9D9E4] mt-1.5 mb-2.5" />
-
-                <View className="flex-row items-center">
-                  <View className="flex-1 flex-row items-center gap-2">
-                    <Ionicons name="thermometer-outline" size={16} color={TEAL} />
-                    <View>
-                      <Text className="text-[9.5px] text-muted">High / Low</Text>
-                      <Text className="text-[11.5px] font-extrabold text-ink">{weather.high}° / {weather.low}°</Text>
-                    </View>
-                  </View>
-                  <View className="w-px h-6 bg-[#B9D9E4]" />
-                  <View className="flex-1 flex-row items-center justify-center gap-2">
-                    <MaterialCommunityIcons name="weather-windy" size={16} color={TEAL} />
-                    <View>
-                      <Text className="text-[9.5px] text-muted">Wind</Text>
-                      <Text className="text-[11.5px] font-extrabold text-ink">{weather.wind} km/h</Text>
-                    </View>
-                  </View>
-                  <View className="w-px h-6 bg-[#B9D9E4]" />
-                  <View className="flex-1 flex-row items-center justify-end gap-2">
-                    <Ionicons name="water-outline" size={16} color={TEAL} />
-                    <View>
-                      <Text className="text-[9.5px] text-muted">Humidity</Text>
-                      <Text className="text-[11.5px] font-extrabold text-ink">{weather.humidity}%</Text>
-                    </View>
-                  </View>
+              ) : weather.status === "loading" ? (
+                <View className="h-[68px] justify-center items-center">
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", marginTop: 8 }}>Loading Soweto weather…</Text>
                 </View>
-              </>
-            ) : weather.status === "loading" ? (
-              <View className="h-[84px] justify-center items-center">
-                <ActivityIndicator color={TEAL} />
-                <Text className="text-[12px] text-muted mt-2">Loading Soweto weather…</Text>
-              </View>
-            ) : (
-              <TouchableOpacity className="h-[84px] justify-center items-center" onPress={fetchWeather} activeOpacity={0.8}>
-                <Ionicons name="cloud-offline-outline" size={30} color={TEAL} />
-                <Text className="text-[13.5px] font-bold text-ink mt-2">Weather unavailable</Text>
-                <Text className="text-[12px] text-muted mt-0.5">Tap to try again</Text>
-              </TouchableOpacity>
-            )}
-          </LinearGradient>
+              ) : (
+                <TouchableOpacity className="h-[68px] justify-center items-center" onPress={fetchWeather} activeOpacity={0.8}>
+                  <Ionicons name="cloud-offline-outline" size={26} color="#FFFFFF" />
+                  <Text style={{ fontSize: 13.5, fontWeight: "700", color: "#FFFFFF", marginTop: 6 }}>Weather unavailable</Text>
+                  <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.8)", marginTop: 1 }}>Tap to try again</Text>
+                </TouchableOpacity>
+              )}
+            </LinearGradient>
+          </View>
+
+          {/* ── Search bar (under the weather) — tap to open modal ── */}
+          <View style={{ paddingHorizontal: PAD, marginTop: 12 }}>
+            <TouchableOpacity className="flex-row items-center pl-4 pr-3 h-[48px] bg-surface rounded-full" style={cardShadow} onPress={openSearch} activeOpacity={0.9}>
+              <Ionicons name="search" size={20} color={TEAL} style={{ marginRight: 10 }} />
+              <Text className="flex-1 text-[14px] text-[#7A8A8F]" numberOfLines={1}>Search places, events, etc.</Text>
+              <View className="w-px h-6 bg-line mx-3" />
+              <Ionicons name="options-outline" size={22} color={TEAL} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* ── Quick Access ── */}
-        <View className="px-[22px] mb-6">
+        <View className="px-[16px] mb-6">
           <View className="flex-row items-center justify-between mb-3">
             <Text className="text-[11px] font-extrabold text-[#12495C] tracking-[1.4px] uppercase">Quick Access</Text>
             <TouchableOpacity className="flex-row items-center gap-0.5" onPress={() => goXploreItem("XploreMain")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -573,58 +691,9 @@ const Home = () => {
           </View>
         </View>
 
-        {/* ── Top Stories ── */}
-        <View className="mb-5">
-          <View className="px-[22px]">
-            <SectionHeader title="Top Stories" bar onSeeAll={() => goCommunity("News")} />
-          </View>
-          <FlatList
-            data={stories}
-            horizontal
-            keyExtractor={(item) => String(item.id)}
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={STORY_W + STORY_GAP}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 6 }}
-            onScroll={handleStoryScroll}
-            scrollEventThrottle={32}
-            renderItem={({ item }) => {
-              const tagColor = storyTagColor(item.category)
-              const src = item.imageUrl ? { uri: item.imageUrl } : item.localImage
-              const when = toDate(item.publishedAt)
-              return (
-                <TouchableOpacity activeOpacity={0.9} onPress={() => goCommunity("News")} style={[{ width: STORY_W, marginRight: STORY_GAP, borderRadius: 16, backgroundColor: "#fff" }, cardShadow]}>
-                  <View style={{ borderRadius: 16, overflow: "hidden" }}>
-                    <View style={{ height: 92 }}>
-                      <CoverImage source={src} fallbackIcon={storyIcon(item.category)} iconSize={28} style={{ width: "100%", height: "100%" }} />
-                    </View>
-                    <View className="px-3 pt-5 pb-3">
-                      <Text className="text-[13px] font-extrabold text-ink leading-[17px]" numberOfLines={2}>{item.title}</Text>
-                      <Text className="text-[10.5px] text-muted mt-1" numberOfLines={1}>
-                        {[item.source, when ? dayjs(when).fromNow() : null].filter(Boolean).join("  ·  ")}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={{ position: "absolute", top: 92 - 10, left: 10, backgroundColor: tagColor, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
-                    <Text className="text-[9px] font-extrabold text-white uppercase tracking-[0.5px]">{item.category || "News"}</Text>
-                  </View>
-                </TouchableOpacity>
-              )
-            }}
-          />
-          {stories.length > 1 && (
-            <View className="flex-row justify-center items-center gap-1.5 mt-2.5">
-              {stories.map((s, i) => (
-                <View key={s.id} style={{ width: i === storyIndex ? 14 : 6, height: 6, borderRadius: 3, backgroundColor: i === storyIndex ? TEAL : "#D5D9D9" }} />
-              ))}
-            </View>
-          )}
-        </View>
-
         {/* ── Upcoming Events ── */}
         {events.length > 0 && (
-          <View className="px-[22px] mb-4">
+          <View className="px-[16px] mb-4">
             <SectionHeader title="Upcoming Events" icon="calendar-outline" onSeeAll={() => goCommunity()} />
             {events.map((e) => {
               const tag  = eventTag(e.category)
@@ -664,8 +733,57 @@ const Home = () => {
           </View>
         )}
 
+        {/* ── Top Stories ── */}
+        <View className="mb-5">
+          <View className="px-[16px]">
+            <SectionHeader title="Top Stories" bar onSeeAll={() => goCommunity("News")} />
+          </View>
+          <FlatList
+            data={stories}
+            horizontal
+            keyExtractor={(item) => String(item.id)}
+            showsHorizontalScrollIndicator={false}
+            snapToInterval={STORY_W + STORY_GAP}
+            snapToAlignment="start"
+            decelerationRate="fast"
+            contentContainerStyle={{ paddingHorizontal: PAD, paddingBottom: 6 }}
+            onScroll={handleStoryScroll}
+            scrollEventThrottle={32}
+            renderItem={({ item }) => {
+              const tagColor = storyTagColor(item.category)
+              const src = item.imageUrl ? { uri: item.imageUrl } : item.localImage
+              const when = toDate(item.publishedAt)
+              return (
+                <TouchableOpacity activeOpacity={0.9} onPress={() => goCommunity("News")} style={[{ width: STORY_W, marginRight: STORY_GAP, borderRadius: 16, backgroundColor: "#fff" }, cardShadow]}>
+                  <View style={{ borderRadius: 16, overflow: "hidden" }}>
+                    <View style={{ height: 92 }}>
+                      <CoverImage source={src} fallbackIcon={storyIcon(item.category)} iconSize={28} style={{ width: "100%", height: "100%" }} />
+                    </View>
+                    <View className="px-3 pt-5 pb-3">
+                      <Text className="text-[13px] font-extrabold text-ink leading-[17px]" numberOfLines={2}>{item.title}</Text>
+                      <Text className="text-[10.5px] text-muted mt-1" numberOfLines={1}>
+                        {[item.source, when ? dayjs(when).fromNow() : null].filter(Boolean).join("  ·  ")}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={{ position: "absolute", top: 92 - 10, left: 10, backgroundColor: tagColor, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
+                    <Text className="text-[9px] font-extrabold text-white uppercase tracking-[0.5px]">{item.category || "News"}</Text>
+                  </View>
+                </TouchableOpacity>
+              )
+            }}
+          />
+          {stories.length > 1 && (
+            <View className="flex-row justify-center items-center gap-1.5 mt-2.5">
+              {stories.map((s, i) => (
+                <View key={s.id} style={{ width: i === storyIndex ? 14 : 6, height: 6, borderRadius: 3, backgroundColor: i === storyIndex ? TEAL : "#D5D9D9" }} />
+              ))}
+            </View>
+          )}
+        </View>
+
         {/* ── Community Announcements ── */}
-        <View className="px-[22px] mb-5">
+        <View className="px-[16px] mb-5">
           <TouchableOpacity
             activeOpacity={0.88}
             onPress={() => goCommunity()}
@@ -687,7 +805,7 @@ const Home = () => {
         </View>
 
         {/* ── The Ultimate Guide to Soweto ── */}
-        <View className="px-[22px] mb-5">
+        <View className="px-[16px] mb-5">
           <SectionHeader icon="book-outline" title={featuredImage?.title || "The Ultimate Guide to Soweto"} subtitle="Discover places, people and experiences." />
           <TouchableOpacity activeOpacity={0.9} onPress={() => goXploreItem("XploreMain")}
             className="rounded-2xl bg-surface" style={cardShadow}>
@@ -708,7 +826,7 @@ const Home = () => {
         </View>
 
         {/* ── Soweto Townships ── */}
-        <View className="px-[22px]">
+        <View className="px-[16px]">
           <SectionHeader title="Soweto Townships" onSeeAll={() => goXploreItem("XploreMain")} />
           <View className="flex-row flex-wrap" style={{ gap: 8 }}>
             {dataLoading
