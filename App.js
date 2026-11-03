@@ -1,18 +1,13 @@
-"use client"
-
 import { useState, useEffect } from "react"
-import { StyleSheet, StatusBar, Platform, LogBox } from "react-native"
 import { NavigationContainer } from "@react-navigation/native"
-import { createStackNavigator } from "@react-navigation/stack"
+import { StyleSheet, StatusBar, Platform } from "react-native"
+import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context"
 import GlobalLoader from "./components/loader/GlobalLoader"
 import { LoadingProvider, useLoading } from "./components/context/LoadingContext"
 
-// @react-navigation/stack's Card still calls InteractionManager internally,
-// which React Native now flags as deprecated. It is a library-internal call
-// (not app code), so hide the warning until the library drops it.
-LogBox.ignoreLogs(["InteractionManager has been deprecated"])
+
 
 // Import screens
 import Splash from "./screens/Splash"
@@ -45,10 +40,10 @@ import PublicService from "./components/xplorescreens/PublicService"
 import { initializeAuth } from "./utils/persistAuth"
 import { setupNetworkListener } from "./utils/networkManager"
 
-const Stack           = createStackNavigator()
+const Stack           = createNativeStackNavigator()
 const Tab             = createBottomTabNavigator()
-const XploreStack     = createStackNavigator()
-const CommunityStack  = createStackNavigator()
+const XploreStack     = createNativeStackNavigator()
+const CommunityStack  = createNativeStackNavigator()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SafeScreen — wraps every screen and injects the correct top inset so content
