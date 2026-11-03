@@ -38,12 +38,13 @@ const cardShadow = {
   elevation: 3,
 }
 
+// Light shadow only: a heavy one shows through the translucent glass card
 const weatherShadow = {
   shadowColor: "#0E3441",
-  shadowOffset: { width: 0, height: 6 },
-  shadowOpacity: 0.22,
-  shadowRadius: 14,
-  elevation: 5,
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.08,
+  shadowRadius: 10,
+  elevation: 0,
 }
 
 // Maps each collection to a display label, icon, and nav destination
@@ -79,7 +80,7 @@ const FALLBACK_TOWNSHIPS = ["Dobsonville", "Emndeni", "Orlando", "Meadowlands", 
 // screen never looks empty (same approach as screens/News.js). Replace by adding
 // documents to Firestore — no code change needed.
 const buildFallbackStories = () => [
-  { id: "s1", title: "What's happening in Soweto today?",             category: "Local News", source: "Latest community headlines", publishedAt: dayjs().subtract(10, "minute").toISOString(), localImage: require("../assets/home/story-towers.jpg") },
+  { id: "s1", title: "What's happening in Soweto today?",             category: "Local News", source: "Latest community headlines", publishedAt: dayjs().subtract(10, "minute").toISOString(), localImage: require("../assets/home/news.png") },
   { id: "s2", title: "Youth development initiatives making a difference", category: "Community",  source: "Community update",        publishedAt: dayjs().subtract(25, "minute").toISOString() },
   { id: "s3", title: "Discover what's new in local business",         category: "Business",   source: "Business news",             publishedAt: dayjs().subtract(1, "hour").toISOString() },
 ]
@@ -118,14 +119,12 @@ const storyTagColor = (c = "") => STORY_TAG[c.toLowerCase()] || TEAL
 const STORY_ICON = { community: "people", business: "storefront", safety: "shield-checkmark", events: "calendar" }
 const storyIcon = (c = "") => STORY_ICON[c.toLowerCase()] || "newspaper"
 
-// Soft chips used on event rows
-const EVENT_TAG = {
-  "music & culture": { bg: "#E6F6EC", fg: "#1E8E4E", icon: "musical-notes" },
-  sports:            { bg: "#E3EEFF", fg: "#2563EB", icon: "football" },
-  community:         { bg: "#FFF1E8", fg: "#C74E06", icon: "people" },
-  business:          { bg: "#FFF1E8", fg: "#C74E06", icon: "storefront" },
+// Events may store their picture under a few different field names
+const eventImage = (e) => {
+  const url = e.imageUrl || e.image || e.photo || e.thumbnail || e.coverImage
+  return typeof url === "string" && url.trim() ? { uri: url.trim() } : null
 }
-const eventTag = (c = "") => EVENT_TAG[c.toLowerCase()] || { bg: "#E8F4F7", fg: TEAL, icon: "calendar" }
+const EVENT_FALLBACK_IMAGE = require("../assets/home/events.png")
 
 // Open-Meteo weather codes → label + icon kind
 const describeWeather = (code, isDay) => {
@@ -275,8 +274,13 @@ const WeatherStat = ({ icon, label, value }) => (
 const WEATHER_DIVIDER = { width: 1, height: 54, backgroundColor: "rgba(255,255,255,0.28)" }
 
 // Image that quietly falls back to a gradient + icon if it fails to load
-const CoverImage = ({ source, fallbackIcon = "image-outline", colors = ["#DCEBEF", "#EAF3F5"], style, iconSize = 24 }) => {
+const CoverImage = ({ source, fallbackSource, fallbackIcon = "image-outline", colors = ["#DCEBEF", "#EAF3F5"], style, iconSize = 24 }) => {
   const [failed, setFailed] = useState(false)
+  const [fallbackFailed, setFallbackFailed] = useState(false)
+  // Primary image missing or broken → show the bundled fallback image, if one was given
+  if ((!source || failed) && fallbackSource && !fallbackFailed) {
+    return <Image source={fallbackSource} style={style} resizeMode="cover" onError={() => setFallbackFailed(true)} />
+  }
   if (!source || failed) {
     return (
       <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[{ justifyContent: "center", alignItems: "center" }, style]}>
@@ -316,6 +320,7 @@ const Home = () => {
   const [dataLoading, setDataLoading]         = useState(true)
   const [screenData, setScreenData]           = useState(Dimensions.get("window"))
   const [storyIndex, setStoryIndex]           = useState(0)
+  const [eventIndex, setEventIndex]           = useState(0)
 
   // ── Weather state ──
   const [weather, setWeather] = useState({ status: "loading" })
@@ -554,10 +559,12 @@ const Home = () => {
 
   // ── Derived layout values ────────────────────────────────────────────────
   const screenW    = screenData.width
-  const HERO_H     = insets.top + 175                 // backdrop reaches into the top of the weather card
+  const HERO_H     = insets.top + 215                 // backdrop runs behind the whole (glass) weather card
   const HERO_SHIFT = Math.round(screenW * 0)         // nudge the artwork to the right
   const STORY_W    = Math.min(Math.round(screenW * 0.66), 270)
   const STORY_GAP  = 12
+  const EVENT_W    = screenW - PAD * 2               // one event card per screen
+  const EVENT_GAP  = 12
   const townshipsToShow = (townships.length > 0 ? townships : FALLBACK_TOWNSHIPS).slice(0, 6)
   const townshipW  = (screenW - PAD * 2 - 16) / 3
 
@@ -565,6 +572,12 @@ const Home = () => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / (STORY_W + STORY_GAP))
     const clamped = Math.max(0, Math.min(idx, stories.length - 1))
     if (clamped !== storyIndex) setStoryIndex(clamped)
+  }
+
+  const handleEventScroll = (e) => {
+    const idx = Math.round(e.nativeEvent.contentOffset.x / (EVENT_W + EVENT_GAP))
+    const clamped = Math.max(0, Math.min(idx, events.length - 1))
+    if (clamped !== eventIndex) setEventIndex(clamped)
   }
 
   const openTownship = (name) => {
@@ -589,7 +602,7 @@ const Home = () => {
             {/* fade the left so the greeting stays readable */}
             <LinearGradient colors={["rgba(250, 247, 242, 0.65)", "rgba(250,247,242,0.55)", "rgba(250,247,242,0)"]} locations={[0, 0.4, 0.75]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
             {/* fade the bottom into the page background */}
-            <LinearGradient colors={["rgba(250,247,242,0)", BG]} locations={[0.55, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+            <LinearGradient colors={["rgba(250,247,242,0)", BG]} locations={[0.7, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
           </View>
 
           {/* Greeting + bell */}
@@ -603,19 +616,26 @@ const Home = () => {
                 <Text className="text-[12px] text-ink font-medium ml-1">Soweto, Gauteng</Text>
               </View>
             </View>
-            <TouchableOpacity className="w-[42px] h-[42px] justify-center items-center rounded-[14px] bg-surface" style={cardShadow} activeOpacity={0.8}>
-              <Ionicons name="notifications-outline" size={21} color={TEAL} />
-              <View className="absolute top-2.5 right-[11px] w-2 h-2 rounded-full bg-brand border-[1.5px] border-surface" />
+            <TouchableOpacity className="w-[34px] h-[34px] justify-center items-center rounded-[12px] bg-surface" style={cardShadow} activeOpacity={0.8}>
+              <Ionicons name="notifications-outline" size={16} color={TEAL} />
+              <View className="absolute top-[7px] right-[8px] w-[7px] h-[7px] rounded-full bg-brand border-[1.5px] border-surface" />
             </TouchableOpacity>
           </View>
 
           {/* ── Weather card ── */}
           <View style={{ paddingHorizontal: PAD, marginTop: 14 }}>
             <LinearGradient
-              colors={["rgba(36,96,112,0.94)", "rgba(20,64,80,0.96)"]}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-              style={[{ borderRadius: 24, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.22)", minHeight: 92, justifyContent: "center" }, weatherShadow]}
+              colors={["rgba(70,138,152,0.42)", "rgba(34,96,112,0.66)", "rgba(22,72,88,0.78)"]}
+              locations={[0, 0.45, 1]}
+              start={{ x: 0, y: 0.2 }} end={{ x: 1, y: 0.8 }}
+              style={[{ borderRadius: 24, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.30)", minHeight: 92, justifyContent: "center" }, weatherShadow]}
             >
+              <LinearGradient
+                pointerEvents="none"
+                colors={["rgba(255,255,255,0.22)", "rgba(255,255,255,0)"]}
+                locations={[0, 0.6]}
+                style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 24 }}
+              />
               {weather.status === "ready" ? (
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <WeatherIcon kind={weather.kind} />
@@ -665,7 +685,7 @@ const Home = () => {
         </View>
 
         {/* ── Quick Access ── */}
-        <View className="px-[16px] mb-6">
+        <View className="px-[16px] mb-6" style={{ marginTop: 24 }}>
           <View className="flex-row items-center justify-between mb-3">
             <Text className="text-[11px] font-extrabold text-[#12495C] tracking-[1.4px] uppercase">Quick Access</Text>
             <TouchableOpacity className="flex-row items-center gap-0.5" onPress={() => goXploreItem("XploreMain")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -695,41 +715,78 @@ const Home = () => {
         {events.length > 0 && (
           <View className="px-[16px] mb-4">
             <SectionHeader title="Upcoming Events" icon="calendar-outline" onSeeAll={() => goCommunity()} />
-            {events.map((e) => {
-              const tag  = eventTag(e.category)
-              const d    = dayjs(e._date)
-              const time = e.time || ((d.hour() || d.minute()) ? d.format("HH:mm") : null)
-              return (
-                <TouchableOpacity key={e.id} activeOpacity={0.85} onPress={() => goCommunity()}
-                  className="flex-row items-center bg-surface rounded-2xl p-1.5 mb-2.5 gap-2.5" style={cardShadow}>
-                  <CoverImage
-                    source={e.imageUrl ? { uri: e.imageUrl } : null}
-                    fallbackIcon={tag.icon}
-                    colors={[tag.bg, "#FFFFFF"]}
-                    style={{ width: 70, height: 60, borderRadius: 12 }}
-                  />
-                  <View className="w-[38px] h-[46px] rounded-[10px] bg-teal-light justify-center items-center">
-                    <Text className="text-[16px] font-extrabold text-[#12495C]" style={{ lineHeight: 18 }}>{d.format("D")}</Text>
-                    <Text className="text-[9.5px] font-bold text-[#12495C] uppercase">{d.format("MMM")}</Text>
-                  </View>
-                  <View className="flex-1">
-                    {e.category ? (
-                      <View className="self-start px-1.5 py-px rounded-full mb-0.5" style={{ backgroundColor: tag.bg }}>
-                        <Text className="text-[8.5px] font-extrabold uppercase tracking-[0.4px]" style={{ color: tag.fg }}>{e.category}</Text>
+            <FlatList
+              data={events}
+              horizontal
+              keyExtractor={(item) => String(item.id)}
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={EVENT_W + EVENT_GAP}
+              snapToAlignment="start"
+              decelerationRate="fast"
+              contentContainerStyle={{ paddingBottom: 6 }}
+              onScroll={handleEventScroll}
+              scrollEventThrottle={32}
+              renderItem={({ item: e }) => {
+                const d    = dayjs(e._date)
+                const time = e.time || ((d.hour() || d.minute()) ? d.format("HH:mm") : null)
+                return (
+                  <TouchableOpacity activeOpacity={0.9} onPress={() => goCommunity()}
+                    style={[{ width: EVENT_W, height: 96, borderRadius: 18, backgroundColor: "#fff", marginRight: EVENT_GAP }, cardShadow]}>
+                    <View style={{ flex: 1, borderRadius: 18, overflow: "hidden" }}>
+                      {/* Event photo, full bleed (Soweto1.png when the event has none) */}
+                      <CoverImage
+                        source={eventImage(e)}
+                        fallbackSource={EVENT_FALLBACK_IMAGE}
+                        fallbackIcon="calendar"
+                        iconSize={26}
+                        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" }}
+                      />
+                      {/* White fade from the left so the text stays readable over the photo */}
+                      <LinearGradient
+                        pointerEvents="none"
+                        colors={["rgba(255,255,255,0.97)", "rgba(255,255,255,0.88)", "rgba(255,255,255,0.35)", "rgba(255,255,255,0)"]}
+                        locations={[0, 0.4, 0.68, 0.92]}
+                        start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
+                        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+                      />
+                      <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 9, justifyContent: "space-between" }}>
+                        <View style={{ width: "68%" }}>
+                          <View style={{ alignSelf: "flex-start", backgroundColor: BRAND, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 }}>
+                            <Text className="text-[9px] font-extrabold text-white uppercase tracking-[0.5px]" numberOfLines={1}>{e.category || "Event"}</Text>
+                          </View>
+                          <Text className="text-[14px] font-extrabold text-ink -tracking-[0.2px] mt-1" numberOfLines={1}>{e.title || e.name}</Text>
+                        </View>
+                        <View style={{ width: "72%" }}>
+                          <View className="flex-row items-center">
+                            <Ionicons name="calendar-outline" size={12} color={TEAL} />
+                            <Text className="text-[11px] font-semibold text-ink ml-1.5" numberOfLines={1}>
+                              {[d.format("D MMM"), time].filter(Boolean).join("  •  ")}
+                            </Text>
+                          </View>
+                          {e.location ? (
+                            <View className="flex-row items-center mt-0.5">
+                              <Ionicons name="location-outline" size={12} color={TEAL} />
+                              <Text className="text-[11px] font-semibold text-ink ml-1.5" numberOfLines={1}>{e.location}</Text>
+                            </View>
+                          ) : null}
+                        </View>
                       </View>
-                    ) : null}
-                    <Text className="text-[13px] font-extrabold text-ink -tracking-[0.2px]" numberOfLines={1}>{e.title || e.name}</Text>
-                    <View className="flex-row items-center mt-1">
-                      <Ionicons name="location-outline" size={11} color={TEAL} />
-                      <Text className="text-[11px] text-muted ml-1 flex-1" numberOfLines={1}>
-                        {[time, e.location].filter(Boolean).join("  ·  ")}
-                      </Text>
+                      {/* Arrow button */}
+                      <View style={{ position: "absolute", right: 10, bottom: 10, width: 28, height: 28, borderRadius: 14, backgroundColor: "#FFFFFF", justifyContent: "center", alignItems: "center", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 3 }}>
+                        <Ionicons name="arrow-forward" size={15} color={BRAND} />
+                      </View>
                     </View>
-                  </View>
-                  <Ionicons name="chevron-forward" size={15} color="#9AA9AE" style={{ marginRight: 4 }} />
-                </TouchableOpacity>
-              )
-            })}
+                  </TouchableOpacity>
+                )
+              }}
+            />
+            {events.length > 1 && (
+              <View className="flex-row justify-center items-center gap-1.5 mt-2">
+                {events.map((ev, i) => (
+                  <View key={ev.id} style={{ width: i === eventIndex ? 14 : 6, height: 6, borderRadius: 3, backgroundColor: i === eventIndex ? TEAL : "#D5D9D9" }} />
+                ))}
+              </View>
+            )}
           </View>
         )}
 
