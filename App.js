@@ -75,15 +75,15 @@ const SafeScreen = ({ children, style }) => {
 const XploreStackNavigator = () => (
   <XploreStack.Navigator screenOptions={{ headerShown: false }}>
     <XploreStack.Screen name="XploreMain"    component={XploreWithHeader}       />
-    <XploreStack.Screen name="Accommodation" component={AccommodationWithHeader} />
+    <XploreStack.Screen name="Accommodation" component={AccommodationWithoutHeader} />
     <XploreStack.Screen name="Restaurants"   component={RestaurantsWithoutHeader} />
     <XploreStack.Screen name="Emergency"     component={EmergencyWithHeader}     />
-    <XploreStack.Screen name="Recreation"    component={RecreationWithHeader}    />
-    <XploreStack.Screen name="Attraction"    component={AttractionWithHeader}    />
+    <XploreStack.Screen name="Recreation"    component={RecreationWithoutHeader}    />
+    <XploreStack.Screen name="Attraction"    component={AttractionWithoutHeader}    />
     <XploreStack.Screen name="Transport"     component={TransportWithHeader}     />
-    <XploreStack.Screen name="Business"      component={BusinessWithHeader}      />
-    <XploreStack.Screen name="Healthcare"    component={HealthcareWithHeader}    />
-    <XploreStack.Screen name="PublicService" component={PublicServiceWithHeader} />
+    <XploreStack.Screen name="Business"      component={BusinessWithoutHeader}      />
+    <XploreStack.Screen name="Healthcare"    component={HealthcareWithoutHeader}    />
+    <XploreStack.Screen name="PublicService" component={PublicServiceWithoutHeader} />
   </XploreStack.Navigator>
 )
 
@@ -147,15 +147,15 @@ const PoIstWithHeader = () => (
   </SafeScreen>
 )
 
-const AccommodationWithHeader = () => (
-  <SafeScreen>
-    <Header title="Accommodation" />
+const AccommodationWithoutHeader = () => (
+  <SafeScreen style={{ paddingTop: 0 }}>
     <Accommodation />
   </SafeScreen>
 )
 
-// Restaurants draws its own hero (with back / search / bell buttons) edge-to-edge
-// under the status bar, so no Header component and no SafeScreen top padding.
+// Restaurants, Accommodation, Recreation, Attraction, Business, Healthcare and
+// PublicService draw their own hero (back / bell buttons) edge-to-edge under the
+// status bar, so they get no Header component and no SafeScreen top padding.
 const RestaurantsWithoutHeader = () => (
   <SafeScreen style={{ paddingTop: 0 }}>
     <Restaurants />
@@ -169,16 +169,14 @@ const EmergencyWithHeader = () => (
   </SafeScreen>
 )
 
-const RecreationWithHeader = () => (
-  <SafeScreen>
-    <Header title="Recreation" />
+const RecreationWithoutHeader = () => (
+  <SafeScreen style={{ paddingTop: 0 }}>
     <Recreation />
   </SafeScreen>
 )
 
-const AttractionWithHeader = () => (
-  <SafeScreen>
-    <Header title="Attraction" />
+const AttractionWithoutHeader = () => (
+  <SafeScreen style={{ paddingTop: 0 }}>
     <Attraction />
   </SafeScreen>
 )
@@ -190,23 +188,20 @@ const TransportWithHeader = () => (
   </SafeScreen>
 )
 
-const BusinessWithHeader = () => (
-  <SafeScreen>
-    <Header title="Business" />
+const BusinessWithoutHeader = () => (
+  <SafeScreen style={{ paddingTop: 0 }}>
     <Business />
   </SafeScreen>
 )
 
-const HealthcareWithHeader = () => (
-  <SafeScreen>
-    <Header title="Healthcare" />
+const HealthcareWithoutHeader = () => (
+  <SafeScreen style={{ paddingTop: 0 }}>
     <Healthcare />
   </SafeScreen>
 )
 
-const PublicServiceWithHeader = () => (
-  <SafeScreen>
-    <Header title="Public Service" />
+const PublicServiceWithoutHeader = () => (
+  <SafeScreen style={{ paddingTop: 0 }}>
     <PublicService />
   </SafeScreen>
 )

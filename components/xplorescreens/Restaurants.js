@@ -25,6 +25,15 @@ const MUTED = "#7A8A8F"
 const STAR  = "#F5A524"
 const ALL   = "__all__" // "See All" — no category filter
 
+// Rotating tile colours used by the detail modal (tags, dishes)
+const TILE_THEMES = [
+  { bgClass: "bg-teal-light",    hex: "#1B4D5C" },
+  { bgClass: "bg-brand-light",   hex: "#E8600A" },
+  { bgClass: "bg-success-light", hex: "#22C55E" },
+  { bgClass: "bg-warning-light", hex: "#F59E0B" },
+  { bgClass: "bg-danger-light",  hex: "#EF4444" },
+]
+
 // Badge rules. Everything is derived from the restaurant's own Firestore data.
 const TOP_RATED_MIN_RATING  = 4.7
 const TOP_RATED_MIN_REVIEWS = 10
@@ -33,7 +42,7 @@ const POPULAR_MIN_REVIEWS   = 200
 // Hero artwork (already used on Home) — 1042 × 316
 const HERO_IMAGE  = require("../../assets/home/hero-towers.png")
 const HERO_RATIO  = 1042 / 316
-const HERO_BODY_H = 150 // hero height below the status bar
+const HERO_BODY_H = 172 // hero height below the status bar
 
 const cardShadow = {
   shadowColor: "#14213D",
@@ -547,15 +556,6 @@ const Restaurants = () => {
       >
         {restaurantTypes.map((type) => {
           const isActive = activeTab === type && !query
-          const content = (
-            <>
-              <MaterialCommunityIcons name={typeIcon(type)} size={19} color={isActive ? "#FFFFFF" : TEAL} />
-              <Text className={`text-[10px] font-bold mt-0.5 ${isActive ? "text-white" : "text-ink"}`} numberOfLines={1}>
-                {type}
-              </Text>
-              {isActive && <View className="bg-brand rounded-full mt-0.5" style={{ width: 20, height: 2 }} />}
-            </>
-          )
           return (
             <TouchableOpacity
               key={type}
@@ -563,22 +563,15 @@ const Restaurants = () => {
               activeOpacity={0.85}
               onPress={() => { setQuery(""); setActiveTab(type) }}
             >
-              {isActive ? (
-                <LinearGradient
-                  colors={["#236477", "#123F4D"]}
-                  start={{ x: 0.1, y: 0 }}
-                  end={{ x: 0.9, y: 1 }}
-                  style={[{ minWidth: 40, height: 50, borderRadius: 50, paddingHorizontal: 9, alignItems: "center", justifyContent: "center" }, softShadow]}
-                >
-                  {content}
-                </LinearGradient>
-              ) : (
-                <View
-                  style={{ minWidth: 40, height: 50, borderRadius: 50, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", backgroundColor: "#f1ede62b" }}
-                >
-                  {content}
-                </View>
-              )}
+              <View
+                style={{ minWidth: 40, height: 50, borderRadius: 50, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", backgroundColor: "#f1ede62b" }}
+              >
+                <MaterialCommunityIcons name={typeIcon(type)} size={19} color={TEAL} />
+                <Text className={`text-[10px] mt-0.5 ${isActive ? "font-extrabold text-ink" : "font-bold text-muted"}`} numberOfLines={1}>
+                  {type}
+                </Text>
+                <View className={`rounded-full mt-0.5 ${isActive ? "bg-brand" : "bg-transparent"}`} style={{ width: 20, height: 2 }} />
+              </View>
             </TouchableOpacity>
           )
         })}
