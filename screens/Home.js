@@ -14,6 +14,7 @@ import { doc, getDoc, collection, getDocs } from "firebase/firestore"
 import { auth, db } from "../Firebase/config"
 import { useNavigation, CommonActions } from "@react-navigation/native"
 import { useOfflineData } from "../hooks/useOfflineData"
+import TownshipSheet from "../components/township/TownshipSheet"
 
 dayjs.extend(relativeTime)
 
@@ -49,7 +50,7 @@ const cardShadow = {
 //   WEATHER_GLOSS      – glassy highlight laid over the top of the card
 //   weatherShadow      – coloured glow under the card (raise shadowOpacity for more)
 // ═════════════════════════════════════════════════════════════════════════════
-const WEATHER_GRADIENT = ["rgba(3, 58, 67, 0.79)", "rgba(3, 54, 80, 0.83)", "rgba(9, 23, 51, 0.74)"]
+const WEATHER_GRADIENT = ["rgba(0,160,190,0.92)", "rgba(10,110,160,0.95)", "rgba(20,60,140,0.97)"]
 const WEATHER_GRADIENT_LOCATIONS = [0, 0.5, 1]
 const WEATHER_BORDER = "rgba(255,255,255,0.45)"
 const WEATHER_GLOSS = ["rgba(255,255,255,0.30)", "rgba(255,255,255,0)"]
@@ -331,6 +332,8 @@ const Home = () => {
   const [loading, setLoading]                 = useState(true)
   const [featuredImage, setFeaturedImage]     = useState(null)
   const [townships, setTownships]             = useState([])
+  const [activeTownship, setActiveTownship]   = useState(null)   // township info sheet
+  const [activeTownshipIdx, setActiveTownshipIdx] = useState(0)
   const [dataLoading, setDataLoading]         = useState(true)
   const [screenData, setScreenData]           = useState(Dimensions.get("window"))
   const [storyIndex, setStoryIndex]           = useState(0)
@@ -448,7 +451,7 @@ const Home = () => {
       setTownships(townshipsData)
     } catch {
       setFeaturedImage({ imageUrl: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=800&h=600&fit=crop", title: "The Ultimate Guide to Soweto" })
-      setTownships(FALLBACK_TOWNSHIPS)
+      setTownships(FALLBACK_TOWNSHIPS.map((name) => ({ id: name, name })))
     } finally { setDataLoading(false) }
   }
 
@@ -579,7 +582,7 @@ const Home = () => {
   const STORY_GAP  = 12
   const EVENT_W    = screenW - PAD * 2               // one event card per screen
   const EVENT_GAP  = 12
-  const townshipsToShow = (townships.length > 0 ? townships : FALLBACK_TOWNSHIPS).slice(0, 6)
+  const townshipsToShow = (townships.length > 0 ? townships : FALLBACK_TOWNSHIPS.map((name) => ({ id: name, name }))).slice(0, 6)
   const townshipW  = (screenW - PAD * 2 - 16) / 3
 
   const handleStoryScroll = (e) => {
@@ -904,8 +907,8 @@ const Home = () => {
               ? Array.from({ length: 6 }).map((_, i) => (
                   <View key={i} className="h-[38px] rounded-xl bg-[#EDE8E2]" style={{ width: townshipW }} />
                 ))
-              : townshipsToShow.map((t) => (
-                  <TouchableOpacity key={t.id} activeOpacity={0.85} onPress={() => openTownship(t.name)}
+              : townshipsToShow.map((t, i) => (
+                  <TouchableOpacity key={t.id} activeOpacity={0.85} onPress={() => { setActiveTownshipIdx(i); setActiveTownship(t) }}
                     className="h-[38px] rounded-xl bg-surface flex-row items-center px-2 border border-line"
                     style={{ width: townshipW }}>
                     <Ionicons name="location" size={13} color={TEAL} />
@@ -917,9 +920,18 @@ const Home = () => {
         </View>
       </ScrollView>
 
+      {/* ── Township info (history, local legends, landmarks) ── */}
+      <TownshipSheet
+        visible={!!activeTownship}
+        township={activeTownship}
+        index={activeTownshipIdx}
+        onClose={() => setActiveTownship(null)}
+        onExplore={(name) => { setActiveTownship(null); setTimeout(() => openTownship(name), 350) }}
+      />
+
       {/* ── Search Modal ── */}
       <Modal visible={searchVisible} animationType="slide" transparent={false} onRequestClose={closeSearch}>
-        <View className="flex-1 pt-[50px]">
+        <View className="flex-1 bg-bg pt-[50px]">
 
           {/* Modal header */}
           <View className="flex-row items-center px-4 pb-3.5 gap-2.5">
