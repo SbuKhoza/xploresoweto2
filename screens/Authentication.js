@@ -1,5 +1,6 @@
 "use client"
 
+import GlossyBackground from "../components/GlossyBackground"
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
   Alert, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -20,7 +21,7 @@ WebBrowser.maybeCompleteAuthSession()
 // ── Design tokens — matches Home.js palette ──────────────────────────────────
 const ACCENT    = "#1B4D5C"   // Deep teal
 const HIGHLIGHT = "#E8600A"   // Vibrant orange
-const BG        = "#FDF8F3"   // Warm off-white
+const BG        = "#F5F7FA"   // Glossy blue-white
 const SURFACE   = "#FFFFFF"
 const MUTED     = "#7A8A8F"
 const HERO_BG   = "#E8F4F7"  // Light teal
@@ -394,6 +395,7 @@ const Authentication = ({ navigation }) => {
   // ── Root render ────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+      <GlossyBackground />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
 

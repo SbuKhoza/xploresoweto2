@@ -64,7 +64,7 @@ export const Hero = ({ title, subtitle }) => {
         resizeMode="cover"
       />
       <LinearGradient
-        colors={["rgba(250,247,242,0.96)", "rgba(250,247,242,0.82)", "rgba(250,247,242,0)"]}
+        colors={["rgba(245,247,250,0.96)", "rgba(245,247,250,0.82)", "rgba(245,247,250,0)"]}
         locations={[0, 0.42, 0.78]}
         start={{ x: 0, y: 0.4 }}
         end={{ x: 1, y: 0.6 }}

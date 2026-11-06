@@ -23,7 +23,7 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get("window")
 // ── Design tokens ────────────────────────────────────────────────────────────
 const ACCENT    = "#1A1A2E"
 const HIGHLIGHT = "#E94560"
-const BG        = "#F4F6FB"
+const BG        = "#F5F7FA"
 const SURFACE   = "#FFFFFF"
 const MISSING   = "#E94560"   // red-pink — urgent
 const WANTED    = "#F59E0B"   // amber — caution
@@ -499,7 +499,7 @@ const PersonOfInterest = () => {
 }
 
 const styles = StyleSheet.create({
-  container: { flex:1, backgroundColor:BG },
+  container: { flex:1, backgroundColor:"transparent" },
 
   stateScreen: { flex:1, justifyContent:"center", alignItems:"center", padding:40 },
   stateIconWrap: { width:80, height:80, borderRadius:24, backgroundColor:"#EEF2FF", justifyContent:"center", alignItems:"center", marginBottom:16 },
@@ -529,7 +529,7 @@ const styles = StyleSheet.create({
   postImagesScroll: { marginBottom:14 },
   postImg: { width:130, height:130, borderRadius:14, marginRight:10 },
   detailsGrid: { flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:12 },
-  detailChip: { backgroundColor:BG, paddingHorizontal:12, paddingVertical:8, borderRadius:12 },
+  detailChip: { backgroundColor:"#ECEFF4", paddingHorizontal:12, paddingVertical:8, borderRadius:12 },
   detailChipLabel: { fontSize:10, fontWeight:"700", color:"#AAA", textTransform:"uppercase", letterSpacing:0.5, marginBottom:2 },
   detailChipValue: { fontSize:13, fontWeight:"600", color:ACCENT },
   postDescription: { fontSize:14, color:"#555", lineHeight:21, marginBottom:14 },
@@ -562,7 +562,7 @@ const styles = StyleSheet.create({
   // Sheet
   sheetContainer: { flex:1, backgroundColor:BG },
   sheetHeader: { flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:20, paddingVertical:16, backgroundColor:SURFACE, borderBottomWidth:1, borderBottomColor:"#F0F0F0" },
-  sheetCloseBtn: { width:38, height:38, borderRadius:12, backgroundColor:BG, justifyContent:"center", alignItems:"center" },
+  sheetCloseBtn: { width:38, height:38, borderRadius:12, backgroundColor:"#ECEFF4", justifyContent:"center", alignItems:"center" },
   sheetTitle: { fontSize:17, fontWeight:"800", color:ACCENT },
   sheetSaveBtn: { backgroundColor:HIGHLIGHT, paddingHorizontal:16, paddingVertical:8, borderRadius:12 },
   sheetSaveText: { color:"#FFF", fontSize:14, fontWeight:"700" },
@@ -579,7 +579,7 @@ const styles = StyleSheet.create({
   addComment: { backgroundColor:SURFACE, padding:16, borderTopWidth:1, borderTopColor:"#F0F0F0" },
   commentInput: { borderWidth:1.5, borderColor:"#E8ECF4", borderRadius:12, paddingHorizontal:14, paddingVertical:10, fontSize:14, color:ACCENT, maxHeight:80, marginBottom:10 },
   commentActions: { flexDirection:"row", justifyContent:"space-between", alignItems:"center" },
-  commentPhotoBtn: { width:42, height:42, borderRadius:12, backgroundColor:BG, justifyContent:"center", alignItems:"center" },
+  commentPhotoBtn: { width:42, height:42, borderRadius:12, backgroundColor:"#ECEFF4", justifyContent:"center", alignItems:"center" },
   commentSendBtn: { flexDirection:"row", alignItems:"center", gap:6, backgroundColor:ACCENT, borderRadius:12, paddingHorizontal:18, paddingVertical:10 },
   commentSendText: { color:"#FFF", fontSize:14, fontWeight:"700" },
 

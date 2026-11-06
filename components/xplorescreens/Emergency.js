@@ -13,7 +13,7 @@ import OfflineIndicator from "../OfflineIndicator"
 // ── Design tokens ────────────────────────────────────────────────────────────
 const ACCENT    = "#1A1A2E"
 const HIGHLIGHT = "#E94560"
-const BG        = "#F4F6FB"
+const BG        = "#F5F7FA"
 const SURFACE   = "#FFFFFF"
 const SUCCESS   = "#22C55E"
 const WARNING   = "#F59E0B"
@@ -292,10 +292,10 @@ const Emergency = () => {
 }
 
 const styles = StyleSheet.create({
-  container: { flex:1, backgroundColor:BG },
+  container: { flex:1, backgroundColor:"transparent" },
 
   // State screens
-  stateScreen: { flex:1, backgroundColor:BG, justifyContent:"center", alignItems:"center", paddingHorizontal:40 },
+  stateScreen: { flex:1, backgroundColor:"transparent", justifyContent:"center", alignItems:"center", paddingHorizontal:40 },
   stateIconWrap: { width:80, height:80, borderRadius:24, backgroundColor:"#EEF2FF", justifyContent:"center", alignItems:"center", marginBottom:16 },
   stateText: { fontSize:18, fontWeight:"700", color:ACCENT, marginTop:10, textAlign:"center" },
   stateSubText: { fontSize:14, color:"#999", textAlign:"center", marginTop:6, marginBottom:20 },
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   cardNumber: { fontSize:14, color:HIGHLIGHT, fontWeight:"700" },
   categoryChip: { alignSelf:"flex-start", paddingHorizontal:10, paddingVertical:3, borderRadius:20, marginTop:2 },
   categoryChipText: { fontSize:10, fontWeight:"700", color:ACCENT, textTransform:"uppercase", letterSpacing:0.5 },
-  chevronWrap: { width:30, height:30, borderRadius:10, backgroundColor:"#F4F6FB", justifyContent:"center", alignItems:"center" },
+  chevronWrap: { width:30, height:30, borderRadius:10, backgroundColor:"#ECEFF4", justifyContent:"center", alignItems:"center" },
   chevronWrapActive: { backgroundColor:"#FFF0F3" },
 
   // Expanded details
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
   detailRow: { gap:3 },
   detailLabel: { fontSize:11, fontWeight:"800", color:"#AAA", textTransform:"uppercase", letterSpacing:0.6 },
   detailText: { fontSize:14, color:"#555", lineHeight:21 },
-  offlineChip: { flexDirection:"row", alignItems:"center", gap:5, backgroundColor:"#F4F6FB", paddingHorizontal:10, paddingVertical:6, borderRadius:10, alignSelf:"flex-start" },
+  offlineChip: { flexDirection:"row", alignItems:"center", gap:5, backgroundColor:"#ECEFF4", paddingHorizontal:10, paddingVertical:6, borderRadius:10, alignSelf:"flex-start" },
   offlineChipText: { fontSize:12, color:"#888", fontWeight:"500" },
 
   // Call CTA
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
   emptySubText: { fontSize:13, color:"#999", marginTop:6, textAlign:"center" },
 
   // Last updated
-  lastUpdated: { flexDirection:"row", alignItems:"center", justifyContent:"center", gap:4, paddingVertical:8, backgroundColor:BG },
+  lastUpdated: { flexDirection:"row", alignItems:"center", justifyContent:"center", gap:4, paddingVertical:8, backgroundColor:"#ECEFF4" },
   lastUpdatedText: { fontSize:12, color:"#BBB" },
 })
 

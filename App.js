@@ -4,6 +4,7 @@ import { StyleSheet, StatusBar, Platform } from "react-native"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context"
+import GlossyBackground from "./components/GlossyBackground"
 import GlobalLoader from "./components/loader/GlobalLoader"
 import { LoadingProvider, useLoading } from "./components/context/LoadingContext"
 
@@ -66,6 +67,7 @@ const SafeScreen = ({ children, style }) => {
         style,
       ]}
     >
+      <GlossyBackground />
       {children}
     </ScrollTrackingView>
   )
@@ -267,10 +269,10 @@ export default function App() {
 const styles = StyleSheet.create({
   safeAreaProvider: {
     flex: 1,
-    backgroundColor: "#F4F6FB",
+    backgroundColor: "#F5F7FA",
   },
   screenContainer: {
     flex: 1,
-    backgroundColor: "#F4F6FB",
+    backgroundColor: "#F5F7FA",
   },
 })

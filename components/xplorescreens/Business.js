@@ -27,7 +27,7 @@ const { width } = Dimensions.get("window")
 // ── Design tokens (same palette as the rest of Xplore) ──────────────────────
 const ACCENT    = INK
 const HIGHLIGHT = BRAND
-const BG        = "#FAF7F2"
+const BG        = "#F5F7FA"
 const SURFACE   = "#FFFFFF"
 const SUCCESS   = "#22C55E"
 
@@ -525,7 +525,7 @@ const Business = () => {
   if (dataLoading || authLoading) {
     if (!(refreshing && businesses.length)) {
       return (
-        <View className="flex-1 bg-bg">
+        <View className="flex-1">
           <Hero title="Business" subtitle={"Local\ndirectory"} />
           <View className="items-center mt-16">
             <ActivityIndicator size="large" color={BRAND} />
@@ -538,7 +538,7 @@ const Business = () => {
 
   if (businesses.length === 0) {
     return (
-      <View className="flex-1 bg-bg">
+      <View className="flex-1">
         <Hero title="Business" subtitle={"Local\ndirectory"} />
         <EmptyState icon="storefront" title="No businesses available" message="Please check back soon" />
       </View>
@@ -615,7 +615,7 @@ const Business = () => {
 
   // ── Main render ──────────────────────────────────────────────────────────
   return (
-    <View className="flex-1 bg-bg">
+    <View className="flex-1">
       <OfflineIndicator />
 
       <AnimatedFlatList
@@ -764,7 +764,7 @@ const Business = () => {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+  container: { flex: 1, backgroundColor: "transparent" },
 
   // State screens
 
@@ -799,10 +799,10 @@ const styles = StyleSheet.create({
   // Modal
   modalContainer: { flex: 1, backgroundColor: BG },
   modalHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, backgroundColor: SURFACE, borderBottomWidth: 1, borderBottomColor: "#ECE6DD" },
-  modalCloseBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: "#FAF7F2", justifyContent: "center", alignItems: "center" },
+  modalCloseBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: "#ECEFF4", justifyContent: "center", alignItems: "center" },
   modalHeaderTitle: { fontSize: 15, fontWeight: "800", color: ACCENT },
   modalHeaderSub: { fontSize: 11, color: "#7A8A8F", marginTop: 1 },
-  modalFavBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: "#FAF7F2", justifyContent: "center", alignItems: "center" },
+  modalFavBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: "#ECEFF4", justifyContent: "center", alignItems: "center" },
 
   // Detail tabs (inside modal)
   detailTabBar: { flexDirection: "row", backgroundColor: SURFACE, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#ECE6DD" },
@@ -841,7 +841,7 @@ const styles = StyleSheet.create({
   reviewsHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 22, paddingVertical: 18, backgroundColor: SURFACE, borderBottomWidth: 1, borderBottomColor: "#ECE6DD" },
   reviewsTitle: { fontSize: 18, fontWeight: "800", color: ACCENT },
   reviewsSubtitle: { fontSize: 12, color: "#7A8A8F", marginTop: 2 },
-  reviewsCloseBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#FAF7F2", justifyContent: "center", alignItems: "center" },
+  reviewsCloseBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#ECEFF4", justifyContent: "center", alignItems: "center" },
   ratingBanner: { flexDirection: "row", alignItems: "center", gap: 16, backgroundColor: SURFACE, borderRadius: 18, padding: 18, marginBottom: 16, shadowColor: ACCENT, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 1 },
   ratingBannerScore: { fontSize: 36, fontWeight: "800", color: ACCENT },
   ratingBannerCount: { fontSize: 12, color: "#AAA", marginTop: 4 },
@@ -852,7 +852,7 @@ const styles = StyleSheet.create({
   reviewForm: { backgroundColor: SURFACE, borderRadius: 18, padding: 18, marginBottom: 16 },
   formTitle: { fontSize: 17, fontWeight: "800", color: ACCENT, marginBottom: 16 },
   formLabel: { fontSize: 12, fontWeight: "700", color: "#AAA", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6, marginTop: 12 },
-  formInput: { borderWidth: 1.5, borderColor: "#ECE6DD", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: ACCENT, backgroundColor: BG },
+  formInput: { borderWidth: 1.5, borderColor: "#ECE6DD", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: ACCENT, backgroundColor: "#ECEFF4" },
   formTextArea: { height: 100, textAlignVertical: "top" },
   ratingSelector: { flexDirection: "row", marginTop: 4 },
   submitBtn: { backgroundColor: HIGHLIGHT, paddingVertical: 14, borderRadius: 14, alignItems: "center", marginTop: 16 },

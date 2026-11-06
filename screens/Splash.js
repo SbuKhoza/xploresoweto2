@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View, Image, TouchableOpacity, StatusBar, useWindowDimensions } from 'react-native';
+import GlossyBackground from '../components/GlossyBackground';
 import React, { useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -33,7 +34,8 @@ const Splash = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F6F6F6" />
+      <GlossyBackground />
+      <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
 
       {/* Logo/Brand Section */}
       <View style={[styles.logoSection, isTablet && styles.tabletLogoSection]}>
@@ -122,7 +124,7 @@ export default Splash;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F6F6F6',
+    backgroundColor: '#F5F7FA',
   },
   logoSection: {
     alignItems: 'center',

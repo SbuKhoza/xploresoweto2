@@ -20,7 +20,7 @@ dayjs.extend(relativeTime)
 // ── Design tokens (mirror tailwind.config.js) ───────────────────────────────
 const TEAL   = "#1B4D5C"
 const BRAND  = "#E8600A"
-const BG     = "#FAF7F2"
+const BG     = "#F5F7FA"
 const MUTED  = "#7A8A8F"
 
 // Horizontal page margin shared by every section on Home
@@ -31,20 +31,34 @@ const SOWETO = { latitude: -26.2485, longitude: 27.854 }
 
 // Soft card shadow shared by every card on the screen
 const cardShadow = {
-  shadowColor: TEAL,
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.08,
-  shadowRadius: 12,
-  elevation: 3,
+  shadowColor: "#2B5FA8",
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.16,
+  shadowRadius: 16,
+  elevation: 5,
 }
 
-// Light shadow only: a heavy one shows through the translucent glass card
+// ═════════════════════════════════════════════════════════════════════════════
+// ★ WEATHER WIDGET — PLAY WITH THESE ★
+// The weather card on Home (search for "WEATHER CARD" further down) reads all
+// of its colours from this block.
+//   WEATHER_GRADIENT   – card colours, top-left → bottom-right. The last number
+//                        in each rgba() is opacity: 1 = solid, lower = see-through.
+//   WEATHER_GRADIENT_LOCATIONS – where each colour sits (0 = start, 1 = end)
+//   WEATHER_BORDER     – outline of the card
+//   WEATHER_GLOSS      – glassy highlight laid over the top of the card
+//   weatherShadow      – coloured glow under the card (raise shadowOpacity for more)
+// ═════════════════════════════════════════════════════════════════════════════
+const WEATHER_GRADIENT = ["rgba(3, 58, 67, 0.79)", "rgba(3, 54, 80, 0.83)", "rgba(9, 23, 51, 0.74)"]
+const WEATHER_GRADIENT_LOCATIONS = [0, 0.5, 1]
+const WEATHER_BORDER = "rgba(255,255,255,0.45)"
+const WEATHER_GLOSS = ["rgba(255,255,255,0.30)", "rgba(255,255,255,0)"]
 const weatherShadow = {
-  shadowColor: "#0E3441",
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.08,
-  shadowRadius: 10,
-  elevation: 0,
+  shadowColor: "#0A6EA0",
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.35,
+  shadowRadius: 14,
+  elevation: 6,
 }
 
 // Maps each collection to a display label, icon, and nav destination
@@ -588,7 +602,7 @@ const Home = () => {
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <>
-      <ScrollView className="flex-1 bg-bg" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+      <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
 
         {/* ── Hero: Orlando Towers backdrop, greeting, weather, search ── */}
         <View style={{ paddingTop: insets.top + 10 }}>
@@ -600,9 +614,9 @@ const Home = () => {
               resizeMode="cover"
             />
             {/* fade the left so the greeting stays readable */}
-            <LinearGradient colors={["rgba(250, 247, 242, 0.65)", "rgba(250,247,242,0.55)", "rgba(250,247,242,0)"]} locations={[0, 0.4, 0.75]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+            <LinearGradient colors={["rgba(245,247,250,0.65)", "rgba(245,247,250,0.55)", "rgba(255,255,255,0)"]} locations={[0, 0.4, 0.75]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
             {/* fade the bottom into the page background */}
-            <LinearGradient colors={["rgba(250,247,242,0)", BG]} locations={[0.7, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+            <LinearGradient colors={["rgba(245,247,250,0)", "rgba(245,247,250,0.95)"]} locations={[0.7, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
           </View>
 
           {/* Greeting + bell */}
@@ -622,17 +636,17 @@ const Home = () => {
             </TouchableOpacity>
           </View>
 
-          {/* ── Weather card ── */}
+          {/* ═══ WEATHER CARD — colours come from the "WEATHER WIDGET" block at the top of this file ═══ */}
           <View style={{ paddingHorizontal: PAD, marginTop: 14 }}>
             <LinearGradient
-              colors={["rgba(70,138,152,0.42)", "rgba(34,96,112,0.66)", "rgba(22,72,88,0.78)"]}
-              locations={[0, 0.45, 1]}
+              colors={WEATHER_GRADIENT}
+              locations={WEATHER_GRADIENT_LOCATIONS}
               start={{ x: 0, y: 0.2 }} end={{ x: 1, y: 0.8 }}
-              style={[{ borderRadius: 24, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.30)", minHeight: 92, justifyContent: "center" }, weatherShadow]}
+              style={[{ borderRadius: 24, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: WEATHER_BORDER, minHeight: 92, justifyContent: "center" }, weatherShadow]}
             >
               <LinearGradient
                 pointerEvents="none"
-                colors={["rgba(255,255,255,0.22)", "rgba(255,255,255,0)"]}
+                colors={WEATHER_GLOSS}
                 locations={[0, 0.6]}
                 style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 24 }}
               />
@@ -905,7 +919,7 @@ const Home = () => {
 
       {/* ── Search Modal ── */}
       <Modal visible={searchVisible} animationType="slide" transparent={false} onRequestClose={closeSearch}>
-        <View className="flex-1 bg-bg pt-[50px]">
+        <View className="flex-1 pt-[50px]">
 
           {/* Modal header */}
           <View className="flex-row items-center px-4 pb-3.5 gap-2.5">
