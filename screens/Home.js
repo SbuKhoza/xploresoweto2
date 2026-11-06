@@ -901,7 +901,7 @@ const Home = () => {
 
         {/* ── Soweto Townships ── */}
         <View className="px-[16px]">
-          <SectionHeader title="Soweto Townships" onSeeAll={() => goXploreItem("XploreMain")} />
+          <SectionHeader title="Soweto Townships" onSeeAll={() => goXploreItem("SowetoTownships")} />
           <View className="flex-row flex-wrap" style={{ gap: 8 }}>
             {dataLoading
               ? Array.from({ length: 6 }).map((_, i) => (

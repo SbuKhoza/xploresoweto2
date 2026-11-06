@@ -15,6 +15,7 @@ import Splash from "./screens/Splash"
 import Authentication from "./screens/Authentication"
 import Home from "./screens/Home"
 import Xplore from "./screens/Xplore"
+import SowetoTownships from "./screens/SowetoTownships"
 import Profile from "./screens/Profile"
 import Community from "./screens/Community"
 import News from "./screens/News"
@@ -86,6 +87,7 @@ const XploreStackNavigator = () => (
     <XploreStack.Screen name="Business"      component={BusinessWithoutHeader}      />
     <XploreStack.Screen name="Healthcare"    component={HealthcareWithoutHeader}    />
     <XploreStack.Screen name="PublicService" component={PublicServiceWithoutHeader} />
+    <XploreStack.Screen name="SowetoTownships" component={SowetoTownshipsWithHeader} />
   </XploreStack.Navigator>
 )
 
@@ -112,6 +114,14 @@ const XploreWithHeader = () => (
   <SafeScreen>
     <Header title="Xplore" />
     <Xplore />
+  </SafeScreen>
+)
+
+// All Soweto townships — opened from Home → Soweto Townships → See All.
+const SowetoTownshipsWithHeader = () => (
+  <SafeScreen>
+    <Header title="Townships" />
+    <SowetoTownships />
   </SafeScreen>
 )
 
