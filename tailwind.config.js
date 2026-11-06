@@ -18,20 +18,20 @@ module.exports = {
         },
         teal: {
           DEFAULT: "#1B4D5C",
-          light: "#E8F4F7",
+          light: "#C9E8F3",
         },
         brand: {
           DEFAULT: "#E8600A", // primary CTA / highlight orange
-          light: "#FFF1E8",
+          light: "#FFD9BD",
           dark: "#C74E06",
         },
-        bg: "#FAF7F2",        // warm off-white app background
+        bg: "#F5F7FA",        // glossy white page background
         surface: "#FFFFFF",
-        muted: "#7A8A8F",
-        line: "#ECE6DD",
-        success: { DEFAULT: "#22C55E", light: "#EAFBF1" },
-        warning: { DEFAULT: "#F59E0B", light: "#FEF3C7" },
-        danger:  { DEFAULT: "#EF4444", light: "#FFF0F0" },
+        muted: "#5E7088",
+        line: "#DDE2EA",
+        success: { DEFAULT: "#22C55E", light: "#C4F3D6" },
+        warning: { DEFAULT: "#F59E0B", light: "#FCE39A" },
+        danger:  { DEFAULT: "#EF4444", light: "#FFD2D2" },
       },
       fontFamily: {
         display: ["System"],
