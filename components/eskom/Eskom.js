@@ -79,8 +79,10 @@ const ImprovedEskom = () => {
         const coords = await getUserLocation()
         if (coords) {
           const suburb = await reverseGeocode(coords.latitude, coords.longitude)
-          setDetectedSuburb(suburb)
-          setSearchQuery(suburb)
+          if (suburb) {
+            setDetectedSuburb(suburb)
+            setSearchQuery(suburb)
+          }
         }
       } catch (error) {
         console.warn("Location detection failed:", error)

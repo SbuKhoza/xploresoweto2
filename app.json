@@ -19,7 +19,11 @@
     "web": {
       "favicon": "./assets/Sowetoicon.png"
     },
-    "extra": {},
+    "extra": {
+      "eas": {
+        "projectId": "9ca91ae0-7d47-40c4-8299-80b8595e5f27"
+      }
+    },
     "owner": "sbudamalloya",
     "plugins": [
       "@react-native-community/datetimepicker",

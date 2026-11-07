@@ -148,3 +148,29 @@ Township document (`homescreen/{slug}`):
 > Until those two one-click imports are done, the app will show "No townships yet" / "No routes yet".
 
 **Enrollment kasi lists** — `components/KasiPicker.js` and `screens/EnrollmentScreen.js` no longer fetch `homescreen` themselves; they use `useTownships()` (cached offline, hides inactive townships) on top of the built-in `utils/townshipList.js` baseline.
+
+---
+
+## 7. Hero image, News, Events and Community announcements are dynamic
+
+Everything is managed in the Xplore CMS and appears in the app immediately. No sample/fallback content is bundled any more — empty collections simply show empty states (or hide the section on Home).
+
+| Content | Firestore | CMS location |
+|---|---|---|
+| Home hero backdrop | `homescreen/hero` `{ type:"hero", imageUrl, isActive }` | Soweto → Hero image |
+| News | `news` | Community → News |
+| Events | `events` | Community → Events |
+| Announcements | `announcements` | Community → Announcements |
+
+- **Hero**: `hooks/useHomeContent.js` (cached offline, shared with townships). If no image is set, it's switched off, or the URL fails to load, the bundled `hero-towers.png` is used. The "Ultimate Guide" card now uses the same hook, so it also works offline.
+- **News / Events**: removed `FALLBACK_NEWS`, `buildFallbackEvents`, `buildFallbackStories` and the "Sample …" banners from `News.js`, `Events.js`, `Home.js` and `utils/content.js`. Home hides *Top Stories* / *Upcoming Events* when there's nothing to show.
+- **Announcements** (new): `hooks/useAnnouncements.js` + `utils/announcements.js`.
+  - Doc: `{ title, message, type: "info"|"success"|"warning"|"urgent", pinned, link, linkLabel, publishedAt, startsAt?, expiresAt?, isActive }`
+  - Only active announcements inside their `startsAt`/`expiresAt` window show; order is pinned → urgency → newest.
+  - Home's formerly static "Community Announcements" banner now shows the top announcement (colour/icon by type, "+N more"), and hides if there are none.
+  - The Community screen lists all announcements at the top (tap to expand, optional link button) with pull-to-refresh.
+- **Dates**: CMS saves `publishedAt` / `date` as Firestore Timestamps; the app's `toDate()` handles those and ISO strings. `Community.js` previously did `new Date(publishedAt)` directly (breaks on Timestamps) — now uses `toDate()`.
+
+**Events navigation fix** — `screens/Events.js` was never registered in the navigator, so the Community → Events card threw *"The action 'NAVIGATE' with payload {name: Events} was not handled"*. `App.js` now imports it and registers `Events` in the Community stack (with the shared Header, like News), and Home → Upcoming Events → *See all* opens it directly.
+
+**Location on phones without Google Play services (Huawei etc.)** — `utils/getLocation.js` no longer depends solely on Google's fused location provider. Order: classic API → `expo-location/next` (Google → Android `LocationManager` fallback) → last known position. It never throws and logs warnings instead of errors. Added the missing `reverseGeocode()` (it was imported by `Eskom.js` but never defined): OpenStreetMap Nominatim first, platform geocoder as last resort. `Eskom.js` only pre-fills the suburb search when a suburb was found.

@@ -17,6 +17,9 @@ import { useOfflineData } from "../hooks/useOfflineData"
 import TownshipSheet from "../components/township/TownshipSheet"
 import { useEnrollment, DEFAULT_GREETING } from "../utils/enrollment"
 import { useTownships } from "../hooks/useTownships"
+import { useHomeContent } from "../hooks/useHomeContent"
+import { useAnnouncements } from "../hooks/useAnnouncements"
+import { announcementStyle } from "../utils/announcements"
 
 dayjs.extend(relativeTime)
 
@@ -89,26 +92,6 @@ const QUICK_LINKS = [
   { id: "4", name: "Emergency",   icon: "medical",    screen: "Emergency"   },
 ]
 
-
-// ── Placeholder content ─────────────────────────────────────────────────────
-// Shown until the "news" / "events" Firestore collections have content, so the
-// screen never looks empty (same approach as screens/News.js). Replace by adding
-// documents to Firestore — no code change needed.
-const buildFallbackStories = () => [
-  { id: "s1", title: "What's happening in Soweto today?",             category: "Local News", source: "Latest community headlines", publishedAt: dayjs().subtract(10, "minute").toISOString(), localImage: require("../assets/home/news.png") },
-  { id: "s2", title: "Youth development initiatives making a difference", category: "Community",  source: "Community update",        publishedAt: dayjs().subtract(25, "minute").toISOString() },
-  { id: "s3", title: "Discover what's new in local business",         category: "Business",   source: "Business news",             publishedAt: dayjs().subtract(1, "hour").toISOString() },
-]
-
-const nextOccurrence = (month, day) => {
-  let d = dayjs().month(month).date(day).startOf("day")
-  if (d.isBefore(dayjs().startOf("day"))) d = d.add(1, "year")
-  return d.toISOString()
-}
-const buildFallbackEvents = () => [
-  { id: "e1", title: "Soweto Cultural Festival", category: "Music & Culture", date: nextOccurrence(10, 15), time: "10:00", location: "Orlando, Soweto" },
-  { id: "e2", title: "Community Football Day",   category: "Sports",          date: nextOccurrence(10, 22), time: "09:00", location: "Dobsonville, Soweto" },
-]
 
 // ── Small helpers ───────────────────────────────────────────────────────────
 // Firestore Timestamps may arrive as Timestamp objects, {seconds}, ISO strings…
@@ -330,13 +313,15 @@ const Home = () => {
   const insets        = useSafeAreaInsets()
   const [userDisplayName, setUserDisplayName] = useState("User")
   const [loading, setLoading]                 = useState(true)
-  const [featuredImage, setFeaturedImage]     = useState(null)
   const { townships, loading: townshipsLoading } = useTownships()   // dynamic, from Firestore
+  const { hero, featured: featuredImage, loading: dataLoading } = useHomeContent() // hero + guide card images
+  const { announcements } = useAnnouncements()
+  const topAnnouncement = announcements[0] || null
   const [activeTownship, setActiveTownship]   = useState(null)   // township info sheet
   const [activeTownshipIdx, setActiveTownshipIdx] = useState(0)
   const { enrollment } = useEnrollment()                       // greeting chosen during enrollment
   const userGreeting = enrollment?.greeting || DEFAULT_GREETING
-  const [dataLoading, setDataLoading]         = useState(true)
+  const [heroFailed, setHeroFailed]           = useState(false)
   const [screenData, setScreenData]           = useState(Dimensions.get("window"))
   const [storyIndex, setStoryIndex]           = useState(0)
   const [eventIndex, setEventIndex]           = useState(0)
@@ -353,25 +338,21 @@ const Home = () => {
   const searchInputRef                        = useRef(null)
   const debounceTimer                         = useRef(null)
 
-  // ── Top stories + events (Firestore with graceful fallback) ──
+  // ── Top stories + events (live from Firestore — manage in CMS → Community) ──
   const feedOptions = useMemo(() => ({ maxAgeMinutes: 20, enableBackgroundRefresh: true }), [])
   const { data: newsData }   = useOfflineData("news",   feedOptions)
   const { data: eventsData } = useOfflineData("events", feedOptions)
 
   const stories = useMemo(() => {
     const live = (newsData || []).filter(a => a.isActive !== false && a.title)
-    const list = live.length > 0
-      ? [...live].sort((a, b) => (toDate(b.publishedAt) || 0) - (toDate(a.publishedAt) || 0))
-      : buildFallbackStories()
-    return list.slice(0, 5)
+    return [...live].sort((a, b) => (toDate(b.publishedAt) || 0) - (toDate(a.publishedAt) || 0)).slice(0, 5)
   }, [newsData])
 
   const events = useMemo(() => {
     const today = dayjs().startOf("day")
     const normalise = (e) => ({ ...e, _date: toDate(e.date || e.startDate) })
     const live = (eventsData || []).filter(e => e.isActive !== false).map(normalise).filter(e => e._date && (e.title || e.name))
-    const source = live.length > 0 ? live : buildFallbackEvents().map(normalise)
-    return source
+    return live
       .filter(e => !dayjs(e._date).isBefore(today))
       .sort((a, b) => a._date - b._date)
       .slice(0, 3)
@@ -437,21 +418,6 @@ const Home = () => {
     } finally { clearTimeout(timeout) }
   }, [])
 
-  const fetchHomescreenData = async () => {
-    try {
-      setDataLoading(true)
-      const featuredSnap = await getDoc(doc(db, "homescreen", "featured"))
-      let featuredImageData = null
-      if (featuredSnap.exists()) {
-        const d = featuredSnap.data()
-        if (d.type === "featuredImage") featuredImageData = { id: featuredSnap.id, ...d }
-      }
-      setFeaturedImage(featuredImageData)
-    } catch {
-      setFeaturedImage({ imageUrl: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=800&h=600&fit=crop", title: "The Ultimate Guide to Soweto" })
-    } finally { setDataLoading(false) }
-  }
-
   useEffect(() => {
     const sub = Dimensions.addEventListener("change", ({ window }) => setScreenData(window))
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -468,7 +434,6 @@ const Home = () => {
       } else { setUserDisplayName("User") }
       setLoading(false)
     })
-    fetchHomescreenData()
     fetchWeather()
     return () => { sub?.remove(); unsub() }
   }, [fetchWeather])
@@ -609,7 +574,8 @@ const Home = () => {
           {/* Backdrop — shifted right so the towers sit on the right-hand side */}
           <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: HERO_H, overflow: "hidden" }}>
             <Image
-              source={require("../assets/home/hero-towers.png")}
+              source={hero?.imageUrl && !heroFailed ? { uri: hero.imageUrl } : require("../assets/home/hero-towers.png")}
+              onError={() => setHeroFailed(true)}
               style={{ position: "absolute", top: 0, left: HERO_SHIFT, width: screenW, height: HERO_H, opacity: 0.92 }}
               resizeMode="cover"
             />
@@ -728,7 +694,7 @@ const Home = () => {
         {/* ── Upcoming Events ── */}
         {events.length > 0 && (
           <View className="px-[16px] mb-4">
-            <SectionHeader title="Upcoming Events" icon="calendar-outline" onSeeAll={() => goCommunity()} />
+            <SectionHeader title="Upcoming Events" icon="calendar-outline" onSeeAll={() => goCommunity("Events")} />
             <FlatList
               data={events}
               horizontal
@@ -744,7 +710,7 @@ const Home = () => {
                 const d    = dayjs(e._date)
                 const time = e.time || ((d.hour() || d.minute()) ? d.format("HH:mm") : null)
                 return (
-                  <TouchableOpacity activeOpacity={0.9} onPress={() => goCommunity()}
+                  <TouchableOpacity activeOpacity={0.9} onPress={() => goCommunity("Events")}
                     style={[{ width: EVENT_W, height: 96, borderRadius: 18, backgroundColor: "#fff", marginRight: EVENT_GAP }, cardShadow]}>
                     <View style={{ flex: 1, borderRadius: 18, overflow: "hidden" }}>
                       {/* Event photo, full bleed (Soweto1.png when the event has none) */}
@@ -805,6 +771,7 @@ const Home = () => {
         )}
 
         {/* ── Top Stories ── */}
+        {stories.length > 0 && (
         <View className="mb-5">
           <View className="px-[16px]">
             <SectionHeader title="Top Stories" bar onSeeAll={() => goCommunity("News")} />
@@ -852,28 +819,36 @@ const Home = () => {
             </View>
           )}
         </View>
+        )}
 
-        {/* ── Community Announcements ── */}
-        <View className="px-[16px] mb-5">
-          <TouchableOpacity
-            activeOpacity={0.88}
-            onPress={() => goCommunity()}
-            className="flex-row items-center rounded-2xl px-3 py-3 gap-3"
-            style={{ backgroundColor: "#FFF1E4", borderWidth: 1, borderColor: "#F8D9BC" }}
-          >
-            <Ionicons name="megaphone" size={30} color={BRAND} />
-            <View className="flex-1">
-              <View className="flex-row items-center justify-between mb-1">
-                <Text className="text-[13.5px] font-extrabold text-[#8A3D05] flex-1" numberOfLines={1}>Community Announcements</Text>
-                <View className="px-2 py-0.5 rounded-full bg-[#1E9E55] ml-2">
-                  <Text className="text-[9px] font-bold text-white">Local updates</Text>
+        {/* ── Community Announcements (live — CMS → Community → Announcements) ── */}
+        {topAnnouncement && (() => {
+          const st = announcementStyle(topAnnouncement.type)
+          const more = announcements.length - 1
+          return (
+            <View className="px-[16px] mb-5">
+              <TouchableOpacity
+                activeOpacity={0.88}
+                onPress={() => goCommunity()}
+                className="flex-row items-center rounded-2xl px-3 py-3 gap-3"
+                style={{ backgroundColor: st.bg, borderWidth: 1, borderColor: st.border }}
+              >
+                <Ionicons name={topAnnouncement.pinned ? "megaphone" : st.icon} size={30} color={st.color} />
+                <View className="flex-1">
+                  <View className="flex-row items-center justify-between mb-1">
+                    <Text className="text-[13.5px] font-extrabold flex-1" style={{ color: st.color }} numberOfLines={1}>{topAnnouncement.title}</Text>
+                    <View className="px-2 py-0.5 rounded-full ml-2" style={{ backgroundColor: st.chip }}>
+                      <Text className="text-[9px] font-bold text-white">{st.label}</Text>
+                    </View>
+                  </View>
+                  <Text className="text-[11px] leading-[15px]" style={{ color: st.color, opacity: 0.85 }} numberOfLines={2}>{topAnnouncement.message}</Text>
+                  {more > 0 && <Text className="text-[10.5px] font-bold mt-1" style={{ color: st.color }}>+{more} more announcement{more === 1 ? "" : "s"}</Text>}
                 </View>
-              </View>
-              <Text className="text-[11px] text-[#6B5B4B] leading-[15px]">Stay informed with the latest notices, opportunities and important information.</Text>
+                <Ionicons name="chevron-forward" size={15} color={st.color} />
+              </TouchableOpacity>
             </View>
-            <Ionicons name="chevron-forward" size={15} color="#8A6B50" />
-          </TouchableOpacity>
-        </View>
+          )
+        })()}
 
         {/* ── The Ultimate Guide to Soweto ── */}
         <View className="px-[16px] mb-5">

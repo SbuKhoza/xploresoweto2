@@ -11,7 +11,7 @@ import CoverImage from "../components/content/CoverImage"
 import DetailSheet from "../components/content/DetailSheet"
 import {
   TEAL, BRAND, cardShadow, eventImage, eventTime, normaliseEvent,
-  buildFallbackEvents, EVENT_FALLBACK_IMAGE, matchesQuery,
+  EVENT_FALLBACK_IMAGE, matchesQuery,
 } from "../utils/content"
 
 const SEARCH_FIELDS = ["title", "name", "location", "category", "description"]
@@ -109,8 +109,7 @@ const Events = ({ search = "" }) => {
     () => (data || []).filter((e) => e.isActive !== false).map(normaliseEvent).filter((e) => e._date && (e.title || e.name)),
     [data]
   )
-  const usingFallback = live.length === 0
-  const all = useMemo(() => (usingFallback ? buildFallbackEvents().map(normaliseEvent) : live), [usingFallback, live])
+  const all = live // fully dynamic: only what's in Firestore (CMS → Community → Events)
 
   const { upcoming, past } = useMemo(() => {
     const today = dayjs().startOf("day")
@@ -229,12 +228,6 @@ const Events = ({ search = "" }) => {
         <View className="flex-row items-center justify-center gap-1.5 bg-warning-light py-2 border-b border-warning/30">
           <Ionicons name="cloud-offline-outline" size={14} color="#92400E" />
           <Text className="text-[13px] text-[#92400E] font-semibold">Showing saved events</Text>
-        </View>
-      )}
-      {usingFallback && !isOffline && (
-        <View className="flex-row items-center justify-center gap-1.5 bg-teal-light py-2 border-b border-teal/20">
-          <Ionicons name="information-circle-outline" size={14} color={TEAL} />
-          <Text className="text-[13px] text-teal font-semibold">Sample events — add Firestore "events" data for live listings</Text>
         </View>
       )}
 

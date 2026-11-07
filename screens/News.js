@@ -21,13 +21,6 @@ const CATEGORY_ICON = { community: "people", business: "storefront", safety: "sh
 const categoryIcon = (c = "") => CATEGORY_ICON[String(c).toLowerCase()] || "newspaper"
 const ago = (a) => { const d = toDate(a.publishedAt); return d ? dayjs(d).fromNow() : "" }
 
-const FALLBACK_NEWS = [
-  { id: "n1", title: "Vilakazi Street upgrade completed ahead of tourist season", summary: "Pavements, lighting and signage along Vilakazi Street have been refreshed to welcome the busy season.", body: "The City of Johannesburg has completed upgrades along Vilakazi Street, including new paving, upgraded street lighting, and clearer signage for visitors. Local business owners say the improvements should help handle the upcoming rise in tourist traffic. The project also included repainting of the iconic street murals and additional seating areas near the Hector Pieterson Memorial.", category: "Municipal", source: "Soweto Times", publishedAt: dayjs().subtract(3, "hour").toISOString(), isFeatured: true, imageUrl: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=900&h=600&fit=crop" },
-  { id: "n2", title: "Free health screening drive this weekend at Baragwanath", summary: "Community members can access free blood pressure, diabetes and HIV screening.", body: "Chris Hani Baragwanath Academic Hospital, in partnership with local clinics, will host a free health screening weekend covering blood pressure, diabetes, and HIV testing. Screenings run from 8am to 3pm on both Saturday and Sunday. Organisers encourage residents to bring ID and arrive early as queues are expected.", category: "Community", source: "Gauteng Health Dept", publishedAt: dayjs().subtract(1, "day").toISOString(), imageUrl: "https://images.unsplash.com/photo-1584982751601-97dcc096659c?w=900&h=600&fit=crop" },
-  { id: "n3", title: "Increased patrols announced after recent break-ins in Diepkloof", summary: "SAPS confirms additional night patrols following resident reports.", body: "Following a spate of reported break-ins in Diepkloof Zone 4 and 6, SAPS has confirmed increased night patrols in the area for the next month. Residents are urged to report suspicious activity to the community policing forum hotline and to ensure neighbourhood watch WhatsApp groups remain active.", category: "Safety", source: "SAPS Soweto", publishedAt: dayjs().subtract(2, "day").toISOString() },
-  { id: "n4", title: "Soweto Marathon route and road closures announced", summary: "Key roads will close from 5am on race day — plan alternative routes.", body: "Organisers of the annual Soweto Marathon have released this year's route map, with road closures along Chris Hani Road, Old Potch Road and sections of Klipspruit Valley Road starting from 5am on race day until approximately 1pm. Public transport operators have been briefed on detours.", category: "Events", source: "Soweto Marathon Trust", publishedAt: dayjs().subtract(4, "day").toISOString() },
-]
-
 // ── Big card for the featured story ─────────────────────────────────────────
 const FeaturedCard = ({ a, onPress }) => (
   <TouchableOpacity activeOpacity={0.9} onPress={onPress}
@@ -89,12 +82,12 @@ const News = ({ search = "" }) => {
   const { data, loading, isOffline, refresh } = useOfflineData("news", options)
 
   const live = useMemo(() => (data || []).filter((a) => a.isActive !== false && a.title), [data])
-  const usingFallback = live.length === 0
 
-  const sorted = useMemo(() => {
-    const list = usingFallback ? FALLBACK_NEWS : live
-    return [...list].sort((a, b) => (toDate(b.publishedAt) || 0) - (toDate(a.publishedAt) || 0))
-  }, [usingFallback, live])
+  // Fully dynamic: only what's in Firestore (CMS → Community → News), newest first
+  const sorted = useMemo(
+    () => [...live].sort((a, b) => (toDate(b.publishedAt) || 0) - (toDate(a.publishedAt) || 0)),
+    [live]
+  )
 
   const categories = useMemo(() => ["All", ...Array.from(new Set(sorted.map((a) => a.category).filter(Boolean)))], [sorted])
   const category = categories.includes(activeCategory) ? activeCategory : "All"
@@ -165,12 +158,6 @@ const News = ({ search = "" }) => {
         <View className="flex-row items-center justify-center gap-1.5 bg-warning-light py-2 border-b border-warning/30">
           <Ionicons name="cloud-offline-outline" size={14} color="#92400E" />
           <Text className="text-[13px] text-[#92400E] font-semibold">Showing cached headlines</Text>
-        </View>
-      )}
-      {usingFallback && !isOffline && (
-        <View className="flex-row items-center justify-center gap-1.5 bg-teal-light py-2 border-b border-teal/20">
-          <Ionicons name="information-circle-outline" size={14} color={TEAL} />
-          <Text className="text-[13px] text-teal font-semibold">Sample headlines — add Firestore "news" data for live info</Text>
         </View>
       )}
 

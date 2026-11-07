@@ -47,26 +47,6 @@ export const eventTime = (e) => {
   return (d.hour() || d.minute()) ? d.format("HH:mm") : null
 }
 
-const nextOccurrence = (month, day) => {
-  let d = dayjs().month(month).date(day).startOf("day")
-  if (d.isBefore(dayjs().startOf("day"))) d = d.add(1, "year")
-  return d.toISOString()
-}
-
-// Shown until the "events" Firestore collection has content, so screens never look empty.
-export const buildFallbackEvents = () => [
-  { id: "e1", title: "Soweto Cultural Festival", category: "Music & Culture", date: nextOccurrence(10, 15), time: "10:00", location: "Orlando, Soweto",
-    description: "A full day celebrating Soweto's music, dance, food and craft. Live performances on the main stage, street food stalls and a kids' corner.\nEntry is free. Bring a hat, sunscreen and your dancing shoes." },
-  { id: "e2", title: "Community Football Day", category: "Sports", date: nextOccurrence(10, 22), time: "09:00", location: "Dobsonville, Soweto",
-    description: "Local clubs go head to head in a day of friendly matches. Everyone is welcome to watch, and walk-on teams can register at the gate." },
-  { id: "e3", title: "Vilakazi Street Night Market", category: "Food & Market", date: nextOccurrence(10, 29), time: "17:00", location: "Vilakazi Street, Orlando West",
-    description: "Street food, local designers and live acoustic sets under the lights on Vilakazi Street." },
-  { id: "e4", title: "Youth Skills Expo", category: "Community", date: nextOccurrence(11, 6), time: "09:30", location: "Meadowlands Community Hall",
-    description: "Workshops, CV clinics and career talks for school leavers and young job seekers." },
-  { id: "e5", title: "Heritage Walk: Hector Pieterson Memorial", category: "Heritage", date: dayjs().subtract(12, "day").startOf("day").toISOString(), time: "10:00", location: "Orlando West, Soweto",
-    description: "A guided walk through the history of the 1976 Soweto uprising." },
-]
-
 // ── News ────────────────────────────────────────────────────────────────────
 const NEWS_TAG = {
   "local news": TEAL, municipal: TEAL, community: "#22A559",

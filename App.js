@@ -21,6 +21,7 @@ import { EnrollmentProvider, useEnrollment } from "./utils/enrollment"
 import Profile from "./screens/Profile"
 import Community from "./screens/Community"
 import News from "./screens/News"
+import Events from "./screens/Events"
 
 // Import components
 import BottomNav, { ScrollProvider, ScrollTrackingView } from "./components/BottomNav"
@@ -97,6 +98,7 @@ const XploreStackNavigator = () => (
 const CommunityStackNavigator = () => (
   <CommunityStack.Navigator screenOptions={{ headerShown: false }}>
     <CommunityStack.Screen name="CommunityMain" component={CommunityWithoutHeader} />
+    <CommunityStack.Screen name="Events"        component={EventsWithHeader}       />
     <CommunityStack.Screen name="News"          component={NewsWithHeader}         />
     <CommunityStack.Screen name="Eskom"         component={EskomWithHeader}        />
     <CommunityStack.Screen name="PoIst"         component={PoIstWithHeader}        />
@@ -137,6 +139,13 @@ const ProfileWithoutHeader = () => (
 const CommunityWithoutHeader = () => (
   <SafeScreen>
     <Community />
+  </SafeScreen>
+)
+
+const EventsWithHeader = () => (
+  <SafeScreen>
+    <Header title="Events" />
+    <Events />
   </SafeScreen>
 )
 

@@ -1,23 +1,61 @@
 "use client"
-import { useMemo } from "react"
-import { Text, View, TouchableOpacity, ScrollView } from "react-native"
+import { useMemo, useState } from "react"
+import { Text, View, TouchableOpacity, ScrollView, Linking, RefreshControl } from "react-native"
 import { useNavigation } from "@react-navigation/native"
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import { useOfflineData } from "../hooks/useOfflineData"
-import { toDate } from "../utils/content"
+import { toDate, cardShadow } from "../utils/content"
+import { useAnnouncements } from "../hooks/useAnnouncements"
+import { announcementStyle } from "../utils/announcements"
 
 dayjs.extend(relativeTime)
 
+// One announcement: tap to expand the full message; optional link button
+const AnnouncementCard = ({ a }) => {
+  const [open, setOpen] = useState(false)
+  const st = announcementStyle(a.type)
+  const when = toDate(a.publishedAt)
+  return (
+    <TouchableOpacity activeOpacity={0.9} onPress={() => setOpen((o) => !o)}
+      style={[{ backgroundColor: "#fff", borderRadius: 18, padding: 14, borderWidth: 1, borderColor: st.border }, cardShadow]}>
+      <View className="flex-row items-center mb-2">
+        <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: st.bg, justifyContent: "center", alignItems: "center" }}>
+          <Ionicons name={st.icon} size={20} color={st.color} />
+        </View>
+        <View className="flex-row items-center gap-1.5 ml-2.5 flex-1">
+          <View style={{ backgroundColor: st.chip, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 }}>
+            <Text className="text-[9.5px] font-extrabold text-white uppercase tracking-[0.5px]">{st.label}</Text>
+          </View>
+          {a.pinned ? <Ionicons name="pin" size={12} color="#7A8A8F" /> : null}
+        </View>
+        {when ? <Text className="text-[11px] text-muted font-medium">{dayjs(when).fromNow()}</Text> : null}
+      </View>
+      <Text className="text-[15px] font-extrabold text-ink -tracking-[0.2px]">{a.title}</Text>
+      {a.message ? <Text className="text-[13px] text-ink/80 leading-[19px] mt-1" numberOfLines={open ? undefined : 3}>{a.message}</Text> : null}
+      {a.link ? (
+        <TouchableOpacity onPress={() => Linking.openURL(a.link).catch(() => {})} activeOpacity={0.85}
+          className="flex-row items-center self-start mt-2.5 px-3 py-1.5 rounded-full" style={{ backgroundColor: st.bg }}>
+          <Text className="text-[12px] font-extrabold" style={{ color: st.color }}>{a.linkLabel || "Learn more"}</Text>
+          <Ionicons name="open-outline" size={13} color={st.color} style={{ marginLeft: 5 }} />
+        </TouchableOpacity>
+      ) : null}
+    </TouchableOpacity>
+  )
+}
+
 const Community = () => {
   const navigation = useNavigation()
+  const { announcements, loading: announcementsLoading, refresh: refreshAnnouncements } = useAnnouncements()
 
   const newsOptions = useMemo(() => ({ maxAgeMinutes: 20 }), [])
   const { data: news } = useOfflineData("news", newsOptions)
-  const latestNews = news && news.length > 0
-    ? [...news].sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))[0]
-    : null
+  const latestNews = useMemo(
+    () => [...(news || [])].filter((n) => n.isActive !== false && n.title)
+      .sort((a, b) => (toDate(b.publishedAt) || 0) - (toDate(a.publishedAt) || 0))[0] || null,
+    [news]
+  )
 
   const eventsOptions = useMemo(() => ({ maxAgeMinutes: 20 }), [])
   const { data: events } = useOfflineData("events", eventsOptions)
@@ -54,7 +92,7 @@ const Community = () => {
       iconType: "Ionicons",
       bg: "bg-teal-light",
       color: "#1B4D5C",
-      preview: latestNews ? `${latestNews.title} · ${dayjs(latestNews.publishedAt).fromNow()}` : "Tap to see the latest local news",
+      preview: latestNews ? `${latestNews.title} · ${toDate(latestNews.publishedAt) ? dayjs(toDate(latestNews.publishedAt)).fromNow() : ""}` : "Tap to see the latest local news",
       onPress: () => navigation.navigate("News"),
     },
     {
@@ -90,7 +128,8 @@ const Community = () => {
   }
 
   return (
-    <ScrollView className="flex-1 bg-bg" showsVerticalScrollIndicator={false}>
+    <ScrollView className="flex-1 bg-bg" showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={announcementsLoading} onRefresh={refreshAnnouncements} colors={["#E8600A"]} tintColor="#E8600A" />}>
       {/* Header */}
       <View className="flex-row justify-between items-center px-[22px] pt-3.5 pb-3">
         <View>
@@ -101,6 +140,19 @@ const Community = () => {
           <Ionicons name="grid-outline" size={20} color="#1B4D5C" />
         </View>
       </View>
+
+      {/* Announcements — live from the CMS */}
+      {announcements.length > 0 && (
+        <View className="px-[22px] mb-4">
+          <View className="flex-row items-center gap-2 mb-2.5">
+            <View className="w-[3px] h-[16px] rounded bg-brand" />
+            <Text className="text-[13px] font-extrabold text-ink uppercase tracking-[0.8px]">Announcements</Text>
+          </View>
+          <View className="gap-3">
+            {announcements.map((a) => <AnnouncementCard key={a.id} a={a} />)}
+          </View>
+        </View>
+      )}
 
       {/* Feature cards */}
       <View className="px-[22px] gap-3">
