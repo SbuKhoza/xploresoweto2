@@ -1,4 +1,3 @@
-
 {
   "expo": {
     "name": "xploresoweto",
@@ -20,11 +19,7 @@
     "web": {
       "favicon": "./assets/Sowetoicon.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "11d35109-de68-4eaa-aea3-a399fd3626a7"
-      }
-    },
+    "extra": {},
     "owner": "sbudamalloya",
     "plugins": [
       "@react-native-community/datetimepicker",
