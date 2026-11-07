@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { NavigationContainer } from "@react-navigation/native"
-import { StyleSheet, StatusBar, Platform } from "react-native"
+import { StyleSheet, StatusBar, Platform, View, ActivityIndicator } from "react-native"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context"
@@ -16,6 +16,8 @@ import Authentication from "./screens/Authentication"
 import Home from "./screens/Home"
 import Xplore from "./screens/Xplore"
 import SowetoTownships from "./screens/SowetoTownships"
+import EnrollmentScreen from "./screens/EnrollmentScreen"
+import { EnrollmentProvider, useEnrollment } from "./utils/enrollment"
 import Profile from "./screens/Profile"
 import Community from "./screens/Community"
 import News from "./screens/News"
@@ -219,6 +221,20 @@ const PublicServiceWithoutHeader = () => (
 )
 
 // ── Main Tab Navigator ────────────────────────────────────────────────────────
+// After sign-in every user passes through this gate. Until they have finished
+// enrollment (username, greeting, kasi) they see the Enrollment screen; after
+// that they get the app. All sign-in paths still navigate to "MainApp".
+const MainGate = () => {
+  const { status } = useEnrollment()
+  if (status === "done")   return <MainTabNavigator />
+  if (status === "needed") return <EnrollmentScreen />
+  return (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F5F7FA" }}>
+      <ActivityIndicator size="large" color="#E8600A" />
+    </View>
+  )
+}
+
 const MainTabNavigator = () => (
   <Tab.Navigator tabBar={(props) => <BottomNav {...props} />} screenOptions={{ headerShown: false }}>
     <Tab.Screen name="Home"      component={HomeWithoutHeader}       />
@@ -254,13 +270,15 @@ const AppContent = () => {
         translucent
       />
       <ScrollProvider>
+        <EnrollmentProvider user={user}>
         <NavigationContainer>
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Splash"          component={Splash}           />
             {!user && <Stack.Screen name="Authentication" component={Authentication} />}
-            {user  && <Stack.Screen name="MainApp"        component={MainTabNavigator} />}
+            {user  && <Stack.Screen name="MainApp"        component={MainGate} />}
           </Stack.Navigator>
         </NavigationContainer>
+        </EnrollmentProvider>
         {!isConnected && <OfflineIndicator />}
         <GlobalLoader visible={globalLoading} message={loadingMessage} />
       </ScrollProvider>

@@ -15,6 +15,7 @@ import { auth, db } from "../Firebase/config"
 import { useNavigation, CommonActions } from "@react-navigation/native"
 import { useOfflineData } from "../hooks/useOfflineData"
 import TownshipSheet from "../components/township/TownshipSheet"
+import { useEnrollment, DEFAULT_GREETING } from "../utils/enrollment"
 
 dayjs.extend(relativeTime)
 
@@ -334,6 +335,8 @@ const Home = () => {
   const [townships, setTownships]             = useState([])
   const [activeTownship, setActiveTownship]   = useState(null)   // township info sheet
   const [activeTownshipIdx, setActiveTownshipIdx] = useState(0)
+  const { enrollment } = useEnrollment()                       // greeting chosen during enrollment
+  const userGreeting = enrollment?.greeting || DEFAULT_GREETING
   const [dataLoading, setDataLoading]         = useState(true)
   const [screenData, setScreenData]           = useState(Dimensions.get("window"))
   const [storyIndex, setStoryIndex]           = useState(0)
@@ -626,7 +629,7 @@ const Home = () => {
           <View className="flex-row justify-between items-start" style={{ paddingHorizontal: PAD + 4 }}>
             <View className="flex-1">
               {/* <Text className="text-[15px] text-ink font-medium mb-0.5">{getGreeting()} 👋</Text> */}
-              <Text className="text-[18px] font-extrabold text-ink -tracking-[0.4px]" numberOfLines={1}>👋Aweh, {loading ? "User" : userDisplayName}!</Text>
+              <Text className="text-[18px] font-extrabold text-ink -tracking-[0.4px]" numberOfLines={1}>👋{userGreeting}, {loading ? "User" : userDisplayName}!</Text>
               <View style={{ width: 62, height: 3, borderRadius: 2, backgroundColor: BRAND, marginTop: 1, marginBottom: 5 }} />
               <View className="flex-row items-center">
                 <Ionicons name="location" size={13} color="#14213D" />

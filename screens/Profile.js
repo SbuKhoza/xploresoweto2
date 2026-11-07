@@ -21,6 +21,8 @@ import {
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
 import { logoutUser, validatePassword } from "../Firebase/authService"
 import { uriToBlob } from "../utils/uriToBlob"
+import KasiPicker from "../components/KasiPicker"
+import { useEnrollment } from "../utils/enrollment"
 
 // ── Design tokens (mirror tailwind.config.js / Home) ────────────────────────
 const TEAL  = "#1B4D5C"
@@ -50,6 +52,27 @@ const CardHeader = ({ icon, tint = "#E8F4F7", color = TEAL, title, subtitle, rig
       {subtitle ? <Text className="text-[11.5px] text-muted mt-px">{subtitle}</Text> : null}
     </View>
     {right}
+  </View>
+)
+
+// Tap-to-choose field (no typing). Shows the current value and opens a picker.
+const SelectField = ({ icon, label, value, placeholder, onPress }) => (
+  <View className="mb-3">
+    <Text className="text-[10.5px] font-bold text-muted uppercase tracking-[0.8px] mb-1.5">{label}</Text>
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value || "not set"}. Tap to choose`}
+      className="flex-row items-center h-[46px] rounded-xl px-3"
+      style={{ backgroundColor: "#FFFFFF", borderWidth: 1.5, borderColor: "#ECE6DD" }}
+    >
+      <Ionicons name={icon} size={17} color={TEAL} />
+      <Text style={{ flex: 1, marginLeft: 10, fontSize: 14, color: value ? "#14213D" : "#B0BFC4" }} numberOfLines={1}>
+        {value || placeholder}
+      </Text>
+      <Ionicons name="chevron-down" size={16} color={TEAL} />
+    </TouchableOpacity>
   </View>
 )
 
@@ -129,6 +152,8 @@ export default function Profile() {
   const emptyProfile = { name: "", email: "", phone: "", city: "", username: "" }
   const [profileData, setProfileData] = useState(emptyProfile)
   const [savedProfile, setSavedProfile] = useState(emptyProfile) // last values stored in Firestore
+  const [showKasiPicker, setShowKasiPicker] = useState(false)
+  const { updateEnrollment } = useEnrollment()
 
   // Password change states
   const [showPasswordForm, setShowPasswordForm] = useState(false)
@@ -152,7 +177,7 @@ export default function Profile() {
         name:     userData.name || currentUser.displayName || "",
         email:    userData.email || currentUser.email || "",
         phone:    userData.phone || "",
-        city:     userData.city || "",
+        city:     userData.city || userData.kasi || "",
         username: userData.username || "",
       }
       if (userData.photoURL) setPhotoURL(userData.photoURL)
@@ -242,8 +267,10 @@ export default function Profile() {
         name: profileData.name,
         phone: profileData.phone,
         city: profileData.city,
+        kasi: profileData.city,   // same value, kept in step with the kasi chosen at enrollment
         updatedAt: new Date(),
       })
+      updateEnrollment({ kasi: profileData.city })
       setSavedProfile(profileData)
       Alert.alert("Success", "Profile updated successfully!")
     } catch (error) {
@@ -322,7 +349,7 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <View className="flex-1 bg-bg justify-center items-center">
+      <View className="flex-1 justify-center items-center">
         <ActivityIndicator size="large" color={BRAND} />
         <Text className="text-[13px] text-muted mt-3">Loading profile…</Text>
       </View>
@@ -334,7 +361,7 @@ export default function Profile() {
   const memberSince  = user?.metadata?.creationTime ? dayjs(user.metadata.creationTime).format("MMM YYYY") : null
 
   return (
-    <KeyboardAvoidingView className="flex-1 bg-bg" behavior={Platform.OS === "ios" ? "padding" : "height"}>
+    <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 120 }}>
 
         {/* ── Hero ── */}
@@ -414,7 +441,7 @@ export default function Profile() {
             <Field icon="mail-outline" label="Email" value={profileData.email} editable={false} />
             {profileData.username ? <Field icon="at-outline" label="Username" value={profileData.username} editable={false} /> : null}
             <Field icon="call-outline" label="Phone" placeholder="Phone number" keyboardType="phone-pad" value={profileData.phone} onChangeText={(t) => handleInputChange("phone", t)} />
-            <Field icon="location-outline" label="City / Township" placeholder="e.g. Orlando, Soweto" value={profileData.city} onChangeText={(t) => handleInputChange("city", t)} />
+            <SelectField icon="location-outline" label="Township (Kasi)" placeholder="Choose your township" value={profileData.city} onPress={() => setShowKasiPicker(true)} />
 
             <PrimaryButton
               label={isDirty ? "Save Changes" : "No changes to save"}
@@ -478,6 +505,13 @@ export default function Profile() {
       </ScrollView>
 
       {/* Full-screen photo viewer */}
+      <KasiPicker
+        visible={showKasiPicker}
+        value={profileData.city}
+        onClose={() => setShowKasiPicker(false)}
+        onSelect={(name) => handleInputChange("city", name)}
+      />
+
       <Modal visible={showFullScreenImage} transparent animationType="fade" onRequestClose={() => setShowFullScreenImage(false)}>
         <TouchableOpacity activeOpacity={1} onPress={() => setShowFullScreenImage(false)}
           style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}>
