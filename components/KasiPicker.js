@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState } from "react"
 import { Modal, View, Text, TextInput, TouchableOpacity, FlatList, Platform } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { collection, getDocs } from "firebase/firestore"
-import { db } from "../Firebase/config"
 import GlossyBackground from "./GlossyBackground"
 import { getKasiOptions } from "../utils/townshipList"
+import { useTownships } from "../hooks/useTownships"
 
 const BRAND = "#E8600A"
 const TEAL = "#1B4D5C"
@@ -22,23 +21,12 @@ const rowShadow = {
 const KasiPicker = ({ visible, value, onClose, onSelect }) => {
   const insets = useSafeAreaInsets()
   const [query, setQuery] = useState("")
-  const [remoteNames, setRemoteNames] = useState([])
+  const { townships } = useTownships()   // dynamic + cached offline; hidden townships are excluded
 
-  // Add townships saved in Firestore to the built-in list (best effort)
-  useEffect(() => {
-    if (!visible) return
-    setQuery("")
-    let alive = true
-    ;(async () => {
-      try {
-        const snap = await getDocs(collection(db, "homescreen"))
-        const names = []
-        snap.forEach((s) => { const d = s.data(); if (d.type === "township" && d.name) names.push(d.name) })
-        if (alive) setRemoteNames(names)
-      } catch { /* offline: built-in list is enough */ }
-    })()
-    return () => { alive = false }
-  }, [visible])
+  useEffect(() => { if (visible) setQuery("") }, [visible])
+
+  // Built-in kasi list + every active township from the CMS
+  const remoteNames = useMemo(() => townships.map((t) => t.info.name), [townships])
 
   const options = useMemo(() => getKasiOptions(remoteNames), [remoteNames])
   const filtered = useMemo(() => {

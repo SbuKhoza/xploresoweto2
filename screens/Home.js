@@ -16,6 +16,7 @@ import { useNavigation, CommonActions } from "@react-navigation/native"
 import { useOfflineData } from "../hooks/useOfflineData"
 import TownshipSheet from "../components/township/TownshipSheet"
 import { useEnrollment, DEFAULT_GREETING } from "../utils/enrollment"
+import { useTownships } from "../hooks/useTownships"
 
 dayjs.extend(relativeTime)
 
@@ -88,8 +89,6 @@ const QUICK_LINKS = [
   { id: "4", name: "Emergency",   icon: "medical",    screen: "Emergency"   },
 ]
 
-const FALLBACK_TOWNSHIPS = ["Dobsonville", "Emndeni", "Orlando", "Meadowlands", "Diepkloof", "Protea Glen"]
-  .map((name, i) => ({ id: `t${i}`, name }))
 
 // ── Placeholder content ─────────────────────────────────────────────────────
 // Shown until the "news" / "events" Firestore collections have content, so the
@@ -332,7 +331,7 @@ const Home = () => {
   const [userDisplayName, setUserDisplayName] = useState("User")
   const [loading, setLoading]                 = useState(true)
   const [featuredImage, setFeaturedImage]     = useState(null)
-  const [townships, setTownships]             = useState([])
+  const { townships, loading: townshipsLoading } = useTownships()   // dynamic, from Firestore
   const [activeTownship, setActiveTownship]   = useState(null)   // township info sheet
   const [activeTownshipIdx, setActiveTownshipIdx] = useState(0)
   const { enrollment } = useEnrollment()                       // greeting chosen during enrollment
@@ -447,14 +446,9 @@ const Home = () => {
         const d = featuredSnap.data()
         if (d.type === "featuredImage") featuredImageData = { id: featuredSnap.id, ...d }
       }
-      const snapshot = await getDocs(collection(db, "homescreen"))
-      const townshipsData = []
-      snapshot.forEach(s => { const d = s.data(); if (d.type === "township") townshipsData.push({ id: s.id, ...d }) })
       setFeaturedImage(featuredImageData)
-      setTownships(townshipsData)
     } catch {
       setFeaturedImage({ imageUrl: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=800&h=600&fit=crop", title: "The Ultimate Guide to Soweto" })
-      setTownships(FALLBACK_TOWNSHIPS.map((name) => ({ id: name, name })))
     } finally { setDataLoading(false) }
   }
 
@@ -585,7 +579,7 @@ const Home = () => {
   const STORY_GAP  = 12
   const EVENT_W    = screenW - PAD * 2               // one event card per screen
   const EVENT_GAP  = 12
-  const townshipsToShow = (townships.length > 0 ? townships : FALLBACK_TOWNSHIPS.map((name) => ({ id: name, name }))).slice(0, 6)
+  const townshipsToShow = townships.slice(0, 6)
   const townshipW  = (screenW - PAD * 2 - 16) / 3
 
   const handleStoryScroll = (e) => {
@@ -906,16 +900,18 @@ const Home = () => {
         <View className="px-[16px]">
           <SectionHeader title="Soweto Townships" onSeeAll={() => goXploreItem("SowetoTownships")} />
           <View className="flex-row flex-wrap" style={{ gap: 8 }}>
-            {dataLoading
+            {townshipsLoading && townships.length === 0
               ? Array.from({ length: 6 }).map((_, i) => (
                   <View key={i} className="h-[38px] rounded-xl bg-[#EDE8E2]" style={{ width: townshipW }} />
                 ))
-              : townshipsToShow.map((t, i) => (
-                  <TouchableOpacity key={t.id} activeOpacity={0.85} onPress={() => { setActiveTownshipIdx(i); setActiveTownship(t) }}
+              : townshipsToShow.length === 0
+              ? <Text className="text-[13px] text-muted px-1 py-2">Township guides are coming soon.</Text>
+              : townshipsToShow.map(({ doc: t, info }, i) => (
+                  <TouchableOpacity key={info.key} activeOpacity={0.85} onPress={() => { setActiveTownshipIdx(i); setActiveTownship(t) }}
                     className="h-[38px] rounded-xl bg-surface flex-row items-center px-2 border border-line"
                     style={{ width: townshipW }}>
                     <Ionicons name="location" size={13} color={TEAL} />
-                    <Text className="flex-1 text-[11px] font-bold text-[#12495C] ml-1" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t.name}</Text>
+                    <Text className="flex-1 text-[11px] font-bold text-[#12495C] ml-1" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{info.name}</Text>
                     <Ionicons name="chevron-forward" size={12} color="#9AA9AE" />
                   </TouchableOpacity>
                 ))}

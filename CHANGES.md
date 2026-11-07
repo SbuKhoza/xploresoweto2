@@ -111,3 +111,40 @@ it — confirmed via grep).
 - Booking flows for Accommodation/Restaurants already exist (`ReservationForm.js`,
   `RestaurantReservationForm.js`) and weren't touched — let me know if those should be
   redesigned too.
+
+---
+
+## 6. Townships & Transport are now fully dynamic
+
+**Townships** — nothing is bundled in the app any more.
+- `utils/townships.js` is now only a normaliser (Firestore doc → what the screens render). The hard-coded Orlando/Meadowlands/… content was moved into the CMS as seed data.
+- New `hooks/useTownships.js`: reads `homescreen` docs with `type: "township"` through `useOfflineData` (cached for offline), hides `isActive === false`, sorts by `order` then A–Z.
+- `Home.js`, `SowetoTownships.js` and `TownshipSheet.js` use the hook. Pull-to-refresh added to the directory. Empty/offline states replace the old fallbacks. History/Legends/Places tabs only show when the township has that content.
+- Search also matches township `aliases`.
+
+Township document (`homescreen/{slug}`):
+```json
+{
+  "type": "township", "name": "Orlando", "area": "Orlando East & West", "tagline": "…",
+  "established": "1931", "namedAfter": "…", "overview": "…",
+  "colorFrom": "#E8600A", "colorTo": "#A63A06", "imageUrl": "https://…",
+  "order": 1, "isActive": true, "aliases": ["orlando east", "orlando west"],
+  "history":   [{ "year": "1931", "text": "…" }],
+  "people":    [{ "name": "…", "role": "…", "note": "…" }],
+  "landmarks": [{ "name": "…", "icon": "bank", "text": "…" }],
+  "facts":     ["…"]
+}
+```
+**First-time setup:** CMS → Soweto → Townships → *Import built-in townships* (one click, skips existing).
+
+**Transport** — `Transport.js` no longer has demo routes.
+- Mode tabs are built from the modes present in Firestore (bus / train / taxi / anything new); the tab bar hides if there's only one.
+- Only `isActive !== false` routes, ordered by `order`.
+- New optional fields: `notice` (amber service alert on the card), `days` (e.g. "Mon–Fri"), `order`.
+- Proper empty / offline states.
+
+**First-time setup:** CMS → Transport → *Load sample routes* (only offered when the collection is empty).
+
+> Until those two one-click imports are done, the app will show "No townships yet" / "No routes yet".
+
+**Enrollment kasi lists** — `components/KasiPicker.js` and `screens/EnrollmentScreen.js` no longer fetch `homescreen` themselves; they use `useTownships()` (cached offline, hides inactive townships) on top of the built-in `utils/townshipList.js` baseline.

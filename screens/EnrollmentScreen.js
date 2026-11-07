@@ -6,11 +6,10 @@ import {
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { collection, getDocs } from "firebase/firestore"
-import { db } from "../Firebase/config"
 import GlossyBackground from "../components/GlossyBackground"
 import { useEnrollment, GREETINGS, validateUsername, isUsernameTaken } from "../utils/enrollment"
 import { getKasiOptions } from "../utils/townshipList"
+import { useTownships } from "../hooks/useTownships"
 
 const BRAND = "#E8600A"
 const BRAND_DARK = "#C74E06"
@@ -49,24 +48,13 @@ export default function EnrollmentScreen() {
   const [query, setQuery] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
-  const [remoteNames, setRemoteNames] = useState([])
+  const { townships } = useTownships()
 
   const step = steps[Math.min(stepIdx, steps.length - 1)]
   const isLast = stepIdx >= steps.length - 1
 
-  // Townships saved in Firestore are added to the built-in kasi list
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      try {
-        const snap = await getDocs(collection(db, "homescreen"))
-        const names = []
-        snap.forEach((s) => { const d = s.data(); if (d.type === "township" && d.name) names.push(d.name) })
-        if (alive) setRemoteNames(names)
-      } catch { /* offline: built-in list is enough */ }
-    })()
-    return () => { alive = false }
-  }, [])
+  // Active townships from the CMS (cached offline) are added to the built-in kasi list
+  const remoteNames = useMemo(() => townships.map((t) => t.info.name), [townships])
 
   const options = useMemo(() => getKasiOptions(remoteNames), [remoteNames])
   const filtered = useMemo(() => {

@@ -42,6 +42,7 @@ const TownshipSheet = ({ visible, onClose, township, index = 0, onExplore }) => 
 
   // Only offer tabs that have content
   const tabs = TABS.filter((t) => {
+    if (t.key === "history") return info.history.length > 0
     if (t.key === "people") return info.people.length > 0
     if (t.key === "places") return info.landmarks.length > 0 || info.facts.length > 0
     return true
@@ -138,7 +139,7 @@ const TownshipSheet = ({ visible, onClose, township, index = 0, onExplore }) => 
               <View>
                 <Section title={`About ${info.name}`}>
                   <View className="bg-surface rounded-2xl p-4 border border-line" style={cardShadow}>
-                    <Text className="text-[14.5px] text-ink leading-6">{info.overview}</Text>
+                    <Text className="text-[14.5px] text-ink leading-6">{info.overview || `More about ${info.name} is coming soon.`}</Text>
                   </View>
                 </Section>
                 {info.namedAfter ? (
@@ -188,9 +189,6 @@ const TownshipSheet = ({ visible, onClose, township, index = 0, onExplore }) => 
                     </View>
                   </View>
                 ))}
-                {info.isGeneral ? (
-                  <Text className="text-[12px] text-muted mt-1">This is the general Soweto story. A dedicated history for {info.name} is coming soon.</Text>
-                ) : null}
               </Section>
             )}
 
@@ -198,7 +196,7 @@ const TownshipSheet = ({ visible, onClose, township, index = 0, onExplore }) => 
             {tab === "people" && (
               <Section title={`Famous faces from ${info.name}`}>
                 {info.people.map((p, i) => (
-                  <View key={p.name} className="flex-row items-center bg-surface rounded-2xl p-3.5 border border-line mb-2.5" style={cardShadow}>
+                  <View key={p.name + i} className="flex-row items-center bg-surface rounded-2xl p-3.5 border border-line mb-2.5" style={cardShadow}>
                     <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: AVATAR_COLORS[i % AVATAR_COLORS.length], alignItems: "center", justifyContent: "center" }}>
                       <Text className="text-[16px] font-extrabold text-white">{initials(p.name)}</Text>
                     </View>
@@ -218,7 +216,7 @@ const TownshipSheet = ({ visible, onClose, township, index = 0, onExplore }) => 
                 {info.landmarks.length > 0 && (
                   <Section title="Landmarks & places to know">
                     {info.landmarks.map((l, i) => (
-                      <View key={l.name} className="flex-row bg-surface rounded-2xl p-3.5 border border-line mb-2.5" style={cardShadow}>
+                      <View key={l.name + i} className="flex-row bg-surface rounded-2xl p-3.5 border border-line mb-2.5" style={cardShadow}>
                         <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: c1, alignItems: "center", justifyContent: "center" }}>
                           <MaterialCommunityIcons name={l.icon || "map-marker"} size={21} color="#fff" />
                         </View>
@@ -243,9 +241,6 @@ const TownshipSheet = ({ visible, onClose, township, index = 0, onExplore }) => 
               </View>
             )}
 
-            <Text className="text-[11px] text-muted mt-5 text-center" style={{ lineHeight: 16 }}>
-              Compiled from public sources. Know something we missed about {info.name}? Let us know and we'll add it.
-            </Text>
           </View>
         </ScrollView>
       </View>
