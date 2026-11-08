@@ -37,3 +37,6 @@ yarn-error.*
 
 hs_err_pid*.log
 replay_pid*.log
+
+# Ignore Firebase configuration files
+android/app/google-services.json
