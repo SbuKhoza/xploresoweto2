@@ -28,6 +28,34 @@ const HERO_BG   = "#E8F4F7"  // Light teal
 const BORDER    = "#C8DFE6"
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Shared input ─────────────────────────────────────────────────────────────
+// Defined at module level (NOT inside Authentication). If it lived inside, every
+// keystroke would create a new component type, remount the TextInput and dismiss
+// the keyboard after each character.
+const Input = ({ icon, placeholder, value, onChange, secure, showToggle, toggleValue, onToggle, keyboardType, autoCapitalize = "none", autoCorrect = false, textContentType, autoComplete }) => (
+  <View style={styles.inputWrap}>
+    <Ionicons name={icon} size={18} color={MUTED} style={styles.inputIcon} />
+    <TextInput
+      style={styles.input}
+      placeholder={placeholder}
+      placeholderTextColor="#B0BFC4"
+      value={value}
+      onChangeText={onChange}
+      secureTextEntry={secure && !toggleValue}
+      autoCapitalize={autoCapitalize}
+      autoCorrect={autoCorrect}
+      autoComplete={autoComplete}
+      textContentType={textContentType}
+      keyboardType={keyboardType || "default"}
+    />
+    {showToggle && (
+      <TouchableOpacity onPress={onToggle} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
+        <Ionicons name={toggleValue ? "eye-outline" : "eye-off-outline"} size={18} color={MUTED} />
+      </TouchableOpacity>
+    )}
+  </View>
+)
+
 const Authentication = ({ navigation }) => {
   // "login" | "register" | "forgot"
   const [mode, setMode] = useState("login")
@@ -69,10 +97,6 @@ const Authentication = ({ navigation }) => {
       Alert.alert("Google Sign-In Failed", googleResponse.error?.message || "Something went wrong")
     }
   }, [googleResponse])
-
-  useEffect(() => {
-    isOnline().then(setNetworkAvailable)
-  }, [])
 
   useEffect(() => {
     isOnline().then(setNetworkAvailable)
@@ -189,28 +213,6 @@ const Authentication = ({ navigation }) => {
     return             { label: "Strong", color: "#22C55E", width: "100%" }
   }
   const strength = mode === "register" ? getPasswordStrength(formData.password) : null
-
-  // ── Shared input renderer ──────────────────────────────────────────────────
-  const Input = ({ icon, placeholder, value, onChange, secure, showToggle, toggleValue, onToggle, keyboardType, autoCapitalize = "none" }) => (
-    <View style={styles.inputWrap}>
-      <Ionicons name={icon} size={18} color={MUTED} style={styles.inputIcon} />
-      <TextInput
-        style={styles.input}
-        placeholder={placeholder}
-        placeholderTextColor="#B0BFC4"
-        value={value}
-        onChangeText={onChange}
-        secureTextEntry={secure && !toggleValue}
-        autoCapitalize={autoCapitalize}
-        keyboardType={keyboardType || "default"}
-      />
-      {showToggle && (
-        <TouchableOpacity onPress={onToggle} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
-          <Ionicons name={toggleValue ? "eye-outline" : "eye-off-outline"} size={18} color={MUTED} />
-        </TouchableOpacity>
-      )}
-    </View>
-  )
 
   // ── Forgot password screen ─────────────────────────────────────────────────
   const renderForgot = () => (

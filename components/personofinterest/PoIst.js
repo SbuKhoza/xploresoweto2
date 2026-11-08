@@ -175,7 +175,8 @@ const PersonOfInterest = () => {
   const previousImage     = () => setCurrentImageIndex(p => (p-1+viewerImages.length) % viewerImages.length)
 
   // ── Form ─────────────────────────────────────────────────────────────────
-  const FormBody = ({ onSubmit, submitLabel }) => (
+  // Called as a plain function (renderFormBody(...)) so TextInputs are not remounted on every keystroke.
+  const renderFormBody = ({ onSubmit, submitLabel }) => (
     <ScrollView style={styles.formScroll} contentContainerStyle={styles.formContent} showsVerticalScrollIndicator={false}>
       {/* Type selector */}
       <View style={styles.typeSelector}>
@@ -377,7 +378,7 @@ const PersonOfInterest = () => {
           )}
         />
       ) : (
-        <FormBody onSubmit={handleSubmitPost} submitLabel="Submit Report" />
+        renderFormBody({ onSubmit: handleSubmitPost, submitLabel: "Submit Report" })
       )}
 
       {/* Edit Modal */}
@@ -392,7 +393,7 @@ const PersonOfInterest = () => {
               <Text style={styles.sheetSaveText}>Save</Text>
             </TouchableOpacity>
           </View>
-          <FormBody onSubmit={handleUpdatePost} submitLabel="Save Changes" />
+          {renderFormBody({ onSubmit: handleUpdatePost, submitLabel: "Save Changes" })}
         </SafeAreaView>
       </Modal>
 
