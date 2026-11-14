@@ -40,3 +40,16 @@ replay_pid*.log
 
 # Ignore Firebase configuration files
 android/app/google-services.json
+
+# --- Firebase / secrets (never commit server credentials) ---
+serviceAccount*.json
+*-service-account*.json
+*-firebase-adminsdk-*.json
+functions/node_modules/
+security-rules/node_modules/
+functions/.env
+functions/.env.*
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
