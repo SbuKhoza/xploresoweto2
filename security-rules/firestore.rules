@@ -1,0 +1,165 @@
+// =====================================================================================================================
+// XploreSoweto Stage 1: Firestore Security Rules (project xploresoweto).            *** PREPARED, NOT DEPLOYED ***
+//
+// Principles
+//  * Default deny. Anything not matched below is closed (including the Person-Of-Interest collection, which is excluded
+//    from the public launch, and the legacy `admin` and `userservices` collections, which no longer exist).
+//  * Sensitive or multi-step writes (profiles, applications, organisations, memberships, invitations, bookings, service
+//    requests, reviews, audit logs) are performed ONLY by Cloud Functions using the Admin SDK, which bypasses these rules.
+//    Clients can therefore not create, edit or delete them directly.
+//  * Platform staff: a custom claim ALONE grants nothing. Staff need the claim AND a verified email AND an active
+//    authoritative record (super-admin/{uid} or platform-editors/{uid}).
+//  * Rules are not filters: public content is readable only when isActive == true, so queries MUST include
+//    where("isActive", "==", true) (the app's data layer does this). Unfiltered list queries are rejected.
+//
+// Role -> permission mapping in roleGrants() mirrors functions/src/lib/constants.js (ROLE_PERMISSIONS). Keep them in sync.
+// =====================================================================================================================
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------- helpers
+    function signedIn() { return request.auth != null; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+    function verified() { return signedIn() && request.auth.token.email_verified == true; }
+
+    function isActiveSuperAdmin() {
+      return verified()
+        && request.auth.token.get('superAdmin', false) == true
+        && get(/databases/$(database)/documents/super-admin/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/super-admin/$(request.auth.uid)).data.role == 'super_admin';
+    }
+    function isActiveEditor() {
+      return verified()
+        && request.auth.token.get('editor', false) == true
+        && get(/databases/$(database)/documents/platform-editors/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/platform-editors/$(request.auth.uid)).data.role == 'editor';
+    }
+    function isStaff() { return isActiveSuperAdmin() || isActiveEditor(); }
+
+    function changedKeys() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // ---- organisation membership (membership document id = organisationId_userId, written only by functions)
+    function membershipPath(orgId) {
+      return /databases/$(database)/documents/organisation-members/$(orgId + '_' + request.auth.uid);
+    }
+    function orgPath(orgId) { return /databases/$(database)/documents/organisations/$(orgId); }
+    function roleGrants(role, perm) {
+      return role in ['owner', 'manager']
+        || (role == 'reservations_manager' && perm in ['bookings.read', 'bookings.manage', 'enquiries.manage'])
+        || (role == 'content_manager' && perm in ['profile.edit', 'content.manage'])
+        || (role == 'employee' && perm == 'bookings.read');
+    }
+    // Active member holding `perm` (both stored on the membership AND granted by the member's role)
+    function memberHas(orgId, perm) {
+      return signedIn()
+        && orgId is string
+        && exists(membershipPath(orgId))
+        && get(membershipPath(orgId)).data.active == true
+        && perm in get(membershipPath(orgId)).data.permissions
+        && roleGrants(get(membershipPath(orgId)).data.role, perm);
+    }
+    function orgIsActive(orgId) {
+      return get(orgPath(orgId)).data.approvalStatus == 'approved' && get(orgPath(orgId)).data.active == true;
+    }
+    function orgPerm(orgId, perm) { return memberHas(orgId, perm) && orgIsActive(orgId); }
+
+    // ---------------------------------------------------------------- platform records: server-written only
+    match /super-admin/{uid}      { allow read: if isActiveSuperAdmin(); allow write: if false; }
+    match /platform-editors/{uid} { allow read: if isActiveSuperAdmin(); allow write: if false; }
+    match /audit-log/{id}         { allow read: if isActiveSuperAdmin(); allow write: if false; }
+
+    // ---------------------------------------------------------------- public content (existing collections)
+    // Readable by anyone ONLY while isActive == true. Written by active staff only. Provider-submitted listings never
+    // write here directly: they go through listing-submissions and are published by staff via a function.
+    function publicCollections() {
+      return ['accommodations', 'attractions', 'business', 'restaurants', 'recreation', 'events', 'news',
+              'announcements', 'transport', 'healthcare', 'emergency', 'publicservice', 'homescreen',
+              'xplore-menu', 'loadshedding'];
+    }
+    match /{coll}/{docId} {
+      allow read: if coll in publicCollections() && resource.data.isActive == true;
+      allow create, update, delete: if coll in publicCollections() && isStaff();
+    }
+
+    // ---------------------------------------------------------------- users (private)
+    match /users/{uid} {
+      allow get: if isSelf(uid);              // own profile only
+      allow list: if false;                   // no profile queries, so no email exposure
+      allow create: if false;                 // created by ensureUserProfile
+      allow delete: if false;
+      // Users may change ONLY these fields. Roles, permissions, email, uid and organisation membership are not here.
+      allow update: if isSelf(uid)
+        && changedKeys().hasOnly(['displayName', 'greeting', 'kasi', 'phone', 'city', 'photoURL', 'enrolled', 'enrolledAt', 'updatedAt'])
+        && (!changedKeys().hasAny(['displayName'])
+            || (request.resource.data.displayName is string && request.resource.data.displayName.size() > 0 && request.resource.data.displayName.size() <= 60))
+        && (!changedKeys().hasAny(['greeting']) || request.resource.data.greeting == null || (request.resource.data.greeting is string && request.resource.data.greeting.size() <= 60))
+        && (!changedKeys().hasAny(['kasi']) || request.resource.data.kasi == null || (request.resource.data.kasi is string && request.resource.data.kasi.size() <= 60))
+        && (!changedKeys().hasAny(['city']) || request.resource.data.city == null || (request.resource.data.city is string && request.resource.data.city.size() <= 60))
+        && (!changedKeys().hasAny(['phone']) || request.resource.data.phone == null || (request.resource.data.phone is string && request.resource.data.phone.size() <= 20))
+        && (!changedKeys().hasAny(['photoURL']) || request.resource.data.photoURL == null || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 2000))
+        && (!changedKeys().hasAny(['enrolled']) || request.resource.data.enrolled is bool)
+        && (!changedKeys().hasAny(['enrolledAt']) || request.resource.data.enrolledAt == null || request.resource.data.enrolledAt is timestamp)
+        && (!changedKeys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp);
+    }
+
+    // ---------------------------------------------------------------- provider applications (private)
+    match /provider-applications/{appId} {
+      allow get, list: if signedIn() && resource.data.applicantUid == request.auth.uid;   // queries must filter on applicantUid
+      allow get, list: if isActiveSuperAdmin();
+      allow write: if false;                  // submitProviderApplication / reviewProviderApplication
+    }
+
+    // ---------------------------------------------------------------- organisations (private to members and super admins)
+    match /organisations/{orgId} {
+      allow get: if memberHas(orgId, 'bookings.read') || memberHas(orgId, 'content.manage') || memberHas(orgId, 'members.manage') || isActiveSuperAdmin();
+      allow list: if isActiveSuperAdmin();    // a user finds their organisations through organisation-members
+      allow create, delete: if false;         // created on approval by a function
+      // Members with profile.edit (owner, manager, content manager) may edit organisation information only
+      allow update: if orgPerm(orgId, 'profile.edit')
+        && changedKeys().hasOnly(['description', 'contact', 'logoUrl', 'updatedAt'])
+        && (!changedKeys().hasAny(['description']) || (request.resource.data.description is string && request.resource.data.description.size() <= 2000))
+        && (!changedKeys().hasAny(['contact']) || (request.resource.data.contact is map && request.resource.data.contact.keys().hasOnly(['phone', 'email', 'address', 'website'])))
+        && (!changedKeys().hasAny(['logoUrl']) || request.resource.data.logoUrl == null || (request.resource.data.logoUrl is string && request.resource.data.logoUrl.size() <= 2000));
+    }
+    match /organisation-members/{membershipId} {
+      allow get, list: if signedIn() && resource.data.userId == request.auth.uid;          // my memberships
+      allow get, list: if memberHas(resource.data.organisationId, 'members.manage');       // staff screens (query by organisationId)
+      allow get, list: if isActiveSuperAdmin();
+      allow write: if false;                  // roles and permissions are assigned only by functions
+    }
+    match /organisation-invitations/{invitationId} {
+      allow read, write: if false;            // never exposed to clients: functions only, emails masked in responses
+    }
+
+    // ---------------------------------------------------------------- listing submissions (private to the organisation)
+    match /listing-submissions/{submissionId} {
+      allow get, list: if memberHas(resource.data.organisationId, 'content.manage');
+      allow get, list: if isStaff();
+      allow write: if false;                  // submitListing / reviewListingSubmission
+    }
+
+    // ---------------------------------------------------------------- bookings and service requests (private)
+    match /bookings/{bookingId} {
+      allow get, list: if signedIn() && resource.data.customerUid == request.auth.uid;     // queries must filter on customerUid
+      allow get, list: if memberHas(resource.data.organisationId, 'bookings.read');
+      allow get, list: if isActiveSuperAdmin();
+      allow write: if false;                  // createBookingRequest / updateRequestStatus
+    }
+    match /service-requests/{requestId} {
+      allow get, list: if signedIn() && resource.data.customerUid == request.auth.uid;
+      allow get, list: if memberHas(resource.data.organisationId, 'enquiries.manage');
+      allow get, list: if isActiveSuperAdmin();
+      allow write: if false;                  // createServiceRequest / updateRequestStatus
+    }
+
+    // ---------------------------------------------------------------- reviews (read-only for clients)
+    match /reviews/{reviewId} {
+      allow read: if signedIn();
+      allow write: if false;                  // submitReview verifies a completed, customer-confirmed request
+    }
+
+    // everything else is denied (Person-Of-Interest, any legacy or future collection)
+    match /{document=**} { allow read, write: if false; }
+  }
+}

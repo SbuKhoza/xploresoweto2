@@ -1,0 +1,16 @@
+{
+  "name": "xploresoweto-security-rules-tests",
+  "private": true,
+  "description": "Syntax lint + Firebase emulator tests for the PROPOSED rules. Run from the repository root (see README.md).",
+  "scripts": {
+    "lint": "eslint --no-config-lookup -c eslint.config.cjs firestore.rules storage.rules",
+    "test": "cd .. && firebase emulators:exec --config security-rules/firebase.rules-test.json --project demo-xploresoweto \"npx --prefix security-rules mocha security-rules/test/*.test.js --exit --timeout 30000\""
+  },
+  "devDependencies": {
+    "@firebase/eslint-plugin-security-rules": "^0.0.2",
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "eslint": "^9.0.0",
+    "firebase": "^11.0.0",
+    "mocha": "^10.7.0"
+  }
+}

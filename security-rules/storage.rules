@@ -1,0 +1,78 @@
+// =====================================================================================================================
+// XploreSoweto Stage 1: Firebase Storage Rules (bucket xploresoweto.firebasestorage.app).   *** PREPARED, NOT DEPLOYED ***
+// Default deny. Staff = claim AND verified email AND an active authoritative Firestore record (cross-service lookup).
+// Note: download-token URLs bypass rules for anyone who holds the URL, so private documents (provider applications) are
+// never given token URLs; they are read only through authenticated SDK calls that these rules authorise.
+// =====================================================================================================================
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function verified() { return signedIn() && request.auth.token.email_verified == true; }
+    function isImage() { return request.resource.contentType.matches('image/(jpeg|png|webp)'); }
+    function isDocument() { return request.resource.contentType.matches('image/(jpeg|png)|application/pdf'); }
+    function underMB(n) { return request.resource.size < n * 1024 * 1024; }
+
+    function isActiveSuperAdmin() {
+      return verified()
+        && request.auth.token.get('superAdmin', false) == true
+        && firestore.get(/databases/(default)/documents/super-admin/$(request.auth.uid)).data.active == true
+        && firestore.get(/databases/(default)/documents/super-admin/$(request.auth.uid)).data.role == 'super_admin';
+    }
+    function isActiveEditor() {
+      return verified()
+        && request.auth.token.get('editor', false) == true
+        && firestore.get(/databases/(default)/documents/platform-editors/$(request.auth.uid)).data.active == true
+        && firestore.get(/databases/(default)/documents/platform-editors/$(request.auth.uid)).data.role == 'editor';
+    }
+    function isStaff() { return isActiveSuperAdmin() || isActiveEditor(); }
+
+    function membershipPath(orgId) { return /databases/(default)/documents/organisation-members/$(orgId + '_' + request.auth.uid); }
+    function orgPath(orgId) { return /databases/(default)/documents/organisations/$(orgId); }
+    function orgContentManager(orgId) {
+      return verified()
+        && firestore.exists(membershipPath(orgId))
+        && firestore.get(membershipPath(orgId)).data.active == true
+        && ('content.manage' in firestore.get(membershipPath(orgId)).data.permissions)
+        && firestore.get(membershipPath(orgId)).data.role in ['owner', 'manager', 'content_manager']
+        && firestore.get(orgPath(orgId)).data.approvalStatus == 'approved'
+        && firestore.get(orgPath(orgId)).data.active == true;
+    }
+
+    // ---- profile images: private to the owner
+    match /profile-images/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid && isImage() && underMB(2);
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // ---- published media: public read; only active staff upload or remove. (Functions publish approved provider images here
+    //      using the Admin SDK, which bypasses rules.)
+    function publicFolder(f) {
+      return f in ['homescreen', 'news', 'events', 'attractions', 'business', 'restaurants', 'accommodations',
+                   'recreation', 'healthcare', 'publicservice'];
+    }
+    match /{folder}/{allPaths=**} {
+      allow read: if publicFolder(folder);
+      allow create, update: if publicFolder(folder) && isStaff() && isImage() && underMB(5);
+      allow delete: if publicFolder(folder) && isStaff();
+    }
+
+    // ---- provider listing submissions: members with content.manage of an approved organisation upload; they and staff read.
+    //      Immutable once uploaded (no update/delete from clients).
+    match /listing-submissions/{orgId}/{submissionId}/{file} {
+      allow read: if orgContentManager(orgId) || isStaff();
+      allow create: if orgContentManager(orgId) && submissionId.matches(orgId + '_.*') && isImage() && underMB(5);
+    }
+
+    // ---- provider application documents: private to the applicant and super admins; immutable
+    match /provider-applications/{uid}/{applicationId}/{file} {
+      allow read: if signedIn() && (request.auth.uid == uid || isActiveSuperAdmin());
+      allow create: if verified() && request.auth.uid == uid && applicationId.matches(uid + '_.*') && isDocument() && underMB(10);
+    }
+
+    // everything else (including person-of-interest/*) is denied
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}
