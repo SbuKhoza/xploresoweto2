@@ -5,8 +5,8 @@ import {
 } from "react-native"
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { collection, getDocs } from "firebase/firestore"
-import { db } from "../../../Firebase/config"
+import { getDocs } from "firebase/firestore"
+import { publicCollectionRef } from "../../../utils/publicContent"
 import { useScrollTracking, AnimatedFlatList } from "../../BottomNav"
 import OfflineIndicator from "../../OfflineIndicator"
 import {
@@ -71,7 +71,7 @@ const ExploreList = ({
   const fetchData = async () => {
     try {
       setLoading(true)
-      const snap = await getDocs(collection(db, collectionName))
+      const snap = await getDocs(publicCollectionRef(collectionName))
       const list = []
       const typeSet = new Set()
       snap.forEach(d => {

@@ -1,6 +1,7 @@
 import NetInfo from "@react-native-community/netinfo"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { collection, getDocs, query, where, doc, getDoc, orderBy, limit } from "firebase/firestore"
+import { isPublicContent, sortAndLimit } from "./publicContent"
 import { db } from "../Firebase/config"
 
 // Enhanced offline data management with better error handling and caching strategies
@@ -92,29 +93,33 @@ export const fetchWithOfflineSupport = async (collectionName, options = {}) => {
       console.log(`🔄 Fetching fresh data for ${collectionName}`)
 
       // Build Firestore query
+      // Public content must be requested with isActive == true (the security rules reject anything else)
+      const isPublic = isPublicContent(collectionName)
+      const allFilters = isPublic && !filters.some((f) => f.field === "isActive")
+        ? [...filters, { field: "isActive", operator: "==", value: true }]
+        : filters
       let dataQuery = collection(db, collectionName)
 
       // Apply filters
-      if (filters.length > 0) {
-        const whereConditions = filters.map((filter) => where(filter.field, filter.operator, filter.value))
+      if (allFilters.length > 0) {
+        const whereConditions = allFilters.map((filter) => where(filter.field, filter.operator, filter.value))
         dataQuery = query(dataQuery, ...whereConditions)
       }
 
-      // Apply ordering
-      if (orderByField) {
+      // Apply ordering / limit: on the server for private collections, in the app for public ones (no composite index needed)
+      if (!isPublic && orderByField) {
         dataQuery = query(dataQuery, orderBy(orderByField))
       }
-
-      // Apply limit
-      if (limitCount) {
+      if (!isPublic && limitCount) {
         dataQuery = query(dataQuery, limit(limitCount))
       }
 
       const querySnapshot = await getDocs(dataQuery)
-      const freshData = querySnapshot.docs.map((doc) => ({
+      let freshData = querySnapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }))
+      if (isPublic) freshData = sortAndLimit(freshData, orderByField, limitCount)
 
       // Store fresh data with metadata
       await storeOfflineData(storageKey, freshData, {

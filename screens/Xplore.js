@@ -6,8 +6,9 @@ import FontAwesome from "react-native-vector-icons/FontAwesome"
 import MaterialIcons from "react-native-vector-icons/MaterialIcons"
 import Ionicons from "react-native-vector-icons/Ionicons"
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons"
-import { collection, getDocs } from "firebase/firestore"
-import { db } from "../Firebase/config"
+import { getDocs } from "firebase/firestore"
+import { publicCollectionRef } from "../utils/publicContent"
+import { DEFAULT_XPLORE_MENU } from "../utils/defaultXploreMenu"
 import { useScrollTracking, AnimatedFlatList } from "../components/BottomNav"
 
 // Same rotating tile-color scheme used on the Community hub, so a card in
@@ -34,11 +35,11 @@ export default function Xplore() {
       setDataLoading(true)
       setError(null)
 
-      const xploreMenuRef = collection(db, "xplore-menu")
-      const snapshot = await getDocs(xploreMenuRef)
+      const snapshot = await getDocs(publicCollectionRef("xplore-menu"))
 
       if (snapshot.empty) {
-        setExploreItems([])
+        // Empty database: fall back to the built-in category shortcuts (navigation only, no content)
+        setExploreItems(DEFAULT_XPLORE_MENU)
         return
       }
 

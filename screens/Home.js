@@ -10,8 +10,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import { onAuthStateChanged } from "firebase/auth"
-import { doc, getDoc, collection, getDocs } from "firebase/firestore"
+import { doc, getDoc, getDocs } from "firebase/firestore"
 import { auth, db } from "../Firebase/config"
+import { publicCollectionRef } from "../utils/publicContent"
 import { useNavigation, CommonActions } from "@react-navigation/native"
 import { useOfflineData } from "../hooks/useOfflineData"
 import TownshipSheet from "../components/township/TownshipSheet"
@@ -430,7 +431,7 @@ const Home = () => {
           const userDoc = await getDoc(doc(db, "users", user.uid))
           if (userDoc.exists()) {
             const d = userDoc.data()
-            setUserDisplayName(d.username || d.name || user.email.split("@")[0])
+            setUserDisplayName(d.displayName || user.displayName || user.email.split("@")[0])
           } else {
             setUserDisplayName(user.displayName || user.email.split("@")[0])
           }
@@ -453,7 +454,7 @@ const Home = () => {
       await Promise.all(
         SEARCH_COLLECTIONS.map(async (col) => {
           try {
-            const snap = await getDocs(collection(db, col.key))
+            const snap = await getDocs(publicCollectionRef(col.key))
             snap.forEach(d => {
               const data = d.data()
               // Only include townships (type === "township") from homescreen

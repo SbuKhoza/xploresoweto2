@@ -6,6 +6,10 @@ import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-ic
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import { useOfflineData } from "../hooks/useOfflineData"
+import { FEATURES } from "../utils/features"
+
+// Person-Of-Interest is excluded from the launch: with the flag off this never touches Firestore (chosen once at module load, so hook order is stable)
+const usePersonsOfInterest = FEATURES.personOfInterest ? useOfflineData : () => ({ data: null })
 import { toDate, cardShadow } from "../utils/content"
 import { useAnnouncements } from "../hooks/useAnnouncements"
 import { announcementStyle } from "../utils/announcements"
@@ -69,7 +73,7 @@ const Community = () => {
   }, [events])
 
   const poiOptions = useMemo(() => ({ maxAgeMinutes: 20 }), [])
-  const { data: personsOfInterest } = useOfflineData("Person-Of-Interest", poiOptions)
+  const { data: personsOfInterest } = usePersonsOfInterest("Person-Of-Interest", poiOptions)
   const activeCasesCount = personsOfInterest ? personsOfInterest.length : null
 
   const cards = [
@@ -119,7 +123,7 @@ const Community = () => {
         : "Tap to view or report a case",
       onPress: () => navigation.navigate("PoIst"),
     },
-  ]
+  ].filter((c) => FEATURES.personOfInterest || c.key !== "poist")
 
   const Icon = ({ type, name, size, color }) => {
     if (type === "Material") return <MaterialIcons name={name} size={size} color={color} />

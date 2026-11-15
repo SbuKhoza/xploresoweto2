@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { getOfflineData, storeOfflineData, isOnline } from "../utils/offlineData"
-import { collection, getDocs, query, orderBy, limit } from "firebase/firestore"
-import { db } from "../Firebase/config"
+import { getDocs, query, orderBy, limit } from "firebase/firestore"
+import { isPublicContent, publicCollectionRef, sortAndLimit } from "../utils/publicContent"
 
 export const useOfflineData = (collectionName, options = {}) => {
   const [data, setData] = useState([])
@@ -51,18 +51,21 @@ export const useOfflineData = (collectionName, options = {}) => {
         console.log(`🔄 Fetching fresh data for ${collectionName}`)
 
         // Build Firestore query
-        let firestoreQuery = collection(db, collectionName)
+        // Public content is read with where("isActive", "==", true) (required by the security rules); ordering and
+        // limiting are then applied in the app so no composite index is needed.
+        const isPublic = isPublicContent(collectionName)
+        let firestoreQuery = publicCollectionRef(collectionName)
 
-        if (optionsRef.current.orderByField) {
+        if (!isPublic && optionsRef.current.orderByField) {
           firestoreQuery = query(firestoreQuery, orderBy(optionsRef.current.orderByField))
         }
 
-        if (optionsRef.current.limitCount) {
+        if (!isPublic && optionsRef.current.limitCount) {
           firestoreQuery = query(firestoreQuery, limit(optionsRef.current.limitCount))
         }
 
         const snapshot = await getDocs(firestoreQuery)
-        const freshData = []
+        let freshData = []
 
         snapshot.forEach((doc) => {
           freshData.push({
@@ -70,6 +73,7 @@ export const useOfflineData = (collectionName, options = {}) => {
             ...doc.data(),
           })
         })
+        if (isPublic) freshData = sortAndLimit(freshData, optionsRef.current.orderByField, optionsRef.current.limitCount)
 
         if (isMountedRef.current) {
           setData(freshData)

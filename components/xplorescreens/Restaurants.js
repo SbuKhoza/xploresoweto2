@@ -10,8 +10,8 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { collection, getDocs } from "firebase/firestore"
-import { db } from "../../Firebase/config"
+import { getDocs } from "firebase/firestore"
+import { publicCollectionRef } from "../../utils/publicContent"
 import { useScrollTracking, AnimatedFlatList } from "../BottomNav"
 import OfflineIndicator from "../OfflineIndicator"
 import RestaurantReservationForm from "./RestaurantReservationForm"
@@ -171,7 +171,7 @@ const Restaurants = () => {
   const fetchRestaurantsData = async () => {
     try {
       setDataLoading(true)
-      const snap = await getDocs(collection(db, "restaurants"))
+      const snap = await getDocs(publicCollectionRef("restaurants"))
       const restaurants = []
       const typesSet = new Set()
       snap.forEach(doc => {

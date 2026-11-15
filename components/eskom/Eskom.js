@@ -13,7 +13,6 @@ import {
 } from "react-native"
 import { getUserLocation, reverseGeocode } from "../../utils/getLocation"
 import { useOfflineData } from "../../hooks/useOfflineData"
-import { seedFirestoreIfNeeded } from "../../utils/seedLoadshedding"
 
 const getEskomStage = async () => {
   try {
@@ -68,10 +67,6 @@ const ImprovedEskom = () => {
     enableBackgroundRefresh: true,
     maxAgeMinutes: 60,
   })
-
-  useEffect(() => {
-    seedFirestoreIfNeeded()
-  }, [])
 
   useEffect(() => {
     const init = async () => {
