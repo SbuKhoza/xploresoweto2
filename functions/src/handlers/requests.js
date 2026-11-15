@@ -30,7 +30,7 @@ async function createRequest(kind, request) {
   } else {
     V.onlyKeys(d, ["requestId", "listingCollection", "listingId", "message", "phone"])
     listingCollection = V.oneOf(d.listingCollection ?? "business", "listingCollection", SERVICE_COLLECTIONS)
-    extra = { message: V.str(d.message, "message", { max: 1000 }), phone: V.optPhone(d.phone) || null }
+    extra = { message: V.optStr(d.message, "message", { max: 1000 }) || null, phone: V.optPhone(d.phone) || null }
   }
   const col = colFor(kind)
   const id = `${ctx.uid}_${rid}`

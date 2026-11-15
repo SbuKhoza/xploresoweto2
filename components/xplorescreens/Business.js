@@ -6,8 +6,11 @@ import {
   Linking, Alert, RefreshControl, ActivityIndicator, TextInput,
 } from "react-native"
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
-import { collection, getDocs, query, where, addDoc, doc, getDoc } from "firebase/firestore"
+import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore"
 import { db, auth } from "../../Firebase/config"
+import { publicCollectionRef } from "../../utils/publicContent"
+import { callFunction, alertCallableError } from "../../utils/callable"
+import { newRequestId } from "../../utils/requestId"
 import { onAuthStateChanged } from "firebase/auth"
 import { useScrollTracking, AnimatedFlatList } from "../BottomNav"
 import OfflineIndicator from "../OfflineIndicator"
@@ -64,6 +67,7 @@ const Business = () => {
   const [newReview, setNewReview] = useState({ rating: 5, comment: "", reviewerName: "" })
   const [currentUser, setCurrentUser] = useState(null)
   const [userCanReview, setUserCanReview] = useState(false)
+  const serviceRequestIdRef = useRef(null)
   const [hasUserReviewed, setHasUserReviewed] = useState(false)
   const [calculatedRating, setCalculatedRating] = useState(0)
   const [authLoading, setAuthLoading] = useState(true)
@@ -89,7 +93,8 @@ const Business = () => {
               ...userDoc.data(),
             }
             setCurrentUser(userData)
-            setUserCanReview(userData.canReview || false)
+            // Review eligibility is decided by the server per business (see refreshReviewEligibility); a client flag is never trusted
+            setUserCanReview(false)
           } else {
             setCurrentUser({ id: firebaseUser.uid, uid: firebaseUser.uid, email: firebaseUser.email, name: firebaseUser.displayName })
             setUserCanReview(false)
@@ -111,7 +116,7 @@ const Business = () => {
   const fetchBusinessData = async () => {
     try {
       setDataLoading(true)
-      const snapshot = await getDocs(collection(db, "business"))
+      const snapshot = await getDocs(publicCollectionRef("business"))
       const list = snapshot.docs.map((d) => {
         const data = { id: d.id, ...d.data() }
         data.__type = typeof data.type === "string" ? data.type.trim() : ""
@@ -324,7 +329,10 @@ const Business = () => {
       })
       setReviews(sorted)
       setCalculatedRating(calculateAverageRating(sorted))
-      if (currentUser?.id || currentUser?.uid) await checkUserReviewStatus(businessId, currentUser.id || currentUser.uid)
+      if (currentUser?.id || currentUser?.uid) {
+        await checkUserReviewStatus(businessId, currentUser.id || currentUser.uid)
+        await refreshReviewEligibility(businessId)
+      }
     } catch (e) {
       setReviews([])
       setCalculatedRating(0)
@@ -343,42 +351,52 @@ const Business = () => {
     } catch {}
   }
 
+  // The server decides: only a customer with a completed, confirmed service request for this business may review it
+  const refreshReviewEligibility = async (businessId) => {
+    try {
+      const r = await callFunction("checkReviewEligibility", { listingCollection: "business", listingId: businessId })
+      setUserCanReview(!!r.eligible)
+      if (r.alreadyReviewed) setHasUserReviewed(true)
+    } catch {
+      setUserCanReview(false) // unverified email, offline or backend unavailable: the button stays disabled
+    }
+  }
+
   const submitReview = async () => {
     if (!newReview.reviewerName.trim() || !newReview.comment.trim()) { Alert.alert("Missing Information", "Please fill in all fields"); return }
     if (authLoading) { Alert.alert("Please wait", "Checking authentication status..."); return }
     if (!currentUser?.id && !currentUser?.uid) { Alert.alert("Authentication Required", "Please log in to submit a review"); return }
     try {
-      await addDoc(collection(db, "reviews"), {
-        businessId: selectedBusiness.id,
-        businessName: selectedBusiness.name,
-        userId: currentUser.id || currentUser.uid,
+      // Created by the backend after it verifies a qualifying, completed and customer-confirmed service request
+      await callFunction("submitReview", {
+        listingCollection: "business",
+        listingId: selectedBusiness.id,
         rating: newReview.rating,
-        comment: newReview.comment,
-        reviewerName: newReview.reviewerName,
-        createdAt: new Date().toISOString(),
+        comment: newReview.comment.trim(),
+        reviewerName: newReview.reviewerName.trim(),
       })
       setNewReview({ rating: 5, comment: "", reviewerName: "" })
       setShowReviewForm(false)
       fetchReviews(selectedBusiness.id)
       Alert.alert("Success", "Review submitted successfully!")
-    } catch { Alert.alert("Error", "Error submitting review. Please try again.") }
+    } catch (e) { alertCallableError(e, { title: "Review not submitted", onVerified: () => refreshReviewEligibility(selectedBusiness.id) }) }
   }
 
   const handleHireRequest = async () => {
     if (authLoading) { Alert.alert("Please wait", "Checking authentication status..."); return }
     if (!currentUser?.id && !currentUser?.uid) { Alert.alert("Authentication Required", "Please log in to request a service"); return }
     try {
-      await addDoc(collection(db, "userservices"), {
-        businessId: selectedBusiness.id,
-        businessName: selectedBusiness.name,
-        userId: currentUser.id || currentUser.uid,
-        userName: currentUser.name || currentUser.displayName || "Unknown User",
-        userEmail: currentUser.email || "No email provided",
-        requestedAt: new Date().toISOString(),
-        status: "pending",
+      // Created by the backend (your name and verified email come from your account, not from this device). Retrying the
+      // same tap reuses the same request id, so a retry can never create a duplicate request.
+      serviceRequestIdRef.current = serviceRequestIdRef.current || newRequestId()
+      await callFunction("createServiceRequest", {
+        requestId: serviceRequestIdRef.current,
+        listingCollection: "business",
+        listingId: selectedBusiness.id,
       })
+      serviceRequestIdRef.current = null
       Alert.alert("Request Sent!", `Service request sent to ${selectedBusiness.name}.`)
-    } catch { Alert.alert("Error", "Error submitting service request. Please try again.") }
+    } catch (e) { alertCallableError(e, { title: "Request not sent" }) }
   }
 
   // ── Business Profile (inside modal) ─────────────────────────────────────

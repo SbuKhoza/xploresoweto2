@@ -1,11 +1,13 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Text, View, ScrollView, TouchableOpacity, Modal, TextInput, Alert, FlatList,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import DateTimePicker from "@react-native-community/datetimepicker"
+import { callFunction, alertCallableError } from "../../utils/callable"
+import { newRequestId, toYMD } from "../../utils/requestId"
 
 const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
   const [reservationDate, setReservationDate] = useState(new Date())
@@ -75,7 +77,11 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
   const formatDate = (date) =>
     date.toLocaleDateString("en-ZA", { weekday: "short", year: "numeric", month: "short", day: "numeric" })
 
-  const handleSubmitReservation = () => {
+  const requestIdRef = useRef(null)
+  const submittingRef = useRef(false)
+
+  const handleSubmitReservation = async () => {
+    if (submittingRef.current) return
     if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim() || !selectedTable) {
       Alert.alert("Missing info", "Please fill in all required fields and select a table")
       return
@@ -89,15 +95,37 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
       occasion: selectedOccasion.label, specialRequests,
     }
 
-    Alert.alert(
-      "Reservation Submitted",
-      `Thank you ${guestName}! Your reservation at ${restaurant?.name} for ${formatDate(reservationDate)} at ${reservationTimeString} has been submitted. You will receive a confirmation email shortly.`,
-      [{ text: "OK", onPress: () => {
-        onClose()
-        setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
-        setGuests(2); setOccasion("none"); setSelectedTable(null)
-      }}],
-    )
+    // Send a real table REQUEST to the restaurant (through the backend). The restaurant accepts or declines it; no
+    // confirmation email is promised because no email notification system exists yet.
+    submittingRef.current = true
+    try {
+      requestIdRef.current = requestIdRef.current || newRequestId()
+      const notes = [`Guest: ${guestName.trim()}`, `Table: ${selectedTable}`, `Occasion: ${selectedOccasion.label}`, specialRequests.trim() && `Requests: ${specialRequests.trim()}`].filter(Boolean).join(". ").slice(0, 500)
+      await callFunction("createBookingRequest", {
+        requestId: requestIdRef.current,
+        listingCollection: "restaurants",
+        listingId: restaurant?.id,
+        date: toYMD(reservationDate),
+        time: reservationTimeString,
+        guests,
+        notes,
+        phone: guestPhone.trim(),
+      })
+      requestIdRef.current = null
+      Alert.alert(
+        "Request Sent",
+        `Thank you ${guestName}! Your table request at ${restaurant?.name} for ${formatDate(reservationDate)} at ${reservationTimeString} has been sent. The restaurant will review it and respond.`,
+        [{ text: "OK", onPress: () => {
+          onClose()
+          setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
+          setGuests(2); setOccasion("none"); setSelectedTable(null)
+        }}],
+      )
+    } catch (e) {
+      alertCallableError(e, { title: "Request not sent" }) // the form stays open so nothing typed is lost
+    } finally {
+      submittingRef.current = false
+    }
   }
 
   const onDateChange = (event, selectedDate) => {

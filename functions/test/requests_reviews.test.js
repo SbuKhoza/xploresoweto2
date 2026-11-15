@@ -36,6 +36,10 @@ test("service request: created with server-derived identity; retry returns the s
   await rejects(svc("cust", { requestId: "req-00000002", status: "completed" }), "invalid-argument")
   await rejects(svc("cust", { requestId: "req-00000002", customerUid: "cust2" }), "invalid-argument")
 })
+test("service request: the message is optional (the app's hire button has no message box)", async () => {
+  const r = await R.createServiceRequest(req("cust", { requestId: "req-00000007", listingId: "biz1" }))
+  assert.equal(r.status, "pending"); assert.equal(env.get("service-requests/cust_req-00000007").message, null)
+})
 test("service request: capped at 10 pending per user", async () => {
   for (let i = 0; i < 10; i++) await svc("cust", { requestId: `req-0000000${i}` })
   await rejects(svc("cust", { requestId: "req-99999999" }), "resource-exhausted")

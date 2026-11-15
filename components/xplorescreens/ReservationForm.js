@@ -1,11 +1,13 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Text, View, ScrollView, TouchableOpacity, Modal, TextInput, Alert, FlatList,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import DateTimePicker from "@react-native-community/datetimepicker"
+import { callFunction, alertCallableError } from "../../utils/callable"
+import { newRequestId, toYMD } from "../../utils/requestId"
 
 const ReservationForm = ({ visible, onClose, accommodation }) => {
   const [checkInDate, setCheckInDate] = useState(new Date())
@@ -74,7 +76,11 @@ const ReservationForm = ({ visible, onClose, accommodation }) => {
 
   const calculateNights = () => Math.ceil(Math.abs(checkOutDate - checkInDate) / (1000 * 60 * 60 * 24))
 
-  const handleSubmitReservation = () => {
+  const requestIdRef = useRef(null)
+  const submittingRef = useRef(false)
+
+  const handleSubmitReservation = async () => {
+    if (submittingRef.current) return
     if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim()) {
       Alert.alert("Missing info", "Please fill in all required fields")
       return
@@ -93,15 +99,38 @@ const ReservationForm = ({ visible, onClose, accommodation }) => {
       breakfast: selectedBreakfast.label, specialRequests, nights: calculateNights(),
     }
 
-    Alert.alert(
-      "Reservation Submitted",
-      `Thank you ${guestName}! Your reservation for ${accommodation?.name} has been submitted. You will receive a confirmation email shortly.`,
-      [{ text: "OK", onPress: () => {
-        onClose()
-        setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
-        setGuests(1); setBreakfastOption("none")
-      }}],
-    )
+    // Send a real booking REQUEST to the accommodation (through the backend). The provider accepts or declines it; no
+    // confirmation email is promised because no email notification system exists yet.
+    submittingRef.current = true
+    try {
+      requestIdRef.current = requestIdRef.current || newRequestId()
+      const notes = [`Guest: ${guestName.trim()}`, `Check-out time: ${checkOutTimeString}`, `Breakfast: ${selectedBreakfast.label}`, specialRequests.trim() && `Requests: ${specialRequests.trim()}`].filter(Boolean).join(". ").slice(0, 500)
+      await callFunction("createBookingRequest", {
+        requestId: requestIdRef.current,
+        listingCollection: "accommodations",
+        listingId: accommodation?.id,
+        date: toYMD(checkInDate),
+        endDate: toYMD(checkOutDate),
+        time: checkInTimeString,
+        guests,
+        notes,
+        phone: guestPhone.trim(),
+      })
+      requestIdRef.current = null
+      Alert.alert(
+        "Request Sent",
+        `Thank you ${guestName}! Your booking request for ${accommodation?.name} has been sent. The accommodation will review it and respond.`,
+        [{ text: "OK", onPress: () => {
+          onClose()
+          setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
+          setGuests(1); setBreakfastOption("none")
+        }}],
+      )
+    } catch (e) {
+      alertCallableError(e, { title: "Request not sent" }) // the form stays open so nothing typed is lost
+    } finally {
+      submittingRef.current = false
+    }
   }
 
   const onCheckInDateChange = (event, selectedDate) => {
