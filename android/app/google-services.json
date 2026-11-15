@@ -1,0 +1,38 @@
+{
+  "project_info": {
+    "project_number": "289244799504",
+    "project_id": "the-steady-hotel",
+    "storage_bucket": "the-steady-hotel.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:289244799504:android:30cf8155e0cccb8c5d2095",
+        "android_client_info": {
+          "package_name": "com.sbudamalloya.xploresoweto"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "289244799504-2hn8ddsn0kks74tq8ims93jj8r7oq06v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sbudamalloya.xploresoweto",
+            "certificate_hash": "daf2c70921a9125ae9a783bd7324d80c6627f34d"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHY3BYWud7UtypZQmcY7EPFREnXRuRZw4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
