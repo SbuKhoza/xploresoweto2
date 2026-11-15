@@ -362,25 +362,29 @@ const Home = () => {
   // The tab's nested stack stays mounted after the first visit, so a plain
   // navigate() would push on top of whatever was opened last (e.g. Restaurants).
   // Resetting that stack to just the target screen avoids this.
-  const openInTab = (tabName, screenName) => {
+  const openInTab = (tabName, screenName, extraParams = {}) => {
     try {
       const tabRoute = navigation.getState()?.routes?.find(r => r.name === tabName)
       const stackKey = tabRoute?.state?.key // undefined until the tab has been visited
       if (stackKey) {
         navigation.dispatch({
-          ...CommonActions.reset({ index: 0, routes: [{ name: screenName }] }),
+          ...CommonActions.reset({ index: 0, routes: [{ name: screenName, params: { from: "Home", ...extraParams } }] }),
           target: stackKey,
         })
       }
       // `from: "Home"` lets the shared Header send the back button straight to Home.
-      navigation.navigate(tabName, { screen: screenName, params: { from: "Home" } })
+      navigation.navigate(tabName, { screen: screenName, params: { from: "Home", ...extraParams } })
     } catch (e) {
       console.error(`Navigation error to ${tabName}/${screenName}:`, e)
     }
   }
 
   const goXploreItem = (screenName) => openInTab("Xplore", screenName)
-  const goCommunity  = (screenName) => openInTab("Community", screenName || "CommunityMain")
+  const goCommunity  = (screenName, params) => openInTab("Community", screenName || "CommunityMain", params)
+
+  // Open one specific story / event. The nonce makes re-opening the same item work.
+  const openStory = (item) => goCommunity("News",   { openItemId: String(item.id), openNonce: Date.now() })
+  const openEvent = (item) => goCommunity("Events", { openItemId: String(item.id), openNonce: Date.now() })
 
   const getGreeting = () => {
     const h = new Date().getHours()
@@ -710,7 +714,7 @@ const Home = () => {
                 const d    = dayjs(e._date)
                 const time = e.time || ((d.hour() || d.minute()) ? d.format("HH:mm") : null)
                 return (
-                  <TouchableOpacity activeOpacity={0.9} onPress={() => goCommunity("Events")}
+                  <TouchableOpacity activeOpacity={0.9} onPress={() => openEvent(e)}
                     style={[{ width: EVENT_W, height: 96, borderRadius: 18, backgroundColor: "#fff", marginRight: EVENT_GAP }, cardShadow]}>
                     <View style={{ flex: 1, borderRadius: 18, overflow: "hidden" }}>
                       {/* Event photo, full bleed (Soweto1.png when the event has none) */}
@@ -792,7 +796,7 @@ const Home = () => {
               const src = item.imageUrl ? { uri: item.imageUrl } : item.localImage
               const when = toDate(item.publishedAt)
               return (
-                <TouchableOpacity activeOpacity={0.9} onPress={() => goCommunity("News")} style={[{ width: STORY_W, marginRight: STORY_GAP, borderRadius: 16, backgroundColor: "#fff" }, cardShadow]}>
+                <TouchableOpacity activeOpacity={0.9} onPress={() => openStory(item)} style={[{ width: STORY_W, marginRight: STORY_GAP, borderRadius: 16, backgroundColor: "#fff" }, cardShadow]}>
                   <View style={{ borderRadius: 16, overflow: "hidden" }}>
                     <View style={{ height: 92 }}>
                       <CoverImage source={src} fallbackIcon={storyIcon(item.category)} iconSize={28} style={{ width: "100%", height: "100%" }} />

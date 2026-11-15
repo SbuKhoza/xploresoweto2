@@ -1,7 +1,8 @@
 "use client"
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { Text, View, TouchableOpacity, ActivityIndicator, RefreshControl, ScrollView, Linking, Share } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { useRoute } from "@react-navigation/native"
 import { LinearGradient } from "expo-linear-gradient"
 import dayjs from "dayjs"
 import { useScrollTracking, AnimatedFlatList } from "../components/BottomNav"
@@ -101,6 +102,8 @@ const Events = ({ search = "" }) => {
   const [category, setCategory] = useState("All")
   const [selected, setSelected] = useState(null)
   const scrollProps = useScrollTracking()
+  const route = useRoute()
+  const handledOpen = useRef(null)
 
   const options = useMemo(() => ({ maxAgeMinutes: 20, enableBackgroundRefresh: true }), [])
   const { data, loading, isOffline, refresh } = useOfflineData("events", options)
@@ -110,6 +113,17 @@ const Events = ({ search = "" }) => {
     [data]
   )
   const all = live // fully dynamic: only what's in Firestore (CMS → Community → Events)
+
+  // Deep link from Home: open the tapped event straight away
+  const { openItemId, openNonce } = route.params || {}
+  useEffect(() => {
+    if (!openItemId || handledOpen.current === openNonce) return
+    const match = all.find((e) => String(e.id) === String(openItemId))
+    if (match) {
+      handledOpen.current = openNonce
+      setSelected(match)
+    }
+  }, [openItemId, openNonce, all])
 
   const { upcoming, past } = useMemo(() => {
     const today = dayjs().startOf("day")

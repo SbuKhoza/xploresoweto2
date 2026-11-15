@@ -4,6 +4,7 @@ import { StyleSheet, Text, View, TouchableOpacity, Animated } from "react-native
 import { useRef, createContext, useContext, useEffect } from "react"
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import { CommonActions } from "@react-navigation/native"
 
 // ── Design tokens — must match Home.js ──────────────────────────────────────
 const ACCENT    = "#1B4D5C"   // Deep teal
@@ -53,6 +54,11 @@ const TABS = {
   Community: { outline: "grid-outline",    filled: "grid",    label: "Community" },
 }
 
+// Tabs that hold their own nested stack, and the screen each stack starts on.
+// These stacks stay mounted after the first visit, so without a reset the tab
+// would reopen on whatever screen was last open inside it (e.g. Events / News).
+const TAB_ROOT_SCREEN = { Xplore: "XploreMain", Community: "CommunityMain" }
+
 // ── BottomNav ─────────────────────────────────────────────────────────────────
 const BottomNav = ({ state, descriptors, navigation }) => {
   const { scrollY } = useScrollContext()
@@ -91,8 +97,19 @@ const BottomNav = ({ state, descriptors, navigation }) => {
         const onPress = () => {
           const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true })
           if (!event.defaultPrevented) {
-            if (route.name === "Xplore") {
-              navigation.navigate("Xplore", { screen: "XploreMain" })
+            const rootScreen = TAB_ROOT_SCREEN[route.name]
+            if (rootScreen) {
+              // Reset the tab's nested stack back to its main screen (only if it
+              // has moved off it, so we don't needlessly remount the main screen).
+              const nested = route.state
+              const offRoot = nested && (nested.routes.length > 1 || nested.routes[0]?.name !== rootScreen)
+              if (offRoot) {
+                navigation.dispatch({
+                  ...CommonActions.reset({ index: 0, routes: [{ name: rootScreen }] }),
+                  target: nested.key,
+                })
+              }
+              navigation.navigate(route.name, { screen: rootScreen })
             } else if (!isFocused) {
               navigation.navigate(route.name)
             }
