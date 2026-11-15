@@ -1,0 +1,164 @@
+# Stage 1 report: Firebase transition, backend foundation and security
+
+Branch `stage1/firebase-transition` (base `14675c1`, 10 commits). **Nothing is deployed. No Firebase console setting, billing, rule, function, document or data was changed. The old project was not touched. XploreCMS was not touched. No data was migrated.**
+
+## Status at a glance
+| | |
+|---|---|
+| **Implemented and tested** | Cloud Functions logic (93 tests, mutation-checked); super-admin bootstrap library and its safety guards; rules syntax/lint; static app checks; app-vs-rules-vs-backend consistency guard |
+| **Implemented, NOT tested** | **Security rules behaviour** (emulator tests written, not run: binaries cannot be downloaded here); Functions against real/emulated Firebase; the app on a device |
+| **Not implemented** | Provider-facing screens; customer "My requests" / confirm-completion screen; email notifications; CMS changes; deployment (see section 14) |
+| **Requires your manual action** | section 15 |
+
+## 1. The existing application before changes
+Recorded in `docs/stage1/EXISTING_APP_BASELINE.md` before any edit: navigation (Splash, Authentication, 4 tabs, Xplore stack with 10 categories, Community stack), all screens/features, every Firestore collection/Storage path/auth call the code used, local-storage keys, and the Person-Of-Interest dependency chain.
+
+## 2. Files created
+* `docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md`
+* `docs/stage1/EXISTING_APP_BASELINE.md`
+* `docs/stage1/SUPER_ADMIN_BOOTSTRAP.md`
+* `docs/stage1/TESTING.md`
+* `functions/index.js`
+* `functions/package.json`
+* `functions/scripts/call.js`
+* `functions/scripts/super-admin.js`
+* `functions/src/handlers/applications.js`
+* `functions/src/handlers/invitations.js`
+* `functions/src/handlers/listings.js`
+* `functions/src/handlers/loadshedding.js`
+* `functions/src/handlers/members.js`
+* `functions/src/handlers/organisations.js`
+* `functions/src/handlers/platform.js`
+* `functions/src/handlers/profile.js`
+* `functions/src/handlers/requests.js`
+* `functions/src/handlers/reviews.js`
+* `functions/src/lib/audit.js`
+* `functions/src/lib/bootstrap.js`
+* `functions/src/lib/clock.js`
+* `functions/src/lib/constants.js`
+* `functions/src/lib/crypto.js`
+* `functions/src/lib/firebase.js`
+* `functions/src/lib/guards.js`
+* `functions/src/lib/org.js`
+* `functions/src/lib/platform.js`
+* `functions/src/lib/validate.js`
+* `functions/test/app_rules_consistency.test.js`
+* `functions/test/bootstrap.test.js`
+* `functions/test/fake.js`
+* `functions/test/helpers.js`
+* `functions/test/invitations.test.js`
+* `functions/test/listings.test.js`
+* `functions/test/organisations.test.js`
+* `functions/test/platform.test.js`
+* `functions/test/profile.test.js`
+* `functions/test/requests_reviews.test.js`
+* `security-rules/README.md`
+* `security-rules/eslint.config.cjs`
+* `security-rules/firebase.rules-test.json`
+* `security-rules/firestore.indexes.json`
+* `security-rules/firestore.rules`
+* `security-rules/package.json`
+* `security-rules/storage.rules`
+* `security-rules/test/firestore.rules.test.js`
+* `security-rules/test/helpers.js`
+* `security-rules/test/storage.rules.test.js`
+* `utils/callable.js`
+* `utils/defaultXploreMenu.js`
+* `utils/features.js`
+* `utils/profileBootstrap.js`
+* `utils/publicContent.js`
+* `utils/requestId.js`
+* `utils/storageEpoch.js`
+
+## 3. Files modified (and files removed)
+* `.gitignore`: blocks service-account keys, emulator logs, backend node_modules and functions/.env
+* `App.js`: "Try again" gate for a failed profile setup; Person-Of-Interest behind its flag
+* `Firebase/authService.js`: email-only login; verification email; ensureUserProfile with retry; friendly errors; no username lookups
+* `Firebase/config.native.js`: new project, one guarded app instance, africa-south1 Functions client
+* `Firebase/config.web.js`: new project, africa-south1 Functions client
+* `components/eskom/Eskom.js`: client-side seeding removed
+* `components/xplorescreens/Business.js`: reviews, service requests and eligibility via Cloud Functions; active-only query
+* `components/xplorescreens/ReservationForm.js`: sends a real booking request; no false email promise
+* `components/xplorescreens/RestaurantReservationForm.js`: sends a real table request; no false email promise
+* `components/xplorescreens/Restaurants.js`: active-only query
+* `components/xplorescreens/shared/ExploreList.js`: active-only query
+* `hooks/useOfflineData.js`: active-only public queries; ordering/limit in the app (no index)
+* `screens/Authentication.js`: username field removed, login says "Email address", Google button hidden, success text
+* `screens/Community.js`: Person-Of-Interest card and read behind its flag
+* `screens/EnrollmentScreen.js`: username step removed (display name is set at sign-up)
+* `screens/Home.js`: greeting from displayName; search uses active-only queries
+* `screens/Profile.js`: displayName instead of name/username
+* `screens/Xplore.js`: active-only menu query + built-in category fallback
+* `utils/enrollment.js`: profile bootstrap + retry state; updates only allowed fields; username logic removed
+* `utils/offlineData.js`: same for the non-hook data layer
+* `utils/persistAuth.js`: runs the one-time storage clean-up before restoring the cached user
+
+Removed: `utils/seedLoadshedding.js` (client-side privileged loadshedding writes).
+
+## 4. Firebase configuration
+Both `Firebase/config.native.js` and `config.web.js` use project `xploresoweto` (auth domain, bucket, sender and app id as supplied), keep their platform persistence (AsyncStorage / browser local), create exactly one app per platform (guarded against Fast Refresh), and export `functions = getFunctions(app, "africa-south1")`. A repository search finds **no remaining reference to the old project** outside the baseline document. The web API key is not treated as a secret; no service-account material is in the repository (and the `.gitignore` blocks it). **Storage bucket location: NOT identified.** My environment has no access to your console. Find it with `gcloud storage buckets describe gs://xploresoweto.firebasestorage.app --format="value(location)"` (or Console → Storage). Nothing in the design depends on it matching Firestore, and I did not recreate it.
+
+## 5. Authentication
+Email + password registration and login; verification email sent at registration, with resend and "I've verified" (reload + token refresh) prompts when a verified-only action is attempted; password reset (existing flow) kept; persistent sessions kept; secure sign-out kept; usernames removed from login and registration; friendly error messages; Google sign-in hidden behind `utils/features.js` (`googleSignIn: false`). Unverified users can browse and use the app; verified email is required for provider applications, bookings, service requests, reviews and invitations (enforced by the backend).
+
+## 6. User profile
+`ensureUserProfile` creates `users/{uid}` from the verified token (uid and email never come from the client). Idempotent, never overwrites, tested under concurrency. Registration states: creating account, verifying email, creating profile (3 attempts with backoff), ready, **failed with a "Try again" screen** (`App.js`); an interrupted sign-up recovers on the next launch with no second account. Users update only `displayName, greeting, kasi, phone, city, photoURL, enrolled, enrolledAt, updatedAt`; roles, permissions, email and uid are never client-writable.
+
+## 7. Super Admin bootstrap
+`docs/stage1/SUPER_ADMIN_BOOTSTRAP.md`. You create `super-admin/{uid}` by hand; `npm run super-admin -- bootstrap --uid <UID>` verifies it, sets and re-verifies the claim, audits it, and never writes the `super-admin` collection. Refuses the old project, key files inside the repo, mismatched or inactive records, and a second active admin without `--allow-multiple`.
+
+## 8. Cloud Functions (21, all `africa-south1`, Node 22)
+Required 14: `ensureUserProfile, managePlatformRole, seedLoadshedding, submitProviderApplication, reviewProviderApplication, setOrganisationStatus, inviteOrganisationMember, listOrganisationInvitations, revokeOrganisationInvitation, listMyInvitations, acceptOrganisationInvitation, declineOrganisationInvitation, setMemberRole, removeOrganisationMember`. Additional 7 (justified by section 11 of the brief and lifecycle step 9): `createBookingRequest, createServiceRequest, updateRequestStatus, checkReviewEligibility, submitReview, submitListing, reviewListingSubmission`. Callers and rules: `ARCHITECTURE_AND_DATA_MODEL.md`. Node 22 is supported by Cloud Functions until 2027-04-30 (Google's runtime table); Node 20, which an earlier draft used, was decommissioned on 2026-10-30.
+
+## 9. Firestore rules (prepared, not deployed): `security-rules/firestore.rules`
+Default deny. Public content readable only while `isActive == true` (queries must filter). `users` owner-only with an allow-listed update; no profile listing. Applications, organisations, memberships, submissions, bookings, service requests: only the right party or organisation members with the right permission. Invitations: no client access. Reviews: signed-in read, no client write. `super-admin`, `platform-editors`, `audit-log`: no client write; reads need an active super admin. Staff = claim + verified + active record. Person-Of-Interest, `admin`, `userservices`: closed.
+
+## 10. Storage rules (prepared, not deployed): `security-rules/storage.rules`
+Default deny. `profile-images/{uid}`: owner only, images ≤2 MB. Published media folders: public read, active staff write (images ≤5 MB). `listing-submissions/{orgId}/…`: content-managing members of an approved organisation (create only). `provider-applications/{uid}/…`: applicant and super admins, PDF/JPEG/PNG ≤10 MB, verified email, immutable. `person-of-interest/*`: closed. Private documents are never given token URLs.
+
+## 11. Required Firestore indexes
+**None.** Every app and function query is equality-only, and ordering/limiting of public content is done in the app. `security-rules/firestore.indexes.json` is intentionally empty.
+
+## 12. Test results
+`docs/stage1/TESTING.md` has the full table. In short: 93/93 function-logic tests; 10/10 mutations caught; rules lint clean; 0 static errors in 25 changed app files; consistency guard green. **Rules behaviour and the app on a device are untested.**
+
+## 13. Existing features preserved
+Navigation, Home (hero/guide card/feeds/search/township fallbacks already handle empty data), all 9 category screens and Xplore, Events, News, Eskom, Emergency, Transport, Healthcare, Public services, Recreation, Attractions, Businesses and Restaurants (listing, detail, directions, contact actions), profile photo upload, edit profile, change password, offline cache, branding and typography. No feature was deleted except Person-Of-Interest exposure (by instruction) and client loadshedding seeding.
+
+## 14. Existing features that need later implementation
+* **Reviews cannot be written yet in practice**: they require a completed, customer-confirmed service request, and the provider response and customer confirmation screens do not exist yet (the backend does).
+* **Booking/service requests are refused for every listing for now** ("Online requests aren't available for this listing yet"), because listings only become bookable once linked to an approved organisation (`organisationId`).
+* Provider application, organisation dashboard, staff invitations, listing submission and "My requests" screens; CMS review screens for applications and submissions; email notifications.
+* Person-Of-Interest (privacy, safeguarding, moderation design first).
+
+## 15. Manual Firebase console actions for you
+1. Confirm Firestore is `(default)`, `africa-south1`, **locked/production mode** (not test mode), and enable backups. Check the Storage bucket location (section 4).
+2. Billing: Blaze plan (needed for Cloud Functions) and budget alerts.
+3. Authentication: enable Email/Password; enable email-enumeration protection; set a password policy; check authorised domains; leave Google disabled.
+4. Create the first `super-admin` record by hand and run the bootstrap (section 7).
+5. Create `firebase.json` and `.firebaserc` (deliberately absent) with `xploresoweto` set explicitly; always pass `--project xploresoweto`.
+6. After approval only: deploy functions, run the emulator tests, then deploy rules.
+7. Plan App Check: the JS SDK on React Native needs a custom provider built on `@react-native-firebase/app-check` (native build); not enforced in Stage 1.
+8. Make sure every public CMS document carries `isActive: true` (the documented `homescreen/featured` document currently has no such field).
+
+## 16. Blockers, risks and decisions that need your approval
+**UI changes I made because the brief or security required them. Please approve or tell me to revert:**
+1. Authentication: registration "Username" field removed; login placeholder "Email address" (was "Email or username"); Google button and divider hidden; success text mentions the verification email.
+2. New minimal "We couldn't finish setting up your account / Try again" screen (needed for the failed-profile state).
+3. Enrollment: username step removed (display name comes from sign-up). Profile: "@username" subtitle and Username row removed.
+4. Community: Person-Of-Interest card removed (brief). Xplore: built-in category tiles when the menu collection is empty. **I chose these titles, descriptions and icons**: please review `utils/defaultXploreMenu.js`.
+5. Reservation and Business alerts reworded (no email promise; "request sent"/"not available" messages). Verify-email prompts are standard alerts.
+**Technical:** (a) rules behaviour is untested until you run the emulator suite; (b) the rules and the CMS must agree on `isActive` and `organisationId` before deployment; (c) the manager "list members" rule and the Storage two-lookup limit need emulator confirmation; (d) email verification relies on Firebase's default emails and quotas; (e) callables need connectivity (the app says so); (f) existing users must register again on the new project, and all content must be entered through the CMS.
+
+## 17. Applying the changes to `D:\xploresoweto2`
+Your `main` must still be at commit `14675c1` or the patches may conflict (use `git am --3way`).
+```
+cd D:\xploresoweto2
+git status                       # must be clean; stash or commit your own work first
+git checkout -b stage1/firebase-transition
+git am --3way <folder>\*.patch   # applies the 10 commits in order
+# or: git fetch <folder>\stage1.bundle stage1/firebase-transition:stage1/firebase-transition
+cd functions && npm install && npm test
+cd .. && npm --prefix security-rules install && npm --prefix security-rules run lint
+```
+Then follow the device checklist in `docs/stage1/TESTING.md`. Do not deploy anything until the emulator tests have been reviewed and you approve.
