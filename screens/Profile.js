@@ -149,7 +149,7 @@ export default function Profile() {
   const [showFullScreenImage, setShowFullScreenImage] = useState(false)
 
   // Form states
-  const emptyProfile = { name: "", email: "", phone: "", city: "", username: "" }
+  const emptyProfile = { name: "", email: "", phone: "", city: "" }
   const [profileData, setProfileData] = useState(emptyProfile)
   const [savedProfile, setSavedProfile] = useState(emptyProfile) // last values stored in Firestore
   const [showKasiPicker, setShowKasiPicker] = useState(false)
@@ -174,11 +174,10 @@ export default function Profile() {
       const userDoc = await getDoc(doc(db, "users", currentUser.uid))
       const userData = userDoc.exists() ? userDoc.data() : {}
       const loaded = {
-        name:     userData.name || currentUser.displayName || "",
+        name:     userData.displayName || currentUser.displayName || "",
         email:    userData.email || currentUser.email || "",
         phone:    userData.phone || "",
         city:     userData.city || userData.kasi || "",
-        username: userData.username || "",
       }
       if (userData.photoURL) setPhotoURL(userData.photoURL)
       setProfileData(loaded)
@@ -264,7 +263,7 @@ export default function Profile() {
     try {
       await firebaseUpdateProfile(user, { displayName: profileData.name })
       await updateDoc(doc(db, "users", user.uid), {
-        name: profileData.name,
+        displayName: profileData.name.trim(),
         phone: profileData.phone,
         city: profileData.city,
         kasi: profileData.city,   // same value, kept in step with the kasi chosen at enrollment
@@ -408,7 +407,7 @@ export default function Profile() {
 
             <Text className="text-[20px] font-extrabold text-white mt-3 -tracking-[0.3px]" numberOfLines={1}>{displayName}</Text>
             <Text className="text-[12.5px] text-white/75 mt-0.5" numberOfLines={1}>
-              {profileData.username ? `@${profileData.username}` : profileData.email}
+              {profileData.email}
             </Text>
 
             {(profileData.city || memberSince) ? (
@@ -439,7 +438,6 @@ export default function Profile() {
 
             <Field icon="person-outline" label="Full name" placeholder="Your full name" value={profileData.name} onChangeText={(t) => handleInputChange("name", t)} />
             <Field icon="mail-outline" label="Email" value={profileData.email} editable={false} />
-            {profileData.username ? <Field icon="at-outline" label="Username" value={profileData.username} editable={false} /> : null}
             <Field icon="call-outline" label="Phone" placeholder="Phone number" keyboardType="phone-pad" value={profileData.phone} onChangeText={(t) => handleInputChange("phone", t)} />
             <SelectField icon="location-outline" label="Township (Kasi)" placeholder="Choose your township" value={profileData.city} onPress={() => setShowKasiPicker(true)} />
 

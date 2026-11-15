@@ -7,10 +7,11 @@ import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import GlossyBackground from "../components/GlossyBackground"
-import { useEnrollment, GREETINGS, validateUsername, isUsernameTaken } from "../utils/enrollment"
+import { useEnrollment, GREETINGS } from "../utils/enrollment"
 import { getKasiOptions } from "../utils/townshipList"
 import { useTownships } from "../hooks/useTownships"
 
+const STEPS = ["greeting", "kasi"]
 const BRAND = "#E8600A"
 const BRAND_DARK = "#C74E06"
 const TEAL = "#1B4D5C"
@@ -20,27 +21,24 @@ const cardShadow = {
 }
 
 const COPY = {
-  username: { icon: "at",        title: "Pick your username",        sub: "This is how other Xplorers will know you." },
   greeting: { icon: "chatbubbles", title: "How should we greet you?", sub: "Choose the hello you like. We'll use it every time you open the app." },
   kasi:     { icon: "location",  title: "Where's your kasi?",         sub: "Choose your township so we can make Soweto feel like home." },
 }
 
 /**
  * One-time enrollment shown after sign-up:
- *   1. username (skipped automatically if they already chose one at sign-up)
- *   2. greeting — Aweh · Fede · Eita · Hello
- *   3. kasi — one of the Soweto townships
+ *   1. greeting -- Aweh / Fede / Eita / Hello
+ *   2. kasi -- one of the Soweto townships
+ * (The display name is collected at sign-up, so there is no username step any more.)
  * Rendered by MainGate in App.js until the user has finished.
  */
 export default function EnrollmentScreen() {
   const insets = useSafeAreaInsets()
   const { user, existing, complete } = useEnrollment()
 
-  const hasUsername = !!existing?.username
-  const steps = useMemo(() => (hasUsername ? ["greeting", "kasi"] : ["username", "greeting", "kasi"]), [hasUsername])
+  const steps = STEPS
 
   const [stepIdx, setStepIdx] = useState(0)
-  const [username, setUsername] = useState("")
   const [greeting, setGreeting] = useState(null)
   const [kasi, setKasi] = useState(null)
   const [other, setOther] = useState(false)
@@ -62,11 +60,9 @@ export default function EnrollmentScreen() {
     return q ? options.filter((n) => n.toLowerCase().includes(q)) : options
   }, [options, query])
 
-  const previewName = (username.trim() || existing?.username || (user?.displayName || "").split(" ")[0] || "friend")
-  const usernameCheck = validateUsername(username)
+  const previewName = ((existing?.displayName || user?.displayName || "").split(" ")[0] || "friend")
 
   const canContinue =
-    step === "username" ? usernameCheck.ok :
     step === "greeting" ? !!greeting :
     (other ? otherText.trim().length >= 2 : !!kasi)
 
@@ -76,21 +72,11 @@ export default function EnrollmentScreen() {
     if (!canContinue || busy) return
     setError("")
 
-    if (step === "username") {
-      setBusy(true)
-      try {
-        if (await isUsernameTaken(username.trim(), user?.uid)) { setError("That username is taken. Try another."); return }
-      } catch {
-        setError("Couldn't check that username. Check your connection and try again."); return
-      } finally { setBusy(false) }
-    }
-
     if (!isLast) { setStepIdx((i) => i + 1); return }
 
     setBusy(true)
     try {
       await complete({
-        username: hasUsername ? undefined : username.trim(),
         greeting,
         kasi: other ? otherText.trim() : kasi,
       })
@@ -102,33 +88,6 @@ export default function EnrollmentScreen() {
   }
 
   // ── Step bodies ───────────────────────────────────────────────────────────
-  const UsernameStep = (
-    <View>
-      <View className="flex-row items-center bg-surface rounded-2xl px-4 border border-line" style={{ height: 56, ...cardShadow }}>
-        <Ionicons name="at-outline" size={20} color={TEAL} />
-        <TextInput
-          value={username}
-          onChangeText={(t) => { setUsername(t); setError("") }}
-          placeholder="e.g. sbu_k"
-          placeholderTextColor="#9AA9AE"
-          autoCapitalize="none"
-          autoCorrect={false}
-          maxLength={20}
-          returnKeyType="next"
-          onSubmitEditing={onNext}
-          className="flex-1 ml-3 text-[16px] font-semibold text-ink"
-          style={{ paddingVertical: 0 }}
-        />
-        {username.length > 0 && (
-          <Ionicons name={usernameCheck.ok ? "checkmark-circle" : "alert-circle"} size={20} color={usernameCheck.ok ? "#22C55E" : "#EF4444"} />
-        )}
-      </View>
-      <Text className="text-[12.5px] mt-2.5 ml-1" style={{ color: username.length > 0 && !usernameCheck.ok ? "#DC2626" : "#5E7088" }}>
-        {username.length > 0 && !usernameCheck.ok ? usernameCheck.message : "3–20 characters. Letters, numbers, . and _"}
-      </Text>
-    </View>
-  )
-
   const GreetingStep = (
     <View>
       <View className="flex-row flex-wrap justify-between">
@@ -305,7 +264,7 @@ export default function EnrollmentScreen() {
           />
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
-            {step === "username" ? UsernameStep : GreetingStep}
+            {GreetingStep}
           </ScrollView>
         )}
       </View>

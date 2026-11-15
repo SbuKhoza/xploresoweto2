@@ -1,7 +1,7 @@
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from "firebase/auth"
-import { doc, setDoc, query, where, collection, getDocs } from "firebase/firestore"
-import { auth, db } from "./config" // Adjust the import path as necessary
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile, sendEmailVerification } from "firebase/auth"
+import { auth } from "./config"
 import { storeUserCredentials, clearStoredUser } from "../utils/persistAuth"
+import { ensureProfileWithRetry } from "../utils/profileBootstrap"
 
 // Password validation function
 export const validatePassword = (password) => {
@@ -17,88 +17,55 @@ export const validatePassword = (password) => {
   }
 }
 
-// Check if username exists
-export const checkUsernameExists = async (username) => {
-  if (!username) return false
-
-  const q = query(collection(db, "users"), where("username", "==", username))
-  const querySnapshot = await getDocs(q)
-  return !querySnapshot.empty
-}
-
-// Register user
-export const registerUser = async (name, email, password, username = null) => {
-  try {
-    // Validate password
-    const passwordValidation = validatePassword(password)
-    if (!passwordValidation.isValid) {
-      throw new Error("Password does not meet requirements")
-    }
-
-    // Check if username exists (if provided)
-    if (username) {
-      const usernameExists = await checkUsernameExists(username)
-      if (usernameExists) {
-        throw new Error("Username already exists")
-      }
-    }
-
-    // Create user account
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-    const user = userCredential.user
-
-    // Update user profile with display name
-    await updateProfile(user, {
-      displayName: name,
-    })
-
-    // Store additional user data in Firestore
-    await setDoc(doc(db, "users", user.uid), {
-      name: name,
-      email: email,
-      username: username || null,
-      createdAt: new Date(),
-      uid: user.uid,
-    })
-
-    // Store user data for offline access
-    await storeUserCredentials(user)
-
-    return { success: true, user }
-  } catch (error) {
-    return { success: false, error: error.message }
+// Turns Firebase Auth errors into messages a person can act on
+export const friendlyAuthError = (error) => {
+  switch (error?.code) {
+    case "auth/email-already-in-use": return "An account with this email already exists. Please sign in instead."
+    case "auth/invalid-email": return "That email address doesn't look right."
+    case "auth/weak-password": return "Please choose a stronger password."
+    case "auth/user-not-found":
+    case "auth/wrong-password":
+    case "auth/invalid-credential":
+    case "auth/invalid-login-credentials": return "Incorrect email or password."
+    case "auth/user-disabled": return "This account has been disabled."
+    case "auth/too-many-requests": return "Too many attempts. Please wait a few minutes and try again."
+    case "auth/network-request-failed": return "Couldn't reach the server. Check your connection and try again."
+    default: return error?.message && !String(error.message).startsWith("Firebase:") ? error.message : "Something went wrong. Please try again."
   }
 }
 
-// Login user with email or username
-export const loginUser = async (emailOrUsername, password) => {
+// Register with email + password. Steps: create the account -> set display name -> send the verification email ->
+// create users/{uid} through the ensureUserProfile Cloud Function.
+// If only the LAST step fails, the account still exists and we report profileReady:false. The app retries the profile
+// idempotently on the next launch (see EnrollmentProvider), so the user never has to register again.
+export const registerUser = async (name, email, password) => {
   try {
-    let email = emailOrUsername
+    const passwordValidation = validatePassword(password)
+    if (!passwordValidation.isValid) throw new Error("Password does not meet requirements")
 
-    // Check if input is username (no @ symbol)
-    if (!emailOrUsername.includes("@")) {
-      // Query Firestore to find user by username
-      const q = query(collection(db, "users"), where("username", "==", emailOrUsername))
-      const querySnapshot = await getDocs(q)
+    const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password)
+    const user = userCredential.user
+    await updateProfile(user, { displayName: name.trim() })
 
-      if (querySnapshot.empty) {
-        throw new Error("Username not found")
-      }
+    let verificationSent = false
+    try { await sendEmailVerification(user); verificationSent = true } catch { /* the user can resend later */ }
 
-      // Get email from the user document
-      const userDoc = querySnapshot.docs[0]
-      email = userDoc.data().email
-    }
+    await storeUserCredentials(user)
+    const profile = await ensureProfileWithRetry({ displayName: name.trim() })
+    return { success: true, user, verificationSent, profileReady: profile.ok }
+  } catch (error) {
+    return { success: false, error: friendlyAuthError(error) }
+  }
+}
 
-    // Sign in with email and password
-    const userCredential = await signInWithEmailAndPassword(auth, email, password)
-
-    // Store user data for offline access
+// Login with email + password (usernames are no longer used for sign-in)
+export const loginUser = async (email, password) => {
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, String(email || "").trim(), password)
     await storeUserCredentials(userCredential.user)
-
     return { success: true, user: userCredential.user }
   } catch (error) {
-    return { success: false, error: error.message }
+    return { success: false, error: friendlyAuthError(error) }
   }
 }
 

@@ -8,6 +8,7 @@ import {
 import { useState, useEffect } from "react"
 import { Ionicons } from "@expo/vector-icons"
 import { registerUser, loginUser, validatePassword } from "../Firebase/authService"
+import { FEATURES } from "../utils/features"
 import { storeUserCredentials } from "../utils/persistAuth"
 import { isOnline } from "../utils/networkManager"
 import { sendPasswordResetEmail, GoogleAuthProvider, signInWithCredential } from "firebase/auth"
@@ -61,7 +62,7 @@ const Authentication = ({ navigation }) => {
   const [mode, setMode] = useState("login")
 
   const [formData, setFormData] = useState({
-    name: "", username: "", email: "", password: "", confirmPassword: "",
+    name: "", email: "", password: "", confirmPassword: "",
   })
   const [showPassword, setShowPassword]               = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -105,7 +106,7 @@ const Authentication = ({ navigation }) => {
   const set = (field, value) => setFormData(p => ({ ...p, [field]: value }))
 
   const resetForm = () => {
-    setFormData({ name:"", username:"", email:"", password:"", confirmPassword:"" })
+    setFormData({ name:"", email:"", password:"", confirmPassword:"" })
     setShowPassword(false)
     setShowConfirmPassword(false)
   }
@@ -122,9 +123,8 @@ const Authentication = ({ navigation }) => {
       if (!formData.name.trim()) { Alert.alert("Error", "Full name is required"); return false }
       if (formData.password !== formData.confirmPassword) { Alert.alert("Error", "Passwords do not match"); return false }
     }
-    if (!formData.email.trim() && !formData.username.trim()) {
-      Alert.alert("Error", "Email or username is required"); return false
-    }
+    if (!formData.email.trim()) { Alert.alert("Error", "Email address is required"); return false }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) { Alert.alert("Error", "Please enter a valid email address"); return false }
     if (!formData.password.trim()) { Alert.alert("Error", "Password is required"); return false }
     if (mode === "register") {
       const v = validatePassword(formData.password)
@@ -144,7 +144,7 @@ const Authentication = ({ navigation }) => {
   const handleLogin = async () => {
     if (!validateForm()) return
     setLoading(true)
-    const result = await loginUser(formData.email || formData.username, formData.password)
+    const result = await loginUser(formData.email, formData.password)
     if (result.success) {
       await storeUserCredentials(result.user)
       navigation.reset({ index: 0, routes: [{ name: "MainApp" }] })
@@ -157,10 +157,13 @@ const Authentication = ({ navigation }) => {
   const handleRegister = async () => {
     if (!validateForm()) return
     setLoading(true)
-    const result = await registerUser(formData.name, formData.email, formData.password, formData.username || null)
+    const result = await registerUser(formData.name, formData.email, formData.password)
     if (result.success) {
       await storeUserCredentials(result.user)
-      Alert.alert("Success", "Account created successfully!", [{
+      const note = result.verificationSent
+        ? `We've sent a verification link to ${formData.email.trim()}. Please verify your email to request bookings, services and reviews.`
+        : "You can verify your email later from the app."
+      Alert.alert("Success", `Account created successfully!\n\n${note}${result.profileReady ? "" : "\n\nWe'll finish setting up your profile as soon as we can reach the server."}`, [{
         text: "OK",
         onPress: () => navigation.reset({ index: 0, routes: [{ name: "MainApp" }] }),
       }])
@@ -271,6 +274,8 @@ const Authentication = ({ navigation }) => {
         {mode === "login" ? "Sign in to continue exploring Soweto" : "Join and start exploring Soweto"}
       </Text>
 
+      {FEATURES.googleSignIn && (
+        <>
       {/* Google button */}
       <TouchableOpacity
         style={[styles.googleBtn, (!networkAvailable || googleLoading || !googleRequest) && styles.btnDisabled]}
@@ -297,31 +302,20 @@ const Authentication = ({ navigation }) => {
         <Text style={styles.dividerText}>or</Text>
         <View style={styles.dividerLine} />
       </View>
+        </>
+      )}
 
       {/* Registration-only fields */}
       {mode === "register" && (
         <>
           <Input icon="person-outline" placeholder="Full Name" value={formData.name}
             onChange={t => set("name", t)} autoCapitalize="words" />
-          <Input icon="at-outline" placeholder="Username (optional)" value={formData.username}
-            onChange={t => set("username", t)} />
         </>
       )}
 
-      {/* Email / username */}
-      {mode === "login" ? (
-        <Input icon="mail-outline" placeholder="Email or Username"
-          value={formData.email || formData.username}
-          onChange={t => {
-            if (t.includes("@")) { set("email", t); set("username", "") }
-            else { set("username", t); set("email", "") }
-          }}
-          keyboardType="email-address"
-        />
-      ) : (
-        <Input icon="mail-outline" placeholder="Email address" value={formData.email}
-          onChange={t => set("email", t)} keyboardType="email-address" />
-      )}
+      {/* Email */}
+      <Input icon="mail-outline" placeholder="Email address" value={formData.email}
+        onChange={t => set("email", t)} keyboardType="email-address" autoCapitalize="none" />
 
       {/* Password */}
       <Input icon="lock-closed-outline" placeholder="Password" value={formData.password}

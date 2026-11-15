@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { NavigationContainer } from "@react-navigation/native"
-import { StyleSheet, StatusBar, Platform, View, ActivityIndicator } from "react-native"
+import { StyleSheet, StatusBar, Platform, View, ActivityIndicator, Text, TouchableOpacity } from "react-native"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context"
@@ -28,7 +28,9 @@ import BottomNav, { ScrollProvider, ScrollTrackingView } from "./components/Bott
 import Header from "./components/Header"
 import OfflineIndicator from "./components/OfflineIndicator"
 import Eskom from "./components/eskom/Eskom"
-import PoIst from "./components/personofinterest/PoIst"
+import { FEATURES } from "./utils/features"
+// Person-Of-Interest is excluded from the launch: the module is not even loaded while the flag is off
+const PoIst = FEATURES.personOfInterest ? require("./components/personofinterest/PoIst").default : null
 
 // Import Xplore sub-screens
 import Accommodation from "./components/xplorescreens/Accommodation"
@@ -101,7 +103,7 @@ const CommunityStackNavigator = () => (
     <CommunityStack.Screen name="Events"        component={EventsWithHeader}       />
     <CommunityStack.Screen name="News"          component={NewsWithHeader}         />
     <CommunityStack.Screen name="Eskom"         component={EskomWithHeader}        />
-    <CommunityStack.Screen name="PoIst"         component={PoIstWithHeader}        />
+    {FEATURES.personOfInterest && <CommunityStack.Screen name="PoIst" component={PoIstWithHeader} />}
   </CommunityStack.Navigator>
 )
 
@@ -234,9 +236,22 @@ const PublicServiceWithoutHeader = () => (
 // enrollment (username, greeting, kasi) they see the Enrollment screen; after
 // that they get the app. All sign-in paths still navigate to "MainApp".
 const MainGate = () => {
-  const { status } = useEnrollment()
+  const { status, retryProfile } = useEnrollment()
   if (status === "done")   return <MainTabNavigator />
   if (status === "needed") return <EnrollmentScreen />
+  if (status === "profile-failed") {
+    // The Firebase account exists but its profile could not be created yet. Retrying is safe (idempotent) and never
+    // requires registering again.
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F5F7FA", paddingHorizontal: 32 }}>
+        <Text style={{ fontSize: 18, fontWeight: "800", color: "#14213D", textAlign: "center" }}>We couldn't finish setting up your account</Text>
+        <Text style={{ fontSize: 14, color: "#5E7088", textAlign: "center", marginTop: 8 }}>Check your connection and try again. You don't need to sign up again.</Text>
+        <TouchableOpacity onPress={retryProfile} activeOpacity={0.85} style={{ marginTop: 20, backgroundColor: "#E8600A", paddingHorizontal: 28, paddingVertical: 13, borderRadius: 14 }}>
+          <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15 }}>Try again</Text>
+        </TouchableOpacity>
+      </View>
+    )
+  }
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F5F7FA" }}>
       <ActivityIndicator size="large" color="#E8600A" />

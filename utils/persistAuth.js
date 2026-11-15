@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
 import { auth } from "../Firebase/config"
 import { onAuthStateChanged } from "firebase/auth"
 import NetInfo from "@react-native-community/netinfo"
+import { applyStorageEpoch } from "./storageEpoch"
 
 // Store user credentials securely
 export const storeUserCredentials = async (user) => {
@@ -43,8 +44,8 @@ export const clearStoredUser = async () => {
 
 // Initialize auth listener and handle offline authentication
 export const initializeAuth = (setUser, setIsLoading) => {
-  // First check if we have a stored user
-  getStoredUser().then((storedUser) => {
+  // One-time clean-up of state left by builds that used the previous Firebase project, then check for a stored user
+  applyStorageEpoch().then(() => getStoredUser()).then((storedUser) => {
     if (storedUser) {
       setUser(storedUser)
     }
