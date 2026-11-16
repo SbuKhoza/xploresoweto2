@@ -1,0 +1,8 @@
+{
+  "functions": [{ "source": "functions", "codebase": "default" }],
+  "firestore": {
+    "rules": "security-rules/firestore.rules",
+    "indexes": "security-rules/firestore.indexes.json"
+  },
+  "storage": { "rules": "security-rules/storage.rules" }
+}

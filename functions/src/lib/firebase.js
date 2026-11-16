@@ -4,7 +4,7 @@ let impl = null
 function admin() {
   if (!impl) {
     impl = require("firebase-admin")
-    if (!impl.apps.length) impl.initializeApp()
+    if (!impl.apps.some((a) => a && a.name === "[DEFAULT]")) impl.initializeApp()
   }
   return impl
 }
