@@ -1,0 +1,94 @@
+From 425bab1694b918d91d834a595526d276e2fd5ce7 Mon Sep 17 00:00:00 2001
+From: "Claude (Stage 1)" <claude-stage1@users.noreply.local>
+Date: Sat, 14 Nov 2026 05:00:18 +0000
+Subject: [PATCH 01/10] docs: record existing app baseline before Stage 1
+ changes
+
+---
+ docs/stage1/EXISTING_APP_BASELINE.md | 74 ++++++++++++++++++++++++++++
+ 1 file changed, 74 insertions(+)
+ create mode 100644 docs/stage1/EXISTING_APP_BASELINE.md
+
+diff --git a/docs/stage1/EXISTING_APP_BASELINE.md b/docs/stage1/EXISTING_APP_BASELINE.md
+new file mode 100644
+index 0000000..ce700ce
+--- /dev/null
++++ b/docs/stage1/EXISTING_APP_BASELINE.md
+@@ -0,0 +1,74 @@
++# Existing application baseline (recorded BEFORE any Stage 1 change)
++
++Repository: `SbuKhoza/xploresoweto2`, base commit `14675c1` ("updated splash"). Stage 1 work happens on branch
++`stage1/firebase-transition`. This document is the reference for the final "same app, new infrastructure" comparison.
++
++## 1. Stack
++Expo 58 / React Native 0.88, React Navigation (native-stack + bottom-tabs), NativeWind, Firebase JS SDK v11
++(Auth + Firestore + Storage). No `expo-updates`/OTA, no Cloud Functions, no `firebase.json`, no rules files in the repo.
++Light theme only (`userInterfaceStyle: light`).
++
++## 2. Navigation (App.js)
++Root stack: `Splash` → `Authentication` (only when signed out) → `MainApp` (`MainGate`, only when signed in).
++Tabs: `Home`, `Xplore`, `Profile`, `Community`.
++* Xplore stack: XploreMain, Accommodation, Restaurants, Emergency, Recreation, Attraction, Transport, Business, Healthcare, PublicService, SowetoTownships.
++* Community stack: CommunityMain, Events, News, Eskom (loadshedding), **PoIst (Person-Of-Interest)**.
++
++## 3. Screens / features (all must remain)
++Splash; Authentication (login, sign-up, forgot-password, Google button); Enrollment gate (username, greeting, kasi);
++Home (hero, "The ultimate guide to Soweto" card, news/events feed, announcements, search over all collections, townships);
++Xplore menu + 9 category screens (list, search, detail modal, directions, call/WhatsApp actions);
++Business (list, detail, reviews, service request, hire); Restaurants + reservation form; Accommodation + reservation form;
++Emergency; Transport; Healthcare; Public services; Recreation; Attractions; Soweto Townships sheet;
++Events; News; Eskom loadshedding; Profile (photo upload, edit profile, change password, sign-out, clear cache);
++Community hub; offline mode (cache + indicators + clear-cache); Person-Of-Interest (posts, comments, images).
++
++## 4. Firebase dependencies (what the code actually does)
++### Authentication
++`createUserWithEmailAndPassword`, `signInWithEmailAndPassword` (login accepts an email **or a username**, resolved by a Firestore
++query on `users` BEFORE sign-in), `signOut`, `updateProfile`, `sendPasswordResetEmail`, `updatePassword` + re-auth, Google
++credential sign-in (placeholder client IDs, not functional). No email verification anywhere. Persistence: AsyncStorage
++(native) / browser local (web). A cached user object is also kept in AsyncStorage key `user` and used before Firebase confirms.
++
++### Firestore reads (client)
++| Collection | Read by |
++|---|---|
++| accommodations, attractions, recreation, healthcare, publicservice | `ExploreList` (unfiltered `getDocs`), Home search |
++| restaurants | `Restaurants.js:174`, Home search |
++| business | `Business.js:114`, Home search |
++| emergency, transport | `useOfflineData` (Emergency, Transport), Home search |
++| events, news | `useOfflineData` (Home, Events, News, Community) |
++| announcements | `useAnnouncements` (Home, Community) |
++| homescreen | `useHomeContent`, `useTownships`, enrollment kasi data |
++| xplore-menu | `Xplore.js:38` |
++| loadshedding | `Eskom.js:66` |
++| reviews | `Business.js:318,341` (`where businessId == …`) |
++| users | own doc: Home, Profile, Business, enrollment; **other users' docs**: PoIst; **username queries**: authService, enrollment |
++| Person-Of-Interest | `PoIst.js` (live `onSnapshot`), `Community.js:72` |
++
++### Firestore writes (client)
++`users` (authService:56 create; enrollment:114 merge; Profile:239,266 update), `reviews` (Business:351 `addDoc`),
++`userservices` (Business:371 `addDoc`, holds the requester's name/email), `loadshedding` (utils/seedLoadshedding.js, client seeding),
++`Person-Of-Interest` (create/update/delete/arrayUnion comments). Reservation forms store **nothing** and show a "confirmation email" alert.
++
++### Storage
++`profile-images/{uid}` (Profile.js:233), `person-of-interest/<random>` (PoIst.js:95). No deletes. Content images are URLs in documents.
++
++### Local storage (AsyncStorage)
++`user` (cached user), `collection_<name>[_filters]` and `doc_<name>_<id>` (offline cache), `enrollment:<uid>`, plus offline-mode metadata.
++
++## 5. Behaviour that matters for the transition
++* Content screens are CMS-driven; an empty collection shows each screen's existing empty state.
++* `Xplore.js` builds its tiles ONLY from `xplore-menu` documents (empty DB ⇒ no tiles).
++* `Eskom.js:73` seeds `loadshedding` from the client when empty.
++* No screen filters on `isActive`/`status` except news/events/announcements in Home and a few CMS-style lists.
++* Review/service-request eligibility is a client-side flag (`users.canReview`).
++
++## 6. Person-Of-Interest dependencies (documented before any change)
++`App.js:31,104` (import + `PoIst` route) → `Community.js:72` (read for a count) and `Community.js:120` (navigation card) →
++`components/personofinterest/PoIst.js` (reads `users`, writes `Person-Of-Interest`, uploads `person-of-interest/*`).
++**Proposed treatment:** hide behind a single feature flag (`utils/features.js`, default off): no route, no card, no read, no upload path,
++and no rules for the collection/folder. The component code is kept untouched for the later privacy/safeguarding review.
++
++## 7. Old Firebase project references
++Only `Firebase/config.native.js` and `Firebase/config.web.js` (project `the-steady-hotel`). No hard-coded bucket URLs elsewhere.
+-- 
+2.43.0
+

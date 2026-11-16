@@ -1,0 +1,138 @@
+From 5bca6fad9beebcc4e05a897507a3848574391a7d Mon Sep 17 00:00:00 2001
+From: "Claude (Stage 1)" <claude-stage1@users.noreply.local>
+Date: Sat, 14 Nov 2026 05:00:30 +0000
+Subject: [PATCH 02/10] firebase: point native and web config at project
+ xploresoweto; add africa-south1 Functions client; ignore server credentials
+
+---
+ .gitignore                | 13 ++++++++++++
+ Firebase/config.native.js | 44 ++++++++++++++++++++++++---------------
+ Firebase/config.web.js    | 19 ++++++++++-------
+ 3 files changed, 52 insertions(+), 24 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index 02448ab..7a6607b 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -40,3 +40,16 @@ replay_pid*.log
+ 
+ # Ignore Firebase configuration files
+ android/app/google-services.json
++
++# --- Firebase / secrets (never commit server credentials) ---
++serviceAccount*.json
++*-service-account*.json
++*-firebase-adminsdk-*.json
++functions/node_modules/
++security-rules/node_modules/
++functions/.env
++functions/.env.*
++.firebase/
++firebase-debug.log
++firestore-debug.log
++ui-debug.log
+diff --git a/Firebase/config.native.js b/Firebase/config.native.js
+index dd11b2d..86ce7b8 100644
+--- a/Firebase/config.native.js
++++ b/Firebase/config.native.js
+@@ -1,30 +1,40 @@
+-import { initializeApp } from "firebase/app"
+-import { initializeAuth, getReactNativePersistence } from "firebase/auth"
++import { initializeApp, getApp, getApps } from "firebase/app"
++import { initializeAuth, getAuth, getReactNativePersistence } from "firebase/auth"
+ import { getFirestore } from "firebase/firestore"
+ import { getStorage } from "firebase/storage"
++import { getFunctions } from "firebase/functions"
+ import AsyncStorage from "@react-native-async-storage/async-storage"
+ 
++// Firebase project: xploresoweto (the only project this app talks to).
++// A Firebase web API key identifies the project; it is NOT a server secret. Access control is enforced by
++// Security Rules and Cloud Functions. Never put service-account keys or other server secrets in the app.
+ const firebaseConfig = {
+-  apiKey: "AIzaSyBn2qVzwq2MAsvo552yRVufZoiq9ka0jcA",
+-  authDomain: "the-steady-hotel.firebaseapp.com",
+-  projectId: "the-steady-hotel",
+-  storageBucket: "the-steady-hotel.appspot.com",
+-  messagingSenderId: "289244799504",
+-  appId: "1:289244799504:web:0663b34ee6afde815d2095",
+-  measurementId: "G-DSBYCXC322",
++  apiKey: "AIzaSyCwRLeFV0lxbez-G3YONR-WIcdgF3xSUpg",
++  authDomain: "xploresoweto.firebaseapp.com",
++  projectId: "xploresoweto",
++  storageBucket: "xploresoweto.firebasestorage.app",
++  messagingSenderId: "549315620435",
++  appId: "1:549315620435:web:49b7fa6887d89a94c560a6",
+ }
+ 
+-// Initialize Firebase
+-const app = initializeApp(firebaseConfig)
++// Cloud Functions are deployed to africa-south1 (Johannesburg). Keep in sync with functions/src/lib/constants.js
++export const FUNCTIONS_REGION = "africa-south1"
+ 
+-export const auth = initializeAuth(app, {
+-  persistence: getReactNativePersistence(AsyncStorage),
+-})
++// Exactly one Firebase app (reused on Fast Refresh / repeated module evaluation)
++const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
+ 
+-// Initialize Cloud Firestore and get a reference to the service
+-export const db = getFirestore(app)
++// initializeAuth may only run once per app; on a second evaluation reuse the existing instance
++let authInstance
++try {
++  authInstance = initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) })
++} catch (error) {
++  if (error?.code === "auth/already-initialized") authInstance = getAuth(app)
++  else throw error
++}
++export const auth = authInstance
+ 
+-// Initialize Firebase Storage and get a reference to the service
++export const db = getFirestore(app)
+ export const storage = getStorage(app)
++export const functions = getFunctions(app, FUNCTIONS_REGION)
+ 
+ export default app
+diff --git a/Firebase/config.web.js b/Firebase/config.web.js
+index 911eec6..b06dc54 100644
+--- a/Firebase/config.web.js
++++ b/Firebase/config.web.js
+@@ -2,17 +2,21 @@ import { initializeApp, getApp, getApps } from "firebase/app"
+ import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth"
+ import { getFirestore } from "firebase/firestore"
+ import { getStorage } from "firebase/storage"
++import { getFunctions } from "firebase/functions"
+ 
++// Firebase project: xploresoweto (the only project this app talks to). The web API key is not a server secret.
+ const firebaseConfig = {
+-  apiKey: "AIzaSyBn2qVzwq2MAsvo552yRVufZoiq9ka0jcA",
+-  authDomain: "the-steady-hotel.firebaseapp.com",
+-  projectId: "the-steady-hotel",
+-  storageBucket: "the-steady-hotel.appspot.com",
+-  messagingSenderId: "289244799504",
+-  appId: "1:289244799504:web:0663b34ee6afde815d2095",
+-  measurementId: "G-DSBYCXC322",
++  apiKey: "AIzaSyCwRLeFV0lxbez-G3YONR-WIcdgF3xSUpg",
++  authDomain: "xploresoweto.firebaseapp.com",
++  projectId: "xploresoweto",
++  storageBucket: "xploresoweto.firebasestorage.app",
++  messagingSenderId: "549315620435",
++  appId: "1:549315620435:web:49b7fa6887d89a94c560a6",
+ }
+ 
++// Cloud Functions are deployed to africa-south1 (Johannesburg). Keep in sync with functions/src/lib/constants.js
++export const FUNCTIONS_REGION = "africa-south1"
++
+ const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
+ 
+ export const auth = getAuth(app)
+@@ -20,5 +24,6 @@ export const authPersistence = setPersistence(auth, browserLocalPersistence)
+ 
+ export const db = getFirestore(app)
+ export const storage = getStorage(app)
++export const functions = getFunctions(app, FUNCTIONS_REGION)
+ 
+ export default app
+-- 
+2.43.0
+

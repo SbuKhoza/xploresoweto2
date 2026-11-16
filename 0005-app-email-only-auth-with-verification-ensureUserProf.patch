@@ -1,0 +1,853 @@
+From 8fb86ce8603803d6f9719d67922ccd0d0d8da4b2 Mon Sep 17 00:00:00 2001
+From: "Claude (Stage 1)" <claude-stage1@users.noreply.local>
+Date: Sun, 15 Nov 2026 03:06:38 +0000
+Subject: [PATCH 05/10] app: email-only auth with verification,
+ ensureUserProfile registration with idempotent retry, display name replaces
+ username, Google hidden, Person-Of-Interest behind a flag, one-time storage
+ reset
+
+---
+ App.js                      |  23 ++++++--
+ Firebase/authService.js     | 103 ++++++++++++------------------------
+ screens/Authentication.js   |  42 +++++++--------
+ screens/EnrollmentScreen.js |  57 +++-----------------
+ screens/Profile.js          |  10 ++--
+ utils/callable.js           |  67 +++++++++++++++++++++++
+ utils/enrollment.js         |  78 ++++++++++++---------------
+ utils/features.js           |   8 +++
+ utils/persistAuth.js        |   5 +-
+ utils/profileBootstrap.js   |  20 +++++++
+ utils/seedLoadshedding.js   |  18 -------
+ utils/storageEpoch.js       |  24 +++++++++
+ 12 files changed, 239 insertions(+), 216 deletions(-)
+ create mode 100644 utils/callable.js
+ create mode 100644 utils/features.js
+ create mode 100644 utils/profileBootstrap.js
+ delete mode 100644 utils/seedLoadshedding.js
+ create mode 100644 utils/storageEpoch.js
+
+diff --git a/App.js b/App.js
+index 214d7eb..b8b8b81 100644
+--- a/App.js
++++ b/App.js
+@@ -1,6 +1,6 @@
+ import { useState, useEffect } from "react"
+ import { NavigationContainer } from "@react-navigation/native"
+-import { StyleSheet, StatusBar, Platform, View, ActivityIndicator } from "react-native"
++import { StyleSheet, StatusBar, Platform, View, ActivityIndicator, Text, TouchableOpacity } from "react-native"
+ import { createNativeStackNavigator } from "@react-navigation/native-stack"
+ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
+ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context"
+@@ -28,7 +28,9 @@ import BottomNav, { ScrollProvider, ScrollTrackingView } from "./components/Bott
+ import Header from "./components/Header"
+ import OfflineIndicator from "./components/OfflineIndicator"
+ import Eskom from "./components/eskom/Eskom"
+-import PoIst from "./components/personofinterest/PoIst"
++import { FEATURES } from "./utils/features"
++// Person-Of-Interest is excluded from the launch: the module is not even loaded while the flag is off
++const PoIst = FEATURES.personOfInterest ? require("./components/personofinterest/PoIst").default : null
+ 
+ // Import Xplore sub-screens
+ import Accommodation from "./components/xplorescreens/Accommodation"
+@@ -101,7 +103,7 @@ const CommunityStackNavigator = () => (
+     <CommunityStack.Screen name="Events"        component={EventsWithHeader}       />
+     <CommunityStack.Screen name="News"          component={NewsWithHeader}         />
+     <CommunityStack.Screen name="Eskom"         component={EskomWithHeader}        />
+-    <CommunityStack.Screen name="PoIst"         component={PoIstWithHeader}        />
++    {FEATURES.personOfInterest && <CommunityStack.Screen name="PoIst" component={PoIstWithHeader} />}
+   </CommunityStack.Navigator>
+ )
+ 
+@@ -234,9 +236,22 @@ const PublicServiceWithoutHeader = () => (
+ // enrollment (username, greeting, kasi) they see the Enrollment screen; after
+ // that they get the app. All sign-in paths still navigate to "MainApp".
+ const MainGate = () => {
+-  const { status } = useEnrollment()
++  const { status, retryProfile } = useEnrollment()
+   if (status === "done")   return <MainTabNavigator />
+   if (status === "needed") return <EnrollmentScreen />
++  if (status === "profile-failed") {
++    // The Firebase account exists but its profile could not be created yet. Retrying is safe (idempotent) and never
++    // requires registering again.
++    return (
++      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F5F7FA", paddingHorizontal: 32 }}>
++        <Text style={{ fontSize: 18, fontWeight: "800", color: "#14213D", textAlign: "center" }}>We couldn't finish setting up your account</Text>
++        <Text style={{ fontSize: 14, color: "#5E7088", textAlign: "center", marginTop: 8 }}>Check your connection and try again. You don't need to sign up again.</Text>
++        <TouchableOpacity onPress={retryProfile} activeOpacity={0.85} style={{ marginTop: 20, backgroundColor: "#E8600A", paddingHorizontal: 28, paddingVertical: 13, borderRadius: 14 }}>
++          <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15 }}>Try again</Text>
++        </TouchableOpacity>
++      </View>
++    )
++  }
+   return (
+     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F5F7FA" }}>
+       <ActivityIndicator size="large" color="#E8600A" />
+diff --git a/Firebase/authService.js b/Firebase/authService.js
+index cf39e7a..0ff02be 100644
+--- a/Firebase/authService.js
++++ b/Firebase/authService.js
+@@ -1,7 +1,7 @@
+-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from "firebase/auth"
+-import { doc, setDoc, query, where, collection, getDocs } from "firebase/firestore"
+-import { auth, db } from "./config" // Adjust the import path as necessary
++import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile, sendEmailVerification } from "firebase/auth"
++import { auth } from "./config"
+ import { storeUserCredentials, clearStoredUser } from "../utils/persistAuth"
++import { ensureProfileWithRetry } from "../utils/profileBootstrap"
+ 
+ // Password validation function
+ export const validatePassword = (password) => {
+@@ -17,88 +17,55 @@ export const validatePassword = (password) => {
+   }
+ }
+ 
+-// Check if username exists
+-export const checkUsernameExists = async (username) => {
+-  if (!username) return false
+-
+-  const q = query(collection(db, "users"), where("username", "==", username))
+-  const querySnapshot = await getDocs(q)
+-  return !querySnapshot.empty
++// Turns Firebase Auth errors into messages a person can act on
++export const friendlyAuthError = (error) => {
++  switch (error?.code) {
++    case "auth/email-already-in-use": return "An account with this email already exists. Please sign in instead."
++    case "auth/invalid-email": return "That email address doesn't look right."
++    case "auth/weak-password": return "Please choose a stronger password."
++    case "auth/user-not-found":
++    case "auth/wrong-password":
++    case "auth/invalid-credential":
++    case "auth/invalid-login-credentials": return "Incorrect email or password."
++    case "auth/user-disabled": return "This account has been disabled."
++    case "auth/too-many-requests": return "Too many attempts. Please wait a few minutes and try again."
++    case "auth/network-request-failed": return "Couldn't reach the server. Check your connection and try again."
++    default: return error?.message && !String(error.message).startsWith("Firebase:") ? error.message : "Something went wrong. Please try again."
++  }
+ }
+ 
+-// Register user
+-export const registerUser = async (name, email, password, username = null) => {
++// Register with email + password. Steps: create the account -> set display name -> send the verification email ->
++// create users/{uid} through the ensureUserProfile Cloud Function.
++// If only the LAST step fails, the account still exists and we report profileReady:false. The app retries the profile
++// idempotently on the next launch (see EnrollmentProvider), so the user never has to register again.
++export const registerUser = async (name, email, password) => {
+   try {
+-    // Validate password
+     const passwordValidation = validatePassword(password)
+-    if (!passwordValidation.isValid) {
+-      throw new Error("Password does not meet requirements")
+-    }
++    if (!passwordValidation.isValid) throw new Error("Password does not meet requirements")
+ 
+-    // Check if username exists (if provided)
+-    if (username) {
+-      const usernameExists = await checkUsernameExists(username)
+-      if (usernameExists) {
+-        throw new Error("Username already exists")
+-      }
+-    }
+-
+-    // Create user account
+-    const userCredential = await createUserWithEmailAndPassword(auth, email, password)
++    const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password)
+     const user = userCredential.user
++    await updateProfile(user, { displayName: name.trim() })
+ 
+-    // Update user profile with display name
+-    await updateProfile(user, {
+-      displayName: name,
+-    })
+-
+-    // Store additional user data in Firestore
+-    await setDoc(doc(db, "users", user.uid), {
+-      name: name,
+-      email: email,
+-      username: username || null,
+-      createdAt: new Date(),
+-      uid: user.uid,
+-    })
++    let verificationSent = false
++    try { await sendEmailVerification(user); verificationSent = true } catch { /* the user can resend later */ }
+ 
+-    // Store user data for offline access
+     await storeUserCredentials(user)
+-
+-    return { success: true, user }
++    const profile = await ensureProfileWithRetry({ displayName: name.trim() })
++    return { success: true, user, verificationSent, profileReady: profile.ok }
+   } catch (error) {
+-    return { success: false, error: error.message }
++    return { success: false, error: friendlyAuthError(error) }
+   }
+ }
+ 
+-// Login user with email or username
+-export const loginUser = async (emailOrUsername, password) => {
++// Login with email + password (usernames are no longer used for sign-in)
++export const loginUser = async (email, password) => {
+   try {
+-    let email = emailOrUsername
+-
+-    // Check if input is username (no @ symbol)
+-    if (!emailOrUsername.includes("@")) {
+-      // Query Firestore to find user by username
+-      const q = query(collection(db, "users"), where("username", "==", emailOrUsername))
+-      const querySnapshot = await getDocs(q)
+-
+-      if (querySnapshot.empty) {
+-        throw new Error("Username not found")
+-      }
+-
+-      // Get email from the user document
+-      const userDoc = querySnapshot.docs[0]
+-      email = userDoc.data().email
+-    }
+-
+-    // Sign in with email and password
+-    const userCredential = await signInWithEmailAndPassword(auth, email, password)
+-
+-    // Store user data for offline access
++    const userCredential = await signInWithEmailAndPassword(auth, String(email || "").trim(), password)
+     await storeUserCredentials(userCredential.user)
+-
+     return { success: true, user: userCredential.user }
+   } catch (error) {
+-    return { success: false, error: error.message }
++    return { success: false, error: friendlyAuthError(error) }
+   }
+ }
+ 
+diff --git a/screens/Authentication.js b/screens/Authentication.js
+index c945ce2..cd6497f 100644
+--- a/screens/Authentication.js
++++ b/screens/Authentication.js
+@@ -8,6 +8,7 @@ import {
+ import { useState, useEffect } from "react"
+ import { Ionicons } from "@expo/vector-icons"
+ import { registerUser, loginUser, validatePassword } from "../Firebase/authService"
++import { FEATURES } from "../utils/features"
+ import { storeUserCredentials } from "../utils/persistAuth"
+ import { isOnline } from "../utils/networkManager"
+ import { sendPasswordResetEmail, GoogleAuthProvider, signInWithCredential } from "firebase/auth"
+@@ -61,7 +62,7 @@ const Authentication = ({ navigation }) => {
+   const [mode, setMode] = useState("login")
+ 
+   const [formData, setFormData] = useState({
+-    name: "", username: "", email: "", password: "", confirmPassword: "",
++    name: "", email: "", password: "", confirmPassword: "",
+   })
+   const [showPassword, setShowPassword]               = useState(false)
+   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+@@ -105,7 +106,7 @@ const Authentication = ({ navigation }) => {
+   const set = (field, value) => setFormData(p => ({ ...p, [field]: value }))
+ 
+   const resetForm = () => {
+-    setFormData({ name:"", username:"", email:"", password:"", confirmPassword:"" })
++    setFormData({ name:"", email:"", password:"", confirmPassword:"" })
+     setShowPassword(false)
+     setShowConfirmPassword(false)
+   }
+@@ -122,9 +123,8 @@ const Authentication = ({ navigation }) => {
+       if (!formData.name.trim()) { Alert.alert("Error", "Full name is required"); return false }
+       if (formData.password !== formData.confirmPassword) { Alert.alert("Error", "Passwords do not match"); return false }
+     }
+-    if (!formData.email.trim() && !formData.username.trim()) {
+-      Alert.alert("Error", "Email or username is required"); return false
+-    }
++    if (!formData.email.trim()) { Alert.alert("Error", "Email address is required"); return false }
++    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) { Alert.alert("Error", "Please enter a valid email address"); return false }
+     if (!formData.password.trim()) { Alert.alert("Error", "Password is required"); return false }
+     if (mode === "register") {
+       const v = validatePassword(formData.password)
+@@ -144,7 +144,7 @@ const Authentication = ({ navigation }) => {
+   const handleLogin = async () => {
+     if (!validateForm()) return
+     setLoading(true)
+-    const result = await loginUser(formData.email || formData.username, formData.password)
++    const result = await loginUser(formData.email, formData.password)
+     if (result.success) {
+       await storeUserCredentials(result.user)
+       navigation.reset({ index: 0, routes: [{ name: "MainApp" }] })
+@@ -157,10 +157,13 @@ const Authentication = ({ navigation }) => {
+   const handleRegister = async () => {
+     if (!validateForm()) return
+     setLoading(true)
+-    const result = await registerUser(formData.name, formData.email, formData.password, formData.username || null)
++    const result = await registerUser(formData.name, formData.email, formData.password)
+     if (result.success) {
+       await storeUserCredentials(result.user)
+-      Alert.alert("Success", "Account created successfully!", [{
++      const note = result.verificationSent
++        ? `We've sent a verification link to ${formData.email.trim()}. Please verify your email to request bookings, services and reviews.`
++        : "You can verify your email later from the app."
++      Alert.alert("Success", `Account created successfully!\n\n${note}${result.profileReady ? "" : "\n\nWe'll finish setting up your profile as soon as we can reach the server."}`, [{
+         text: "OK",
+         onPress: () => navigation.reset({ index: 0, routes: [{ name: "MainApp" }] }),
+       }])
+@@ -271,6 +274,8 @@ const Authentication = ({ navigation }) => {
+         {mode === "login" ? "Sign in to continue exploring Soweto" : "Join and start exploring Soweto"}
+       </Text>
+ 
++      {FEATURES.googleSignIn && (
++        <>
+       {/* Google button */}
+       <TouchableOpacity
+         style={[styles.googleBtn, (!networkAvailable || googleLoading || !googleRequest) && styles.btnDisabled]}
+@@ -297,31 +302,20 @@ const Authentication = ({ navigation }) => {
+         <Text style={styles.dividerText}>or</Text>
+         <View style={styles.dividerLine} />
+       </View>
++        </>
++      )}
+ 
+       {/* Registration-only fields */}
+       {mode === "register" && (
+         <>
+           <Input icon="person-outline" placeholder="Full Name" value={formData.name}
+             onChange={t => set("name", t)} autoCapitalize="words" />
+-          <Input icon="at-outline" placeholder="Username (optional)" value={formData.username}
+-            onChange={t => set("username", t)} />
+         </>
+       )}
+ 
+-      {/* Email / username */}
+-      {mode === "login" ? (
+-        <Input icon="mail-outline" placeholder="Email or Username"
+-          value={formData.email || formData.username}
+-          onChange={t => {
+-            if (t.includes("@")) { set("email", t); set("username", "") }
+-            else { set("username", t); set("email", "") }
+-          }}
+-          keyboardType="email-address"
+-        />
+-      ) : (
+-        <Input icon="mail-outline" placeholder="Email address" value={formData.email}
+-          onChange={t => set("email", t)} keyboardType="email-address" />
+-      )}
++      {/* Email */}
++      <Input icon="mail-outline" placeholder="Email address" value={formData.email}
++        onChange={t => set("email", t)} keyboardType="email-address" autoCapitalize="none" />
+ 
+       {/* Password */}
+       <Input icon="lock-closed-outline" placeholder="Password" value={formData.password}
+diff --git a/screens/EnrollmentScreen.js b/screens/EnrollmentScreen.js
+index 30f3900..abf2e07 100644
+--- a/screens/EnrollmentScreen.js
++++ b/screens/EnrollmentScreen.js
+@@ -7,10 +7,11 @@ import { Ionicons } from "@expo/vector-icons"
+ import { LinearGradient } from "expo-linear-gradient"
+ import { useSafeAreaInsets } from "react-native-safe-area-context"
+ import GlossyBackground from "../components/GlossyBackground"
+-import { useEnrollment, GREETINGS, validateUsername, isUsernameTaken } from "../utils/enrollment"
++import { useEnrollment, GREETINGS } from "../utils/enrollment"
+ import { getKasiOptions } from "../utils/townshipList"
+ import { useTownships } from "../hooks/useTownships"
+ 
++const STEPS = ["greeting", "kasi"]
+ const BRAND = "#E8600A"
+ const BRAND_DARK = "#C74E06"
+ const TEAL = "#1B4D5C"
+@@ -20,27 +21,24 @@ const cardShadow = {
+ }
+ 
+ const COPY = {
+-  username: { icon: "at",        title: "Pick your username",        sub: "This is how other Xplorers will know you." },
+   greeting: { icon: "chatbubbles", title: "How should we greet you?", sub: "Choose the hello you like. We'll use it every time you open the app." },
+   kasi:     { icon: "location",  title: "Where's your kasi?",         sub: "Choose your township so we can make Soweto feel like home." },
+ }
+ 
+ /**
+  * One-time enrollment shown after sign-up:
+- *   1. username (skipped automatically if they already chose one at sign-up)
+- *   2. greeting — Aweh · Fede · Eita · Hello
+- *   3. kasi — one of the Soweto townships
++ *   1. greeting -- Aweh / Fede / Eita / Hello
++ *   2. kasi -- one of the Soweto townships
++ * (The display name is collected at sign-up, so there is no username step any more.)
+  * Rendered by MainGate in App.js until the user has finished.
+  */
+ export default function EnrollmentScreen() {
+   const insets = useSafeAreaInsets()
+   const { user, existing, complete } = useEnrollment()
+ 
+-  const hasUsername = !!existing?.username
+-  const steps = useMemo(() => (hasUsername ? ["greeting", "kasi"] : ["username", "greeting", "kasi"]), [hasUsername])
++  const steps = STEPS
+ 
+   const [stepIdx, setStepIdx] = useState(0)
+-  const [username, setUsername] = useState("")
+   const [greeting, setGreeting] = useState(null)
+   const [kasi, setKasi] = useState(null)
+   const [other, setOther] = useState(false)
+@@ -62,11 +60,9 @@ export default function EnrollmentScreen() {
+     return q ? options.filter((n) => n.toLowerCase().includes(q)) : options
+   }, [options, query])
+ 
+-  const previewName = (username.trim() || existing?.username || (user?.displayName || "").split(" ")[0] || "friend")
+-  const usernameCheck = validateUsername(username)
++  const previewName = ((existing?.displayName || user?.displayName || "").split(" ")[0] || "friend")
+ 
+   const canContinue =
+-    step === "username" ? usernameCheck.ok :
+     step === "greeting" ? !!greeting :
+     (other ? otherText.trim().length >= 2 : !!kasi)
+ 
+@@ -76,21 +72,11 @@ export default function EnrollmentScreen() {
+     if (!canContinue || busy) return
+     setError("")
+ 
+-    if (step === "username") {
+-      setBusy(true)
+-      try {
+-        if (await isUsernameTaken(username.trim(), user?.uid)) { setError("That username is taken. Try another."); return }
+-      } catch {
+-        setError("Couldn't check that username. Check your connection and try again."); return
+-      } finally { setBusy(false) }
+-    }
+-
+     if (!isLast) { setStepIdx((i) => i + 1); return }
+ 
+     setBusy(true)
+     try {
+       await complete({
+-        username: hasUsername ? undefined : username.trim(),
+         greeting,
+         kasi: other ? otherText.trim() : kasi,
+       })
+@@ -102,33 +88,6 @@ export default function EnrollmentScreen() {
+   }
+ 
+   // ── Step bodies ───────────────────────────────────────────────────────────
+-  const UsernameStep = (
+-    <View>
+-      <View className="flex-row items-center bg-surface rounded-2xl px-4 border border-line" style={{ height: 56, ...cardShadow }}>
+-        <Ionicons name="at-outline" size={20} color={TEAL} />
+-        <TextInput
+-          value={username}
+-          onChangeText={(t) => { setUsername(t); setError("") }}
+-          placeholder="e.g. sbu_k"
+-          placeholderTextColor="#9AA9AE"
+-          autoCapitalize="none"
+-          autoCorrect={false}
+-          maxLength={20}
+-          returnKeyType="next"
+-          onSubmitEditing={onNext}
+-          className="flex-1 ml-3 text-[16px] font-semibold text-ink"
+-          style={{ paddingVertical: 0 }}
+-        />
+-        {username.length > 0 && (
+-          <Ionicons name={usernameCheck.ok ? "checkmark-circle" : "alert-circle"} size={20} color={usernameCheck.ok ? "#22C55E" : "#EF4444"} />
+-        )}
+-      </View>
+-      <Text className="text-[12.5px] mt-2.5 ml-1" style={{ color: username.length > 0 && !usernameCheck.ok ? "#DC2626" : "#5E7088" }}>
+-        {username.length > 0 && !usernameCheck.ok ? usernameCheck.message : "3–20 characters. Letters, numbers, . and _"}
+-      </Text>
+-    </View>
+-  )
+-
+   const GreetingStep = (
+     <View>
+       <View className="flex-row flex-wrap justify-between">
+@@ -305,7 +264,7 @@ export default function EnrollmentScreen() {
+           />
+         ) : (
+           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
+-            {step === "username" ? UsernameStep : GreetingStep}
++            {GreetingStep}
+           </ScrollView>
+         )}
+       </View>
+diff --git a/screens/Profile.js b/screens/Profile.js
+index 8d39975..5b39360 100644
+--- a/screens/Profile.js
++++ b/screens/Profile.js
+@@ -149,7 +149,7 @@ export default function Profile() {
+   const [showFullScreenImage, setShowFullScreenImage] = useState(false)
+ 
+   // Form states
+-  const emptyProfile = { name: "", email: "", phone: "", city: "", username: "" }
++  const emptyProfile = { name: "", email: "", phone: "", city: "" }
+   const [profileData, setProfileData] = useState(emptyProfile)
+   const [savedProfile, setSavedProfile] = useState(emptyProfile) // last values stored in Firestore
+   const [showKasiPicker, setShowKasiPicker] = useState(false)
+@@ -174,11 +174,10 @@ export default function Profile() {
+       const userDoc = await getDoc(doc(db, "users", currentUser.uid))
+       const userData = userDoc.exists() ? userDoc.data() : {}
+       const loaded = {
+-        name:     userData.name || currentUser.displayName || "",
++        name:     userData.displayName || currentUser.displayName || "",
+         email:    userData.email || currentUser.email || "",
+         phone:    userData.phone || "",
+         city:     userData.city || userData.kasi || "",
+-        username: userData.username || "",
+       }
+       if (userData.photoURL) setPhotoURL(userData.photoURL)
+       setProfileData(loaded)
+@@ -264,7 +263,7 @@ export default function Profile() {
+     try {
+       await firebaseUpdateProfile(user, { displayName: profileData.name })
+       await updateDoc(doc(db, "users", user.uid), {
+-        name: profileData.name,
++        displayName: profileData.name.trim(),
+         phone: profileData.phone,
+         city: profileData.city,
+         kasi: profileData.city,   // same value, kept in step with the kasi chosen at enrollment
+@@ -408,7 +407,7 @@ export default function Profile() {
+ 
+             <Text className="text-[20px] font-extrabold text-white mt-3 -tracking-[0.3px]" numberOfLines={1}>{displayName}</Text>
+             <Text className="text-[12.5px] text-white/75 mt-0.5" numberOfLines={1}>
+-              {profileData.username ? `@${profileData.username}` : profileData.email}
++              {profileData.email}
+             </Text>
+ 
+             {(profileData.city || memberSince) ? (
+@@ -439,7 +438,6 @@ export default function Profile() {
+ 
+             <Field icon="person-outline" label="Full name" placeholder="Your full name" value={profileData.name} onChangeText={(t) => handleInputChange("name", t)} />
+             <Field icon="mail-outline" label="Email" value={profileData.email} editable={false} />
+-            {profileData.username ? <Field icon="at-outline" label="Username" value={profileData.username} editable={false} /> : null}
+             <Field icon="call-outline" label="Phone" placeholder="Phone number" keyboardType="phone-pad" value={profileData.phone} onChangeText={(t) => handleInputChange("phone", t)} />
+             <SelectField icon="location-outline" label="Township (Kasi)" placeholder="Choose your township" value={profileData.city} onPress={() => setShowKasiPicker(true)} />
+ 
+diff --git a/utils/callable.js b/utils/callable.js
+new file mode 100644
+index 0000000..22bd046
+--- /dev/null
++++ b/utils/callable.js
+@@ -0,0 +1,67 @@
++import { Alert } from "react-native"
++import { httpsCallable } from "firebase/functions"
++import { sendEmailVerification } from "firebase/auth"
++import { auth, functions } from "../Firebase/config"
++
++// Calls a Cloud Function (region africa-south1, configured in Firebase/config). Throws an Error whose
++// .code is the function's code without the "functions/" prefix and whose .message is safe to show to the user.
++export const callFunction = async (name, data = {}) => {
++  try {
++    const res = await httpsCallable(functions, name)(data)
++    return res.data
++  } catch (e) {
++    const code = String(e?.code || "internal").replace(/^functions\//, "")
++    const err = new Error(friendlyCallableMessage(code, e?.message))
++    err.code = code
++    throw err
++  }
++}
++
++export const friendlyCallableMessage = (code, raw = "") => {
++  if (raw === "email-not-verified" || code === "failed-precondition" && /email-not-verified/.test(raw)) return "Please verify your email address first."
++  if (raw === "listing-not-bookable") return "Online requests aren't available for this listing yet. Please use the contact details shown."
++  if (raw === "not-eligible") return "You can review this business after a completed, confirmed service."
++  switch (code) {
++    case "unauthenticated": return "Please sign in again."
++    case "permission-denied": return "You don't have permission to do that."
++    case "unavailable": case "deadline-exceeded": case "internal": return "We couldn't reach the server. Check your connection and try again."
++    case "not-found": return "That isn't available right now."
++    case "resource-exhausted": return "You've reached a limit. Please try again later."
++    case "invalid-argument": return "Some details look invalid. Please check and try again."
++    default: return "Something went wrong. Please try again."
++  }
++}
++
++// ---- email verification (required for provider applications, bookings, service requests and reviews)
++export const isEmailNotVerified = (e) => e?.code === "failed-precondition" && /verify your email/i.test(e?.message || "")
++export const resendVerificationEmail = async () => {
++  if (!auth.currentUser) throw new Error("Please sign in again.")
++  await sendEmailVerification(auth.currentUser)
++}
++// Reloads the user and refreshes the ID token so the server sees email_verified = true. Returns true when verified.
++export const refreshEmailVerification = async () => {
++  const u = auth.currentUser
++  if (!u) return false
++  await u.reload()
++  await u.getIdToken(true)
++  return u.emailVerified === true
++}
++export const showVerifyEmailAlert = (onVerified) =>
++  Alert.alert(
++    "Verify your email",
++    "Please verify your email address to continue. We sent you a link when you signed up; check your inbox and spam folder.",
++    [
++      { text: "Cancel", style: "cancel" },
++      { text: "Resend email", onPress: async () => { try { await resendVerificationEmail(); Alert.alert("Email sent", "Check your inbox for the verification link.") } catch { Alert.alert("Couldn't send", "Please try again in a few minutes.") } } },
++      { text: "I've verified", onPress: async () => {
++          try { (await refreshEmailVerification()) ? onVerified?.() : Alert.alert("Not verified yet", "Open the link in the email first, then try again.") }
++          catch { Alert.alert("Couldn't check", "Check your connection and try again.") }
++      } },
++    ],
++  )
++// Shows the right alert for a failed callable. Returns true if it was an email-verification problem.
++export const alertCallableError = (e, { title = "Something went wrong", onVerified } = {}) => {
++  if (isEmailNotVerified(e)) { showVerifyEmailAlert(onVerified); return true }
++  Alert.alert(title, e?.message || "Please try again.")
++  return false
++}
+diff --git a/utils/enrollment.js b/utils/enrollment.js
+index 86f3dde..a0d8faf 100644
+--- a/utils/enrollment.js
++++ b/utils/enrollment.js
+@@ -1,14 +1,17 @@
+ import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react"
+ import AsyncStorage from "@react-native-async-storage/async-storage"
+-import { doc, getDoc, setDoc, query, where, collection, getDocs } from "firebase/firestore"
++import { doc, getDoc, updateDoc } from "firebase/firestore"
+ import { db } from "../Firebase/config"
++import { ensureProfileWithRetry } from "./profileBootstrap"
+ 
+ // ═════════════════════════════════════════════════════════════════════════════
+ // Enrollment — the one-time setup every new user completes after creating an
+-// account: username (if they skipped it at sign-up), a greeting and their kasi.
++// account: a greeting and their kasi (the display name is collected at sign-up).
+ //
++// The profile users/{uid} is created by the ensureUserProfile Cloud Function (idempotent, safe to retry). This provider
++// makes sure it exists before enrollment and exposes a "profile-failed" state with a retry.
+ // Saved on the user's Firestore document  users/{uid}:
+-//   username, greeting, kasi, enrolled: true, enrolledAt
++//   greeting, kasi, enrolled: true, enrolledAt
+ // and cached on the device so the app also opens offline.
+ // ═════════════════════════════════════════════════════════════════════════════
+ 
+@@ -21,30 +24,15 @@ export const GREETINGS = [
+ ]
+ export const DEFAULT_GREETING = "Aweh"
+ 
+-// 3–20 characters: letters, numbers, dot and underscore
+-export const validateUsername = (value) => {
+-  const v = String(value || "").trim()
+-  if (v.length < 3) return { ok: false, message: "At least 3 characters" }
+-  if (v.length > 20) return { ok: false, message: "No more than 20 characters" }
+-  if (!/^[A-Za-z0-9._]+$/.test(v)) return { ok: false, message: "Letters, numbers, . and _ only" }
+-  return { ok: true, message: "" }
+-}
+-
+-// True if somebody else already uses this username
+-export const isUsernameTaken = async (username, uid) => {
+-  const snap = await getDocs(query(collection(db, "users"), where("username", "==", username)))
+-  return snap.docs.some((d) => d.id !== uid)
+-}
+-
+ const cacheKey = (uid) => `enrollment:${uid}`
+-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+ 
+ const Ctx = createContext({
+-  status: "loading",   // "loading" | "needed" | "done"
++  status: "loading",   // "loading" | "needed" | "done" | "profile-failed"
+   user: null,
+   existing: null,      // the user's Firestore document, if any
+-  enrollment: null,    // { username, greeting, kasi } once enrolled
++  enrollment: null,    // { displayName, greeting, kasi } once enrolled
+   complete: async () => {},
++  retryProfile: () => {},
+   updateEnrollment: () => {},
+ })
+ 
+@@ -55,6 +43,8 @@ export const EnrollmentProvider = ({ user, children }) => {
+   const [status, setStatus] = useState("loading")
+   const [existing, setExisting] = useState(null)
+   const [enrollment, setEnrollment] = useState(null)
++  const [attempt, setAttempt] = useState(0)
++  const retryProfile = useCallback(() => setAttempt((a) => a + 1), [])
+ 
+   useEffect(() => {
+     if (!uid) { setStatus("loading"); setEnrollment(null); setExisting(null); return }
+@@ -70,13 +60,21 @@ export const EnrollmentProvider = ({ user, children }) => {
+       // 2) Firestore — the source of truth
+       try {
+         let snap = await getDoc(doc(db, "users", uid))
+-        // A brand-new sign-up can reach us a moment before its profile is written
+-        if (!snap.exists()) { await sleep(1500); snap = await getDoc(doc(db, "users", uid)) }
++        if (!snap.exists()) {
++          // Auth account exists but its profile does not (sign-up was interrupted, or the first attempt failed):
++          // ask the server to create it. Idempotent, so retrying never duplicates or overwrites anything.
++          const input = user?.displayName ? { displayName: user.displayName } : {}
++          let r = await ensureProfileWithRetry(input)
++          if (!r.ok && r.error?.code === "invalid-argument") r = await ensureProfileWithRetry({})
++          if (!alive) return
++          if (!r.ok) { if (!cached?.enrolled) setStatus("profile-failed"); return }
++          snap = await getDoc(doc(db, "users", uid))
++        }
+         const data = snap.exists() ? snap.data() : {}
+         if (!alive) return
+         setExisting(data)
+         if (data.enrolled) {
+-          const e = { enrolled: true, username: data.username || null, greeting: data.greeting || DEFAULT_GREETING, kasi: data.kasi || null }
++          const e = { enrolled: true, displayName: data.displayName || null, greeting: data.greeting || DEFAULT_GREETING, kasi: data.kasi || null }
+           setEnrollment(e); setStatus("done")
+           AsyncStorage.setItem(cacheKey(uid), JSON.stringify(e)).catch(() => {})
+         } else if (!cached?.enrolled) {
+@@ -88,35 +86,25 @@ export const EnrollmentProvider = ({ user, children }) => {
+     })()
+ 
+     return () => { alive = false }
+-  }, [uid])
++  }, [uid, attempt])
+ 
+   // Save the answers. Throws a readable Error if something goes wrong.
+-  const complete = useCallback(async ({ username, greeting, kasi }) => {
++  const complete = useCallback(async ({ greeting, kasi }) => {
+     if (!uid) throw new Error("You need to be signed in.")
+-    const name = (username || existing?.username || "").trim()
+-    if (!name) throw new Error("Please choose a username.")
+-    if (!existing?.username) {
+-      if (await isUsernameTaken(name, uid)) throw new Error("That username is taken. Please pick another.")
++    // Make sure the profile exists (it normally already does). Never overwrites an existing profile.
++    if (!existing?.uid) {
++      const r = await ensureProfileWithRetry(user?.displayName ? { displayName: user.displayName } : {})
++      if (!r.ok) throw new Error("Couldn't set up your profile. Check your connection and try again.")
+     }
+-
+-    const payload = {
+-      uid,
+-      email: user?.email || existing?.email || null,
+-      username: name,
+-      greeting,
+-      kasi,
+-      enrolled: true,
+-      enrolledAt: new Date(),
+-    }
+-    if (!existing?.name && user?.displayName) payload.name = user.displayName
+-
++    // Only fields the security rules allow a user to change
++    const payload = { greeting, kasi, enrolled: true, enrolledAt: new Date(), updatedAt: new Date() }
+     try {
+-      await setDoc(doc(db, "users", uid), payload, { merge: true })
++      await updateDoc(doc(db, "users", uid), payload)
+     } catch {
+       throw new Error("Couldn't save your details. Check your connection and try again.")
+     }
+ 
+-    const e = { enrolled: true, username: name, greeting, kasi }
++    const e = { enrolled: true, displayName: existing?.displayName || user?.displayName || null, greeting, kasi }
+     AsyncStorage.setItem(cacheKey(uid), JSON.stringify(e)).catch(() => {})
+     setExisting((prev) => ({ ...(prev || {}), ...payload }))
+     setEnrollment(e)
+@@ -132,6 +120,6 @@ export const EnrollmentProvider = ({ user, children }) => {
+     })
+   }, [uid])
+ 
+-  const value = useMemo(() => ({ status, user, existing, enrollment, complete, updateEnrollment }), [status, user, existing, enrollment, complete, updateEnrollment])
++  const value = useMemo(() => ({ status, user, existing, enrollment, complete, updateEnrollment, retryProfile }), [status, user, existing, enrollment, complete, updateEnrollment, retryProfile])
+   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+ }
+\ No newline at end of file
+diff --git a/utils/features.js b/utils/features.js
+new file mode 100644
+index 0000000..d60a10b
+--- /dev/null
++++ b/utils/features.js
+@@ -0,0 +1,8 @@
++// Feature switches for Stage 1. Flipping one on later re-exposes the feature WITHOUT code changes elsewhere.
++export const FEATURES = Object.freeze({
++  // Hidden until the Google OAuth client IDs are configured (the IDs in Authentication.js are placeholders).
++  googleSignIn: false,
++  // Excluded from the public launch until privacy, safeguarding, authorisation and moderation are designed.
++  // Off means: no route, no Community card, no Firestore read, no Storage upload. The component code is kept untouched.
++  personOfInterest: false,
++})
+diff --git a/utils/persistAuth.js b/utils/persistAuth.js
+index e766ec9..d2e018d 100644
+--- a/utils/persistAuth.js
++++ b/utils/persistAuth.js
+@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
+ import { auth } from "../Firebase/config"
+ import { onAuthStateChanged } from "firebase/auth"
+ import NetInfo from "@react-native-community/netinfo"
++import { applyStorageEpoch } from "./storageEpoch"
+ 
+ // Store user credentials securely
+ export const storeUserCredentials = async (user) => {
+@@ -43,8 +44,8 @@ export const clearStoredUser = async () => {
+ 
+ // Initialize auth listener and handle offline authentication
+ export const initializeAuth = (setUser, setIsLoading) => {
+-  // First check if we have a stored user
+-  getStoredUser().then((storedUser) => {
++  // One-time clean-up of state left by builds that used the previous Firebase project, then check for a stored user
++  applyStorageEpoch().then(() => getStoredUser()).then((storedUser) => {
+     if (storedUser) {
+       setUser(storedUser)
+     }
+diff --git a/utils/profileBootstrap.js b/utils/profileBootstrap.js
+new file mode 100644
+index 0000000..65433f0
+--- /dev/null
++++ b/utils/profileBootstrap.js
+@@ -0,0 +1,20 @@
++import { callFunction } from "./callable"
++
++const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
++const PERMANENT = ["invalid-argument", "unauthenticated", "permission-denied"]
++
++// Creates users/{uid} through the ensureUserProfile Cloud Function. The function is idempotent (it never overwrites an
++// existing profile), so this can be repeated freely: after a failed sign-up step, on every launch, or from a Retry button.
++export const ensureUserProfile = (input = {}) => callFunction("ensureUserProfile", input)
++
++export const ensureProfileWithRetry = async (input = {}, { attempts = 3, delays = [0, 1200, 3500] } = {}) => {
++  let lastError = null
++  for (let i = 0; i < attempts; i++) {
++    if (delays[i]) await sleep(delays[i])
++    try { return { ok: true, data: await ensureUserProfile(input) } } catch (e) {
++      lastError = e
++      if (PERMANENT.includes(e?.code)) break
++    }
++  }
++  return { ok: false, error: lastError }
++}
+diff --git a/utils/seedLoadshedding.js b/utils/seedLoadshedding.js
+deleted file mode 100644
+index 6892e3b..0000000
+--- a/utils/seedLoadshedding.js
++++ /dev/null
+@@ -1,18 +0,0 @@
+-import { collection, getDocs, setDoc, doc } from "firebase/firestore"
+-import { db } from "../Firebase/config"
+-import scheduleData from "../assets/data/loadshedding_schedules.json" // Adjust path as needed
+-
+-export const seedFirestoreIfNeeded = async () => {
+-  const colRef = collection(db, "loadshedding")
+-  const snapshot = await getDocs(colRef)
+-
+-  if (snapshot.empty) {
+-    console.log("📦 Seeding loadshedding collection...")
+-    for (const item of scheduleData) {
+-      await setDoc(doc(colRef, item.suburb.toLowerCase()), item)
+-    }
+-    console.log("✅ Seeding complete.")
+-  } else {
+-    console.log("✅ loadshedding collection already exists. Skipping seed.")
+-  }
+-}
+diff --git a/utils/storageEpoch.js b/utils/storageEpoch.js
+new file mode 100644
+index 0000000..785186b
+--- /dev/null
++++ b/utils/storageEpoch.js
+@@ -0,0 +1,24 @@
++import AsyncStorage from "@react-native-async-storage/async-storage"
++
++// One-time, targeted clean-up for devices that ran a build connected to the previous Firebase project: stale cached content,
++// the cached user object and old Firebase session keys must not be shown against the new project. Runs once per epoch; it only
++// removes this app's own cache/session keys, never unrelated data. Bump STORAGE_EPOCH to force another clean-up later.
++const STORAGE_EPOCH = "xploresoweto-v1"
++const EPOCH_KEY = "@xs/storage-epoch"
++const NEW_API_KEY = "AIzaSyCwRLeFV0lxbez-G3YONR-WIcdgF3xSUpg"
++const OWN_PREFIXES = ["collection_", "doc_", "offline_", "cache_", "enrollment:"]
++
++export const applyStorageEpoch = async () => {
++  try {
++    if ((await AsyncStorage.getItem(EPOCH_KEY)) === STORAGE_EPOCH) return false
++    const keys = await AsyncStorage.getAllKeys()
++    const stale = keys.filter(
++      (k) => k === "user" || OWN_PREFIXES.some((p) => k.startsWith(p)) || (k.startsWith("firebase:") && !k.includes(NEW_API_KEY)),
++    )
++    if (stale.length) await AsyncStorage.multiRemove(stale)
++    await AsyncStorage.setItem(EPOCH_KEY, STORAGE_EPOCH)
++    return true
++  } catch {
++    return false // never block app start because of cache housekeeping
++  }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,695 @@
+From c9a0f71f84bdb65eb373df87a9000848f0277d7e Mon Sep 17 00:00:00 2001
+From: "Claude (Stage 1)" <claude-stage1@users.noreply.local>
+Date: Sat, 14 Nov 2026 10:04:14 +0000
+Subject: [PATCH 04/10] rules: Stage 1 Firestore and Storage security rules
+ (default-deny), emulator tests, lint tooling; not deployed
+
+---
+ security-rules/README.md                    |  29 +++
+ security-rules/eslint.config.cjs            |   3 +
+ security-rules/firebase.rules-test.json     |   5 +
+ security-rules/firestore.indexes.json       |   4 +
+ security-rules/firestore.rules              | 165 ++++++++++++++++
+ security-rules/package.json                 |  16 ++
+ security-rules/storage.rules                |  78 ++++++++
+ security-rules/test/firestore.rules.test.js | 204 ++++++++++++++++++++
+ security-rules/test/helpers.js              |  45 +++++
+ security-rules/test/storage.rules.test.js   |  54 ++++++
+ 10 files changed, 603 insertions(+)
+ create mode 100644 security-rules/README.md
+ create mode 100644 security-rules/eslint.config.cjs
+ create mode 100644 security-rules/firebase.rules-test.json
+ create mode 100644 security-rules/firestore.indexes.json
+ create mode 100644 security-rules/firestore.rules
+ create mode 100644 security-rules/package.json
+ create mode 100644 security-rules/storage.rules
+ create mode 100644 security-rules/test/firestore.rules.test.js
+ create mode 100644 security-rules/test/helpers.js
+ create mode 100644 security-rules/test/storage.rules.test.js
+
+diff --git a/security-rules/README.md b/security-rules/README.md
+new file mode 100644
+index 0000000..a3fde0b
+--- /dev/null
++++ b/security-rules/README.md
+@@ -0,0 +1,29 @@
++# Stage 1 security rules (PREPARED, NOT DEPLOYED)
++
++`firestore.rules`, `storage.rules` and `firestore.indexes.json` are kept out of any `firebase.json`, so a stray `firebase deploy`
++cannot publish them. `firebase.rules-test.json` exists only for emulator testing.
++
++## Status (be precise)
++| Check | Status |
++|---|---|
++| Syntax + Firebase's recommended lint (official ANTLR grammar via `@firebase/eslint-plugin-security-rules`) | **Passed** (`npm run lint`); the same linter rejects a deliberately broken file |
++| Behaviour tests against the Firebase emulator (`test/*.test.js`, ~80 cases) | **Written, NOT run**: the emulator binaries cannot be downloaded in the environment that produced them. Run them locally before trusting the rules. |
++
++## Run on your machine (from the repository root; Java 11+ required for the emulators)
++```
++npm install -g firebase-tools
++npm --prefix security-rules install
++npm --prefix security-rules run lint
++npm --prefix security-rules test
++```
++
++## Things the emulator run must confirm (known uncertainties)
++1. `organisation-members` list queries whose rule calls `get()` with a path built from `resource.data.organisationId`
++   (the manager "list my organisation's members" query).
++2. Storage rules make at most 2 cross-service Firestore lookups per request; `listing-submissions` read for staff stays within that.
++3. Filtered public queries (`where("isActive","==",true)`) are accepted and unfiltered ones are rejected.
++
++## Design
++See `docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md`. In short: default deny; public content readable only when `isActive == true`
++(queries must filter); every sensitive write is a Cloud Function (Admin SDK bypasses rules); staff need claim + verified email +
++active record; organisation access comes from membership documents that only functions write.
+diff --git a/security-rules/eslint.config.cjs b/security-rules/eslint.config.cjs
+new file mode 100644
+index 0000000..f736953
+--- /dev/null
++++ b/security-rules/eslint.config.cjs
+@@ -0,0 +1,3 @@
++// Parses the rules files with Firebase's own grammar (syntax errors + recommended semantic checks). Offline; no emulator needed.
++const mod = require("@firebase/eslint-plugin-security-rules")
++module.exports = [mod.flatRecommended || mod.default.configs["flat/recommended"]]
+diff --git a/security-rules/firebase.rules-test.json b/security-rules/firebase.rules-test.json
+new file mode 100644
+index 0000000..2fc7fb0
+--- /dev/null
++++ b/security-rules/firebase.rules-test.json
+@@ -0,0 +1,5 @@
++{
++  "firestore": { "rules": "security-rules/firestore.rules" },
++  "storage": { "rules": "security-rules/storage.rules" },
++  "emulators": { "firestore": { "port": 8080 }, "storage": { "port": 9199 }, "singleProjectMode": true, "ui": { "enabled": false } }
++}
+diff --git a/security-rules/firestore.indexes.json b/security-rules/firestore.indexes.json
+new file mode 100644
+index 0000000..415027e
+--- /dev/null
++++ b/security-rules/firestore.indexes.json
+@@ -0,0 +1,4 @@
++{
++  "indexes": [],
++  "fieldOverrides": []
++}
+diff --git a/security-rules/firestore.rules b/security-rules/firestore.rules
+new file mode 100644
+index 0000000..6c3c27a
+--- /dev/null
++++ b/security-rules/firestore.rules
+@@ -0,0 +1,165 @@
++// =====================================================================================================================
++// XploreSoweto Stage 1: Firestore Security Rules (project xploresoweto).            *** PREPARED, NOT DEPLOYED ***
++//
++// Principles
++//  * Default deny. Anything not matched below is closed (including the Person-Of-Interest collection, which is excluded
++//    from the public launch, and the legacy `admin` and `userservices` collections, which no longer exist).
++//  * Sensitive or multi-step writes (profiles, applications, organisations, memberships, invitations, bookings, service
++//    requests, reviews, audit logs) are performed ONLY by Cloud Functions using the Admin SDK, which bypasses these rules.
++//    Clients can therefore not create, edit or delete them directly.
++//  * Platform staff: a custom claim ALONE grants nothing. Staff need the claim AND a verified email AND an active
++//    authoritative record (super-admin/{uid} or platform-editors/{uid}).
++//  * Rules are not filters: public content is readable only when isActive == true, so queries MUST include
++//    where("isActive", "==", true) (the app's data layer does this). Unfiltered list queries are rejected.
++//
++// Role -> permission mapping in roleGrants() mirrors functions/src/lib/constants.js (ROLE_PERMISSIONS). Keep them in sync.
++// =====================================================================================================================
++rules_version = '2';
++service cloud.firestore {
++  match /databases/{database}/documents {
++
++    // ---------------------------------------------------------------- helpers
++    function signedIn() { return request.auth != null; }
++    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
++    function verified() { return signedIn() && request.auth.token.email_verified == true; }
++
++    function isActiveSuperAdmin() {
++      return verified()
++        && request.auth.token.get('superAdmin', false) == true
++        && get(/databases/$(database)/documents/super-admin/$(request.auth.uid)).data.active == true
++        && get(/databases/$(database)/documents/super-admin/$(request.auth.uid)).data.role == 'super_admin';
++    }
++    function isActiveEditor() {
++      return verified()
++        && request.auth.token.get('editor', false) == true
++        && get(/databases/$(database)/documents/platform-editors/$(request.auth.uid)).data.active == true
++        && get(/databases/$(database)/documents/platform-editors/$(request.auth.uid)).data.role == 'editor';
++    }
++    function isStaff() { return isActiveSuperAdmin() || isActiveEditor(); }
++
++    function changedKeys() { return request.resource.data.diff(resource.data).affectedKeys(); }
++
++    // ---- organisation membership (membership document id = organisationId_userId, written only by functions)
++    function membershipPath(orgId) {
++      return /databases/$(database)/documents/organisation-members/$(orgId + '_' + request.auth.uid);
++    }
++    function orgPath(orgId) { return /databases/$(database)/documents/organisations/$(orgId); }
++    function roleGrants(role, perm) {
++      return role in ['owner', 'manager']
++        || (role == 'reservations_manager' && perm in ['bookings.read', 'bookings.manage', 'enquiries.manage'])
++        || (role == 'content_manager' && perm in ['profile.edit', 'content.manage'])
++        || (role == 'employee' && perm == 'bookings.read');
++    }
++    // Active member holding `perm` (both stored on the membership AND granted by the member's role)
++    function memberHas(orgId, perm) {
++      return signedIn()
++        && orgId is string
++        && exists(membershipPath(orgId))
++        && get(membershipPath(orgId)).data.active == true
++        && perm in get(membershipPath(orgId)).data.permissions
++        && roleGrants(get(membershipPath(orgId)).data.role, perm);
++    }
++    function orgIsActive(orgId) {
++      return get(orgPath(orgId)).data.approvalStatus == 'approved' && get(orgPath(orgId)).data.active == true;
++    }
++    function orgPerm(orgId, perm) { return memberHas(orgId, perm) && orgIsActive(orgId); }
++
++    // ---------------------------------------------------------------- platform records: server-written only
++    match /super-admin/{uid}      { allow read: if isActiveSuperAdmin(); allow write: if false; }
++    match /platform-editors/{uid} { allow read: if isActiveSuperAdmin(); allow write: if false; }
++    match /audit-log/{id}         { allow read: if isActiveSuperAdmin(); allow write: if false; }
++
++    // ---------------------------------------------------------------- public content (existing collections)
++    // Readable by anyone ONLY while isActive == true. Written by active staff only. Provider-submitted listings never
++    // write here directly: they go through listing-submissions and are published by staff via a function.
++    function publicCollections() {
++      return ['accommodations', 'attractions', 'business', 'restaurants', 'recreation', 'events', 'news',
++              'announcements', 'transport', 'healthcare', 'emergency', 'publicservice', 'homescreen',
++              'xplore-menu', 'loadshedding'];
++    }
++    match /{coll}/{docId} {
++      allow read: if coll in publicCollections() && resource.data.isActive == true;
++      allow create, update, delete: if coll in publicCollections() && isStaff();
++    }
++
++    // ---------------------------------------------------------------- users (private)
++    match /users/{uid} {
++      allow get: if isSelf(uid);              // own profile only
++      allow list: if false;                   // no profile queries, so no email exposure
++      allow create: if false;                 // created by ensureUserProfile
++      allow delete: if false;
++      // Users may change ONLY these fields. Roles, permissions, email, uid and organisation membership are not here.
++      allow update: if isSelf(uid)
++        && changedKeys().hasOnly(['displayName', 'greeting', 'kasi', 'phone', 'city', 'photoURL', 'enrolled', 'enrolledAt', 'updatedAt'])
++        && (!changedKeys().hasAny(['displayName'])
++            || (request.resource.data.displayName is string && request.resource.data.displayName.size() > 0 && request.resource.data.displayName.size() <= 60))
++        && (!changedKeys().hasAny(['greeting']) || request.resource.data.greeting == null || (request.resource.data.greeting is string && request.resource.data.greeting.size() <= 60))
++        && (!changedKeys().hasAny(['kasi']) || request.resource.data.kasi == null || (request.resource.data.kasi is string && request.resource.data.kasi.size() <= 60))
++        && (!changedKeys().hasAny(['city']) || request.resource.data.city == null || (request.resource.data.city is string && request.resource.data.city.size() <= 60))
++        && (!changedKeys().hasAny(['phone']) || request.resource.data.phone == null || (request.resource.data.phone is string && request.resource.data.phone.size() <= 20))
++        && (!changedKeys().hasAny(['photoURL']) || request.resource.data.photoURL == null || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 2000))
++        && (!changedKeys().hasAny(['enrolled']) || request.resource.data.enrolled is bool)
++        && (!changedKeys().hasAny(['enrolledAt']) || request.resource.data.enrolledAt == null || request.resource.data.enrolledAt is timestamp)
++        && (!changedKeys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp);
++    }
++
++    // ---------------------------------------------------------------- provider applications (private)
++    match /provider-applications/{appId} {
++      allow get, list: if signedIn() && resource.data.applicantUid == request.auth.uid;   // queries must filter on applicantUid
++      allow get, list: if isActiveSuperAdmin();
++      allow write: if false;                  // submitProviderApplication / reviewProviderApplication
++    }
++
++    // ---------------------------------------------------------------- organisations (private to members and super admins)
++    match /organisations/{orgId} {
++      allow get: if memberHas(orgId, 'bookings.read') || memberHas(orgId, 'content.manage') || memberHas(orgId, 'members.manage') || isActiveSuperAdmin();
++      allow list: if isActiveSuperAdmin();    // a user finds their organisations through organisation-members
++      allow create, delete: if false;         // created on approval by a function
++      // Members with profile.edit (owner, manager, content manager) may edit organisation information only
++      allow update: if orgPerm(orgId, 'profile.edit')
++        && changedKeys().hasOnly(['description', 'contact', 'logoUrl', 'updatedAt'])
++        && (!changedKeys().hasAny(['description']) || (request.resource.data.description is string && request.resource.data.description.size() <= 2000))
++        && (!changedKeys().hasAny(['contact']) || (request.resource.data.contact is map && request.resource.data.contact.keys().hasOnly(['phone', 'email', 'address', 'website'])))
++        && (!changedKeys().hasAny(['logoUrl']) || request.resource.data.logoUrl == null || (request.resource.data.logoUrl is string && request.resource.data.logoUrl.size() <= 2000));
++    }
++    match /organisation-members/{membershipId} {
++      allow get, list: if signedIn() && resource.data.userId == request.auth.uid;          // my memberships
++      allow get, list: if memberHas(resource.data.organisationId, 'members.manage');       // staff screens (query by organisationId)
++      allow get, list: if isActiveSuperAdmin();
++      allow write: if false;                  // roles and permissions are assigned only by functions
++    }
++    match /organisation-invitations/{invitationId} {
++      allow read, write: if false;            // never exposed to clients: functions only, emails masked in responses
++    }
++
++    // ---------------------------------------------------------------- listing submissions (private to the organisation)
++    match /listing-submissions/{submissionId} {
++      allow get, list: if memberHas(resource.data.organisationId, 'content.manage');
++      allow get, list: if isStaff();
++      allow write: if false;                  // submitListing / reviewListingSubmission
++    }
++
++    // ---------------------------------------------------------------- bookings and service requests (private)
++    match /bookings/{bookingId} {
++      allow get, list: if signedIn() && resource.data.customerUid == request.auth.uid;     // queries must filter on customerUid
++      allow get, list: if memberHas(resource.data.organisationId, 'bookings.read');
++      allow get, list: if isActiveSuperAdmin();
++      allow write: if false;                  // createBookingRequest / updateRequestStatus
++    }
++    match /service-requests/{requestId} {
++      allow get, list: if signedIn() && resource.data.customerUid == request.auth.uid;
++      allow get, list: if memberHas(resource.data.organisationId, 'enquiries.manage');
++      allow get, list: if isActiveSuperAdmin();
++      allow write: if false;                  // createServiceRequest / updateRequestStatus
++    }
++
++    // ---------------------------------------------------------------- reviews (read-only for clients)
++    match /reviews/{reviewId} {
++      allow read: if signedIn();
++      allow write: if false;                  // submitReview verifies a completed, customer-confirmed request
++    }
++
++    // everything else is denied (Person-Of-Interest, any legacy or future collection)
++    match /{document=**} { allow read, write: if false; }
++  }
++}
+diff --git a/security-rules/package.json b/security-rules/package.json
+new file mode 100644
+index 0000000..99cd193
+--- /dev/null
++++ b/security-rules/package.json
+@@ -0,0 +1,16 @@
++{
++  "name": "xploresoweto-security-rules-tests",
++  "private": true,
++  "description": "Syntax lint + Firebase emulator tests for the PROPOSED rules. Run from the repository root (see README.md).",
++  "scripts": {
++    "lint": "eslint --no-config-lookup -c eslint.config.cjs firestore.rules storage.rules",
++    "test": "cd .. && firebase emulators:exec --config security-rules/firebase.rules-test.json --project demo-xploresoweto \"npx --prefix security-rules mocha security-rules/test/*.test.js --exit --timeout 30000\""
++  },
++  "devDependencies": {
++    "@firebase/eslint-plugin-security-rules": "^0.0.2",
++    "@firebase/rules-unit-testing": "^4.0.1",
++    "eslint": "^9.0.0",
++    "firebase": "^11.0.0",
++    "mocha": "^10.7.0"
++  }
++}
+diff --git a/security-rules/storage.rules b/security-rules/storage.rules
+new file mode 100644
+index 0000000..8657e92
+--- /dev/null
++++ b/security-rules/storage.rules
+@@ -0,0 +1,78 @@
++// =====================================================================================================================
++// XploreSoweto Stage 1: Firebase Storage Rules (bucket xploresoweto.firebasestorage.app).   *** PREPARED, NOT DEPLOYED ***
++// Default deny. Staff = claim AND verified email AND an active authoritative Firestore record (cross-service lookup).
++// Note: download-token URLs bypass rules for anyone who holds the URL, so private documents (provider applications) are
++// never given token URLs; they are read only through authenticated SDK calls that these rules authorise.
++// =====================================================================================================================
++rules_version = '2';
++service firebase.storage {
++  match /b/{bucket}/o {
++
++    function signedIn() { return request.auth != null; }
++    function verified() { return signedIn() && request.auth.token.email_verified == true; }
++    function isImage() { return request.resource.contentType.matches('image/(jpeg|png|webp)'); }
++    function isDocument() { return request.resource.contentType.matches('image/(jpeg|png)|application/pdf'); }
++    function underMB(n) { return request.resource.size < n * 1024 * 1024; }
++
++    function isActiveSuperAdmin() {
++      return verified()
++        && request.auth.token.get('superAdmin', false) == true
++        && firestore.get(/databases/(default)/documents/super-admin/$(request.auth.uid)).data.active == true
++        && firestore.get(/databases/(default)/documents/super-admin/$(request.auth.uid)).data.role == 'super_admin';
++    }
++    function isActiveEditor() {
++      return verified()
++        && request.auth.token.get('editor', false) == true
++        && firestore.get(/databases/(default)/documents/platform-editors/$(request.auth.uid)).data.active == true
++        && firestore.get(/databases/(default)/documents/platform-editors/$(request.auth.uid)).data.role == 'editor';
++    }
++    function isStaff() { return isActiveSuperAdmin() || isActiveEditor(); }
++
++    function membershipPath(orgId) { return /databases/(default)/documents/organisation-members/$(orgId + '_' + request.auth.uid); }
++    function orgPath(orgId) { return /databases/(default)/documents/organisations/$(orgId); }
++    function orgContentManager(orgId) {
++      return verified()
++        && firestore.exists(membershipPath(orgId))
++        && firestore.get(membershipPath(orgId)).data.active == true
++        && ('content.manage' in firestore.get(membershipPath(orgId)).data.permissions)
++        && firestore.get(membershipPath(orgId)).data.role in ['owner', 'manager', 'content_manager']
++        && firestore.get(orgPath(orgId)).data.approvalStatus == 'approved'
++        && firestore.get(orgPath(orgId)).data.active == true;
++    }
++
++    // ---- profile images: private to the owner
++    match /profile-images/{uid} {
++      allow read: if signedIn() && request.auth.uid == uid;
++      allow create, update: if signedIn() && request.auth.uid == uid && isImage() && underMB(2);
++      allow delete: if signedIn() && request.auth.uid == uid;
++    }
++
++    // ---- published media: public read; only active staff upload or remove. (Functions publish approved provider images here
++    //      using the Admin SDK, which bypasses rules.)
++    function publicFolder(f) {
++      return f in ['homescreen', 'news', 'events', 'attractions', 'business', 'restaurants', 'accommodations',
++                   'recreation', 'healthcare', 'publicservice'];
++    }
++    match /{folder}/{allPaths=**} {
++      allow read: if publicFolder(folder);
++      allow create, update: if publicFolder(folder) && isStaff() && isImage() && underMB(5);
++      allow delete: if publicFolder(folder) && isStaff();
++    }
++
++    // ---- provider listing submissions: members with content.manage of an approved organisation upload; they and staff read.
++    //      Immutable once uploaded (no update/delete from clients).
++    match /listing-submissions/{orgId}/{submissionId}/{file} {
++      allow read: if orgContentManager(orgId) || isStaff();
++      allow create: if orgContentManager(orgId) && submissionId.matches(orgId + '_.*') && isImage() && underMB(5);
++    }
++
++    // ---- provider application documents: private to the applicant and super admins; immutable
++    match /provider-applications/{uid}/{applicationId}/{file} {
++      allow read: if signedIn() && (request.auth.uid == uid || isActiveSuperAdmin());
++      allow create: if verified() && request.auth.uid == uid && applicationId.matches(uid + '_.*') && isDocument() && underMB(10);
++    }
++
++    // everything else (including person-of-interest/*) is denied
++    match /{allPaths=**} { allow read, write: if false; }
++  }
++}
+diff --git a/security-rules/test/firestore.rules.test.js b/security-rules/test/firestore.rules.test.js
+new file mode 100644
+index 0000000..dba5f77
+--- /dev/null
++++ b/security-rules/test/firestore.rules.test.js
+@@ -0,0 +1,204 @@
++"use strict"
++const { assertFails, assertSucceeds } = require("@firebase/rules-unit-testing")
++const { doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, collection, query, where } = require("firebase/firestore")
++const { makeEnv, seed, as } = require("./helpers")
++
++describe("Firestore rules (Stage 1, proposed)", () => {
++  let env
++  before(async () => { env = await makeEnv() })
++  after(async () => { await env.cleanup() })
++  beforeEach(async () => { await env.clearFirestore(); await seed(env); })
++  const anon = () => env.unauthenticatedContext().firestore()
++  const as_ = (uid, claims, verified) => as(env, uid, claims, verified).firestore()
++  const SA = { superAdmin: true }, ED = { editor: true }
++
++  describe("public content: the app's real queries", () => {
++    it("unauthenticated users can read an active document", () => assertSucceeds(getDoc(doc(anon(), "restaurants/r1"))))
++    it("the app's filtered list query (where isActive == true) works", () => assertSucceeds(getDocs(query(collection(anon(), "restaurants"), where("isActive", "==", true)))))
++    for (const c of ["accommodations", "attractions", "business", "restaurants", "recreation", "events", "news", "announcements", "transport", "healthcare", "emergency", "publicservice", "homescreen", "xplore-menu", "loadshedding"]) {
++      it(`filtered list works for ${c}`, () => assertSucceeds(getDocs(query(collection(as_("alice"), c), where("isActive", "==", true)))))
++    }
++    it("an UNFILTERED list query is rejected (rules are not filters)", () => assertFails(getDocs(collection(anon(), "restaurants"))))
++    it("inactive and flag-less documents are not readable", async () => {
++      await assertFails(getDoc(doc(anon(), "restaurants/r2"))); await assertFails(getDoc(doc(anon(), "restaurants/r3")))
++      await assertFails(getDocs(query(collection(anon(), "restaurants"), where("isActive", "==", false))))
++    })
++    it("ordinary users and anonymous visitors cannot write content", async () => {
++      await assertFails(updateDoc(doc(anon(), "restaurants/r1"), { name: "x" }))
++      await assertFails(setDoc(doc(as_("alice"), "restaurants/new"), { name: "x", isActive: true }))
++      await assertFails(deleteDoc(doc(as_("alice"), "restaurants/r1")))
++    })
++    it("collections outside the public list are closed", async () => {
++      for (const p of ["Person-Of-Interest/p1", "admin/x", "userservices/u1", "unknown/x"]) await assertFails(getDoc(doc(as_("alice"), p)))
++    })
++  })
++
++  describe("platform staff: a claim alone grants nothing", () => {
++    it("active editor (claim + verified + record) can write content", () => assertSucceeds(updateDoc(doc(as_("ed", ED), "restaurants/r1"), { name: "Renamed" })))
++    it("active super admin can write content and read super-admin/audit", async () => {
++      await assertSucceeds(updateDoc(doc(as_("root", SA), "restaurants/r1"), { name: "Renamed" }))
++      await assertSucceeds(getDoc(doc(as_("root", SA), "super-admin/root"))); await assertSucceeds(getDoc(doc(as_("root", SA), "audit-log/a1")))
++    })
++    it("claim WITHOUT a record is denied", async () => {
++      await assertFails(updateDoc(doc(as_("ghost", SA), "restaurants/r1"), { name: "x" }))
++      await assertFails(getDoc(doc(as_("ghost", SA), "super-admin/root")))
++      await assertFails(updateDoc(doc(as_("ghost", ED), "restaurants/r1"), { name: "x" }))
++    })
++    it("inactive record is denied even with the claim", async () => {
++      await assertFails(getDoc(doc(as_("exSA", SA), "super-admin/root")))
++      await assertFails(updateDoc(doc(as_("exEd", ED), "restaurants/r1"), { name: "x" }))
++    })
++    it("active record WITHOUT the claim is denied", async () => {
++      await assertFails(getDoc(doc(as_("root", {}), "super-admin/root")))
++      await assertFails(updateDoc(doc(as_("ed", {}), "restaurants/r1"), { name: "x" }))
++    })
++    it("an unverified email is denied", async () => {
++      await assertFails(getDoc(doc(as_("root", SA, false), "super-admin/root")))
++      await assertFails(updateDoc(doc(as_("ed", ED, false), "restaurants/r1"), { name: "x" }))
++    })
++    it("nobody can write super-admin, platform-editors or audit-log from a client (even a super admin)", async () => {
++      for (const ctx of [as_("alice"), as_("root", SA), as_("ed", ED)]) {
++        await assertFails(setDoc(doc(ctx, "super-admin/alice"), { uid: "alice", role: "super_admin", active: true }))
++        await assertFails(updateDoc(doc(ctx, "super-admin/root"), { active: false }))
++        await assertFails(setDoc(doc(ctx, "platform-editors/alice"), { uid: "alice", role: "editor", active: true }))
++        await assertFails(addDoc(collection(ctx, "audit-log"), { action: "fake" }))
++      }
++    })
++    it("editors cannot read user profiles, applications or super-admin records", async () => {
++      await assertFails(getDoc(doc(as_("ed", ED), "users/alice"))); await assertFails(getDoc(doc(as_("ed", ED), "provider-applications/alice_r1"))); await assertFails(getDoc(doc(as_("ed", ED), "super-admin/root")))
++    })
++  })
++
++  describe("users", () => {
++    it("a user reads only their own profile; nobody can list profiles", async () => {
++      await assertSucceeds(getDoc(doc(as_("alice"), "users/alice"))); await assertFails(getDoc(doc(as_("alice"), "users/bob")))
++      await assertFails(getDocs(collection(as_("alice"), "users"))); await assertFails(getDocs(query(collection(as_("root", SA), "users"), where("email", "==", "bob@x.com"))))
++    })
++    it("a user can update permitted fields (as the app's enrollment and profile screens do)", async () => {
++      await assertSucceeds(updateDoc(doc(as_("alice"), "users/alice"), { displayName: "Alice B", greeting: "Sawubona", kasi: "Orlando", phone: "0110000000", city: "Soweto", enrolled: true, enrolledAt: new Date(), updatedAt: new Date() }))
++    })
++    it("a user can NEVER change privileged or identity fields", async () => {
++      const db = as_("alice")
++      for (const patch of [{ email: "evil@x.com" }, { uid: "bob" }, { role: "super_admin" }, { roles: ["x"] }, { permissions: ["members.manage"] }, { superAdmin: true }, { isAdmin: true }, { canReview: true }, { organisationId: "orgA" }, { verified: true }, { createdAt: new Date() }])
++        await assertFails(updateDoc(doc(db, "users/alice"), patch))
++    })
++    it("field validation, no create, no delete, no editing others", async () => {
++      await assertFails(updateDoc(doc(as_("alice"), "users/alice"), { displayName: "" }))
++      await assertFails(updateDoc(doc(as_("alice"), "users/alice"), { displayName: "x".repeat(61) }))
++      await assertFails(updateDoc(doc(as_("alice"), "users/alice"), { enrolled: "yes" }))
++      await assertFails(setDoc(doc(as_("newuser"), "users/newuser"), { uid: "newuser", displayName: "N" }))
++      await assertFails(deleteDoc(doc(as_("alice"), "users/alice")))
++      await assertFails(updateDoc(doc(as_("alice"), "users/bob"), { displayName: "hacked" }))
++    })
++  })
++
++  describe("provider applications", () => {
++    it("the applicant reads their own (query filtered by applicantUid); others cannot", async () => {
++      await assertSucceeds(getDocs(query(collection(as_("alice"), "provider-applications"), where("applicantUid", "==", "alice"))))
++      await assertFails(getDoc(doc(as_("bob"), "provider-applications/alice_r1"))); await assertFails(getDocs(collection(as_("bob"), "provider-applications")))
++      await assertSucceeds(getDoc(doc(as_("root", SA), "provider-applications/alice_r1")))
++    })
++    it("clients cannot create, approve or edit applications", async () => {
++      await assertFails(addDoc(collection(as_("bob"), "provider-applications"), { applicantUid: "bob", status: "submitted" }))
++      await assertFails(updateDoc(doc(as_("alice"), "provider-applications/alice_r1"), { status: "approved" }))
++      await assertFails(updateDoc(doc(as_("root", SA), "provider-applications/alice_r1"), { status: "approved" }))
++    })
++  })
++
++  describe("organisations: isolation", () => {
++    it("members read their own organisation; outsiders and other organisations' owners cannot", async () => {
++      await assertSucceeds(getDoc(doc(as_("ownerA"), "organisations/orgA"))); await assertSucceeds(getDoc(doc(as_("empA"), "organisations/orgA")))
++      await assertFails(getDoc(doc(as_("bob"), "organisations/orgA"))); await assertFails(getDoc(doc(as_("ownerB"), "organisations/orgA")))
++      await assertFails(getDocs(collection(as_("ownerA"), "organisations")))
++    })
++    it("clients cannot create or delete organisations", async () => {
++      await assertFails(setDoc(doc(as_("alice"), "organisations/mine"), { name: "x", ownerUid: "alice", approvalStatus: "approved", active: true }))
++      await assertFails(deleteDoc(doc(as_("ownerA"), "organisations/orgA")))
++    })
++    it("owner, manager and content manager can edit organisation information; employee and reservations manager cannot", async () => {
++      for (const uid of ["ownerA", "mgrA", "contentA"]) await assertSucceeds(updateDoc(doc(as_(uid), "organisations/orgA"), { description: "Updated", contact: { phone: "0110000000" }, updatedAt: new Date() }))
++      for (const uid of ["empA", "resA"]) await assertFails(updateDoc(doc(as_(uid), "organisations/orgA"), { description: "x" }))
++    })
++    it("protected organisation fields cannot be changed by members", async () => {
++      for (const patch of [{ name: "New" }, { ownerUid: "alice" }, { approvalStatus: "approved" }, { active: false }, { verificationStatus: "unverified" }, { organisationType: "business" }])
++        await assertFails(updateDoc(doc(as_("ownerA"), "organisations/orgA"), patch))
++    })
++    it("a member of one organisation cannot touch another, and a suspended organisation cannot be edited", async () => {
++      await assertFails(updateDoc(doc(as_("ownerA"), "organisations/orgB"), { description: "x" }))
++      await assertFails(updateDoc(doc(as_("ownerC"), "organisations/orgC"), { description: "x" }))
++    })
++  })
++
++  describe("organisation memberships and invitations", () => {
++    it("a user lists their own memberships; managers list their organisation's members", async () => {
++      await assertSucceeds(getDocs(query(collection(as_("ownerA"), "organisation-members"), where("userId", "==", "ownerA"))))
++      await assertSucceeds(getDocs(query(collection(as_("mgrA"), "organisation-members"), where("organisationId", "==", "orgA"))))
++    })
++    it("employees, other organisations and outsiders cannot list another organisation's members", async () => {
++      await assertFails(getDocs(query(collection(as_("empA"), "organisation-members"), where("organisationId", "==", "orgA"))))
++      await assertFails(getDocs(query(collection(as_("ownerB"), "organisation-members"), where("organisationId", "==", "orgA"))))
++      await assertFails(getDocs(query(collection(as_("bob"), "organisation-members"), where("organisationId", "==", "orgA"))))
++    })
++    it("memberships can never be written by clients (no self-promotion)", async () => {
++      await assertFails(setDoc(doc(as_("bob"), "organisation-members/orgA_bob"), { organisationId: "orgA", userId: "bob", role: "owner", active: true, permissions: ["members.manage"] }))
++      await assertFails(updateDoc(doc(as_("mgrA"), "organisation-members/orgA_empA"), { role: "owner" }))
++      await assertFails(updateDoc(doc(as_("empA"), "organisation-members/orgA_empA"), { permissions: ["members.manage"] }))
++      await assertFails(updateDoc(doc(as_("root", SA), "organisation-members/orgA_empA"), { role: "owner" }))
++    })
++    it("invitations are invisible and unwritable for every client, including super admins", async () => {
++      for (const ctx of [as_("ownerA"), as_("root", SA), as_("alice")]) {
++        await assertFails(getDoc(doc(ctx, "organisation-invitations/inv1"))); await assertFails(getDocs(collection(ctx, "organisation-invitations")))
++        await assertFails(setDoc(doc(ctx, "organisation-invitations/x"), { email: "a@x.com" })); await assertFails(updateDoc(doc(ctx, "organisation-invitations/inv1"), { status: "accepted" }))
++      }
++    })
++  })
++
++  describe("listing submissions", () => {
++    it("content-managing members and staff read; employees, other organisations and outsiders cannot", async () => {
++      await assertSucceeds(getDocs(query(collection(as_("contentA"), "listing-submissions"), where("organisationId", "==", "orgA"))))
++      await assertSucceeds(getDocs(collection(as_("ed", ED), "listing-submissions")))
++      await assertFails(getDocs(query(collection(as_("empA"), "listing-submissions"), where("organisationId", "==", "orgA"))))
++      await assertFails(getDocs(query(collection(as_("ownerB"), "listing-submissions"), where("organisationId", "==", "orgA"))))
++    })
++    it("clients cannot write submissions (submitListing does)", async () => {
++      await assertFails(addDoc(collection(as_("contentA"), "listing-submissions"), { organisationId: "orgA", status: "approved" }))
++      await assertFails(updateDoc(doc(as_("ed", ED), "listing-submissions/orgA_s1"), { status: "approved" }))
++    })
++  })
++
++  describe("bookings and service requests: privacy", () => {
++    it("the customer reads their own; other customers cannot", async () => {
++      await assertSucceeds(getDocs(query(collection(as_("alice"), "bookings"), where("customerUid", "==", "alice"))))
++      await assertFails(getDoc(doc(as_("bob"), "bookings/alice_b1"))); await assertFails(getDocs(collection(as_("bob"), "bookings")))
++    })
++    it("organisation members with bookings.read can read their organisation's bookings; others cannot", async () => {
++      for (const uid of ["ownerA", "mgrA", "resA", "empA"]) await assertSucceeds(getDocs(query(collection(as_(uid), "bookings"), where("organisationId", "==", "orgA"))))
++      await assertFails(getDocs(query(collection(as_("contentA"), "bookings"), where("organisationId", "==", "orgA"))))
++      await assertFails(getDocs(query(collection(as_("ownerB"), "bookings"), where("organisationId", "==", "orgA"))))
++    })
++    it("service requests need enquiries.manage (employees and content managers cannot read them)", async () => {
++      for (const uid of ["ownerA", "mgrA", "resA"]) await assertSucceeds(getDocs(query(collection(as_(uid), "service-requests"), where("organisationId", "==", "orgA"))))
++      for (const uid of ["empA", "contentA", "ownerB"]) await assertFails(getDocs(query(collection(as_(uid), "service-requests"), where("organisationId", "==", "orgA"))))
++    })
++    it("nobody can create or modify bookings/service requests from a client", async () => {
++      for (const ctx of [as_("alice"), as_("ownerA"), as_("root", SA)]) {
++        await assertFails(addDoc(collection(ctx, "bookings"), { customerUid: "alice", organisationId: "orgA", status: "pending" }))
++        await assertFails(updateDoc(doc(ctx, "bookings/alice_b1"), { status: "completed" }))
++        await assertFails(updateDoc(doc(ctx, "service-requests/alice_s1"), { status: "completed" }))
++        await assertFails(deleteDoc(doc(ctx, "bookings/alice_b1")))
++      }
++    })
++  })
++
++  describe("reviews", () => {
++    it("signed-in users can read reviews; anonymous cannot", async () => {
++      await assertSucceeds(getDocs(query(collection(as_("bob"), "reviews"), where("userId", "==", "alice")))); await assertFails(getDocs(collection(anon(), "reviews")))
++    })
++    it("clients can never create, edit or delete reviews", async () => {
++      for (const ctx of [as_("alice"), as_("root", SA)]) {
++        await assertFails(addDoc(collection(ctx, "reviews"), { userId: "alice", rating: 5, comment: "x", businessId: "b1" }))
++        await assertFails(updateDoc(doc(ctx, "reviews/alice_business_b1"), { rating: 1 })); await assertFails(deleteDoc(doc(ctx, "reviews/alice_business_b1")))
++      }
++    })
++  })
++})
+diff --git a/security-rules/test/helpers.js b/security-rules/test/helpers.js
+new file mode 100644
+index 0000000..b0414a5
+--- /dev/null
++++ b/security-rules/test/helpers.js
+@@ -0,0 +1,45 @@
++"use strict"
++const fs = require("fs")
++const path = require("path")
++const { initializeTestEnvironment } = require("@firebase/rules-unit-testing")
++const { doc, setDoc } = require("firebase/firestore")
++
++const makeEnv = () => initializeTestEnvironment({
++  projectId: "demo-xploresoweto",
++  firestore: { rules: fs.readFileSync(path.join(__dirname, "../firestore.rules"), "utf8"), host: "127.0.0.1", port: 8080 },
++  storage: { rules: fs.readFileSync(path.join(__dirname, "../storage.rules"), "utf8"), host: "127.0.0.1", port: 9199 },
++})
++const PERMS = {
++  owner: ["profile.edit", "content.manage", "bookings.read", "bookings.manage", "enquiries.manage", "members.manage"],
++  manager: ["profile.edit", "content.manage", "bookings.read", "bookings.manage", "enquiries.manage", "members.manage"],
++  reservations_manager: ["bookings.read", "bookings.manage", "enquiries.manage"],
++  content_manager: ["profile.edit", "content.manage"],
++  employee: ["bookings.read"],
++}
++// Baseline data (written with rules disabled, standing in for what Cloud Functions / the console create)
++async function seed(env) {
++  await env.withSecurityRulesDisabled(async (ctx) => {
++    const db = ctx.firestore(); const put = (p, d) => setDoc(doc(db, p), d)
++    await put("super-admin/root", { uid: "root", email: "root@x.com", role: "super_admin", active: true })
++    await put("super-admin/exSA", { uid: "exSA", email: "ex@x.com", role: "super_admin", active: false })
++    await put("platform-editors/ed", { uid: "ed", role: "editor", active: true })
++    await put("platform-editors/exEd", { uid: "exEd", role: "editor", active: false })
++    await put("users/alice", { uid: "alice", email: "alice@x.com", displayName: "Alice", enrolled: false })
++    await put("users/bob", { uid: "bob", email: "bob@x.com", displayName: "Bob" })
++    for (const [id, ok] of [["orgA", true], ["orgB", true], ["orgC", false]]) await put(`organisations/${id}`, { name: id, organisationType: "restaurant", ownerUid: "owner" + id, approvalStatus: ok ? "approved" : "suspended", active: ok, verificationStatus: "verified", description: "", contact: {} })
++    for (const [org, uid, role] of [["orgA", "ownerA", "owner"], ["orgA", "mgrA", "manager"], ["orgA", "resA", "reservations_manager"], ["orgA", "contentA", "content_manager"], ["orgA", "empA", "employee"], ["orgB", "ownerB", "owner"], ["orgC", "ownerC", "owner"]])
++      await put(`organisation-members/${org}_${uid}`, { organisationId: org, userId: uid, role, permissions: PERMS[role], active: true })
++    await put("restaurants/r1", { name: "Active", isActive: true }); await put("restaurants/r2", { name: "Inactive", isActive: false }); await put("restaurants/r3", { name: "NoFlag" })
++    await put("events/e1", { title: "Event", isActive: true }); await put("homescreen/h1", { type: "hero", isActive: true }); await put("xplore-menu/m1", { screen: "Restaurants", isActive: true }); await put("loadshedding/orlando", { suburb: "Orlando", isActive: true })
++    await put("provider-applications/alice_r1", { applicantUid: "alice", status: "submitted" })
++    await put("organisation-invitations/inv1", { organisationId: "orgA", email: "n@x.com", status: "pending", tokenHash: "h" })
++    await put("listing-submissions/orgA_s1", { organisationId: "orgA", status: "pending" })
++    await put("bookings/alice_b1", { customerUid: "alice", organisationId: "orgA", status: "pending" })
++    await put("service-requests/alice_s1", { customerUid: "alice", organisationId: "orgA", status: "pending" })
++    await put("reviews/alice_business_b1", { userId: "alice", rating: 5 })
++    await put("audit-log/a1", { action: "x", actorUid: "root" })
++    await put("Person-Of-Interest/p1", { name: "N" }); await put("admin/x", { a: 1 }); await put("userservices/u1", { userId: "alice" })
++  })
++}
++const as = (env, uid, claims = {}, verified = true) => env.authenticatedContext(uid, { email: `${uid}@x.com`, email_verified: verified, ...claims })
++module.exports = { makeEnv, seed, as }
+diff --git a/security-rules/test/storage.rules.test.js b/security-rules/test/storage.rules.test.js
+new file mode 100644
+index 0000000..1a08132
+--- /dev/null
++++ b/security-rules/test/storage.rules.test.js
+@@ -0,0 +1,54 @@
++"use strict"
++const { assertFails, assertSucceeds } = require("@firebase/rules-unit-testing")
++const { ref, uploadBytes, deleteObject } = require("firebase/storage")
++const { makeEnv, seed, as } = require("./helpers")
++
++const bytes = (n = 100) => new Uint8Array(n)
++const png = { contentType: "image/png" }, pdf = { contentType: "application/pdf" }
++
++describe("Storage rules (Stage 1, proposed)", () => {
++  let env
++  before(async () => { env = await makeEnv() })
++  after(async () => { await env.cleanup() })
++  beforeEach(async () => { await env.clearFirestore(); await env.clearStorage(); await seed(env) })
++  const st = (uid, claims, verified) => (uid ? as(env, uid, claims, verified).storage() : env.unauthenticatedContext().storage())
++  const put = (s, path, data = bytes(), meta = png) => uploadBytes(ref(s, path), data, meta)
++  const SA = { superAdmin: true }, ED = { editor: true }
++
++  it("unauthenticated users cannot upload or delete anywhere", async () => {
++    for (const p of ["news/a.png", "profile-images/alice", "restaurants/orgA/a.png", "listing-submissions/orgA/orgA_s1/a.png", "random/a.png"]) await assertFails(put(st(), p))
++  })
++  it("profile images: owner only, image types, 2 MB cap, owner-only read", async () => {
++    await assertSucceeds(put(st("alice"), "profile-images/alice"))
++    await assertSucceeds(uploadBytes(ref(st("alice"), "profile-images/alice"), bytes(), { contentType: "image/jpeg" }))
++    await assertFails(put(st("bob"), "profile-images/alice")); await assertFails(put(st("alice"), "profile-images/alice", bytes(), { contentType: "text/html" }))
++    await assertFails(put(st("alice"), "profile-images/alice", bytes(3 * 1024 * 1024))); await assertFails(deleteObject(ref(st("bob"), "profile-images/alice")))
++    await assertFails(put(st("root", SA), "profile-images/alice")) // not even staff
++  })
++  it("published media: public read of the right folders; only ACTIVE staff write", async () => {
++    await assertSucceeds(put(st("ed", ED), "news/n1.png")); await assertSucceeds(put(st("root", SA), "events/e1.png"))
++    await assertFails(put(st("alice"), "news/n1.png")); await assertFails(put(st("ed", ED), "news/n1.exe", bytes(), { contentType: "application/x-msdownload" })); await assertFails(put(st("ed", ED), "news/big.png", bytes(6 * 1024 * 1024)))
++    await assertFails(put(st("ghost", ED), "news/n2.png")); await assertFails(put(st("exEd", ED), "news/n2.png")); await assertFails(put(st("ed", {}), "news/n2.png")); await assertFails(put(st("ed", ED, false), "news/n2.png"))
++    await assertFails(deleteObject(ref(st("alice"), "news/n1.png"))); await assertFails(put(st("ed", ED), "secret-folder/x.png"))
++  })
++  it("provider listing submissions: content-managing members of an approved organisation only", async () => {
++    const p = "listing-submissions/orgA/orgA_req1/front.png"
++    await assertSucceeds(put(st("ownerA"), p)); await assertSucceeds(put(st("contentA"), "listing-submissions/orgA/orgA_req2/front.png"))
++    await assertFails(put(st("empA"), p + "2")); await assertFails(put(st("resA"), p + "3")); await assertFails(put(st("ownerB"), p + "4")); await assertFails(put(st("bob"), p + "5"))
++    await assertFails(put(st("ownerC"), "listing-submissions/orgC/orgC_req1/a.png")) // suspended organisation
++    await assertFails(put(st("ownerA"), "listing-submissions/orgA/wrongprefix/a.png")); await assertFails(put(st("ownerA"), p, bytes(), pdf))
++    await assertFails(put(st("ownerA"), p)) // immutable: no overwrite
++    await assertFails(deleteObject(ref(st("ownerA"), p)))
++  })
++  it("provider application documents are private to the applicant and super admins, and immutable", async () => {
++    const p = "provider-applications/alice/alice_r1/registration.pdf"
++    await assertSucceeds(put(st("alice"), p, bytes(), pdf)); await assertFails(put(st("bob"), "provider-applications/alice/alice_r2/x.pdf", bytes(), pdf))
++    await assertFails(put(st("alice", {}, false), "provider-applications/alice/alice_r3/x.pdf", bytes(), pdf)) // unverified
++    await assertFails(put(st("alice"), "provider-applications/alice/bad-prefix/x.pdf", bytes(), pdf)); await assertFails(put(st("alice"), "provider-applications/alice/alice_r4/x.exe", bytes(), { contentType: "application/octet-stream" }))
++    await assertFails(put(st("alice"), p, bytes(), pdf)); await assertFails(deleteObject(ref(st("alice"), p)))
++    await assertSucceeds(uploadBytes(ref(st("alice"), "provider-applications/alice/alice_r5/ok.png"), bytes(), png))
++  })
++  it("person-of-interest uploads are closed (feature excluded from launch)", async () => {
++    await assertFails(put(st("alice"), "person-of-interest/alice/p.png")); await assertFails(put(st("alice"), "person-of-interest/p.png")); await assertFails(put(st("root", SA), "person-of-interest/p.png"))
++  })
++})
+-- 
+2.43.0
+

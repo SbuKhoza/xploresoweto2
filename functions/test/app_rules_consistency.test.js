@@ -37,7 +37,7 @@ test("every collection the app reads through its data hooks is public in the rul
     for (const m of text.matchAll(/publicCollectionRef\("([^"]+)"/g)) used.add(m[1])
     for (const m of text.matchAll(/collectionName="([^"]+)"/g)) used.add(m[1])
   }
-  for (const m of src["screens/Home.js"].match(/SEARCH_COLLECTIONS = [\s\S]*?\n\]/)[0].matchAll(/key: "([^"]+)"/g)) used.add(m[1])
+  for (const m of src[path.join("screens", "Home.js")].match(/SEARCH_COLLECTIONS = [\s\S]*?\n\]/)[0].matchAll(/key: "([^"]+)"/g)) used.add(m[1])
   assert.ok(used.size >= 14, `expected the app to use many collections, found ${[...used]}`)
   for (const name of used) assert.ok(rulesPublic.includes(name), `app reads "${name}" but the rules do not list it as public`)
 })
@@ -65,7 +65,7 @@ test("Person-Of-Interest is only referenced behind the feature flag", () => {
 })
 test("every client write goes only to fields the rules allow on users/{uid}", () => {
   const allowed = listFrom(rules, /changedKeys\(\)\.hasOnly\(\[('displayName'[^\]]*)\]\)/)
-  const profile = src["screens/Profile.js"], enroll = src["utils/enrollment.js"]
+  const profile = src[path.join("screens", "Profile.js")], enroll = src[path.join("utils", "enrollment.js")]
   for (const k of ["displayName", "phone", "city", "kasi", "updatedAt", "photoURL"]) assert.ok(allowed.includes(k), `rules must allow ${k}`)
   for (const k of ["greeting", "kasi", "enrolled", "enrolledAt", "updatedAt"]) assert.ok(allowed.includes(k), `rules must allow ${k}`)
   for (const privileged of ["role", "roles", "permissions", "superAdmin", "isAdmin", "email", "uid", "canReview", "organisationId"]) assert.ok(!allowed.includes(privileged), `rules must NOT allow users to write ${privileged}`)

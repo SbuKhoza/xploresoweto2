@@ -1,0 +1,346 @@
+From dc68079b120b3c3a8878af354a33e76195904d01 Mon Sep 17 00:00:00 2001
+From: "Claude (Stage 1)" <claude-stage1@users.noreply.local>
+Date: Sun, 15 Nov 2026 03:06:38 +0000
+Subject: [PATCH 07/10] app+functions: reviews, service requests and booking
+ requests go through Cloud Functions; no client-trusted canReview; honest
+ request messaging
+
+---
+ components/xplorescreens/Business.js          | 60 ++++++++++++-------
+ components/xplorescreens/ReservationForm.js   | 51 ++++++++++++----
+ .../RestaurantReservationForm.js              | 50 ++++++++++++----
+ functions/src/handlers/requests.js            |  2 +-
+ functions/test/requests_reviews.test.js       |  4 ++
+ utils/requestId.js                            |  7 +++
+ 6 files changed, 130 insertions(+), 44 deletions(-)
+ create mode 100644 utils/requestId.js
+
+diff --git a/components/xplorescreens/Business.js b/components/xplorescreens/Business.js
+index 0cbc7f5..9c49a93 100644
+--- a/components/xplorescreens/Business.js
++++ b/components/xplorescreens/Business.js
+@@ -6,8 +6,11 @@ import {
+   Linking, Alert, RefreshControl, ActivityIndicator, TextInput,
+ } from "react-native"
+ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
+-import { collection, getDocs, query, where, addDoc, doc, getDoc } from "firebase/firestore"
++import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore"
+ import { db, auth } from "../../Firebase/config"
++import { publicCollectionRef } from "../../utils/publicContent"
++import { callFunction, alertCallableError } from "../../utils/callable"
++import { newRequestId } from "../../utils/requestId"
+ import { onAuthStateChanged } from "firebase/auth"
+ import { useScrollTracking, AnimatedFlatList } from "../BottomNav"
+ import OfflineIndicator from "../OfflineIndicator"
+@@ -64,6 +67,7 @@ const Business = () => {
+   const [newReview, setNewReview] = useState({ rating: 5, comment: "", reviewerName: "" })
+   const [currentUser, setCurrentUser] = useState(null)
+   const [userCanReview, setUserCanReview] = useState(false)
++  const serviceRequestIdRef = useRef(null)
+   const [hasUserReviewed, setHasUserReviewed] = useState(false)
+   const [calculatedRating, setCalculatedRating] = useState(0)
+   const [authLoading, setAuthLoading] = useState(true)
+@@ -89,7 +93,8 @@ const Business = () => {
+               ...userDoc.data(),
+             }
+             setCurrentUser(userData)
+-            setUserCanReview(userData.canReview || false)
++            // Review eligibility is decided by the server per business (see refreshReviewEligibility); a client flag is never trusted
++            setUserCanReview(false)
+           } else {
+             setCurrentUser({ id: firebaseUser.uid, uid: firebaseUser.uid, email: firebaseUser.email, name: firebaseUser.displayName })
+             setUserCanReview(false)
+@@ -111,7 +116,7 @@ const Business = () => {
+   const fetchBusinessData = async () => {
+     try {
+       setDataLoading(true)
+-      const snapshot = await getDocs(collection(db, "business"))
++      const snapshot = await getDocs(publicCollectionRef("business"))
+       const list = snapshot.docs.map((d) => {
+         const data = { id: d.id, ...d.data() }
+         data.__type = typeof data.type === "string" ? data.type.trim() : ""
+@@ -324,7 +329,10 @@ const Business = () => {
+       })
+       setReviews(sorted)
+       setCalculatedRating(calculateAverageRating(sorted))
+-      if (currentUser?.id || currentUser?.uid) await checkUserReviewStatus(businessId, currentUser.id || currentUser.uid)
++      if (currentUser?.id || currentUser?.uid) {
++        await checkUserReviewStatus(businessId, currentUser.id || currentUser.uid)
++        await refreshReviewEligibility(businessId)
++      }
+     } catch (e) {
+       setReviews([])
+       setCalculatedRating(0)
+@@ -343,42 +351,52 @@ const Business = () => {
+     } catch {}
+   }
+ 
++  // The server decides: only a customer with a completed, confirmed service request for this business may review it
++  const refreshReviewEligibility = async (businessId) => {
++    try {
++      const r = await callFunction("checkReviewEligibility", { listingCollection: "business", listingId: businessId })
++      setUserCanReview(!!r.eligible)
++      if (r.alreadyReviewed) setHasUserReviewed(true)
++    } catch {
++      setUserCanReview(false) // unverified email, offline or backend unavailable: the button stays disabled
++    }
++  }
++
+   const submitReview = async () => {
+     if (!newReview.reviewerName.trim() || !newReview.comment.trim()) { Alert.alert("Missing Information", "Please fill in all fields"); return }
+     if (authLoading) { Alert.alert("Please wait", "Checking authentication status..."); return }
+     if (!currentUser?.id && !currentUser?.uid) { Alert.alert("Authentication Required", "Please log in to submit a review"); return }
+     try {
+-      await addDoc(collection(db, "reviews"), {
+-        businessId: selectedBusiness.id,
+-        businessName: selectedBusiness.name,
+-        userId: currentUser.id || currentUser.uid,
++      // Created by the backend after it verifies a qualifying, completed and customer-confirmed service request
++      await callFunction("submitReview", {
++        listingCollection: "business",
++        listingId: selectedBusiness.id,
+         rating: newReview.rating,
+-        comment: newReview.comment,
+-        reviewerName: newReview.reviewerName,
+-        createdAt: new Date().toISOString(),
++        comment: newReview.comment.trim(),
++        reviewerName: newReview.reviewerName.trim(),
+       })
+       setNewReview({ rating: 5, comment: "", reviewerName: "" })
+       setShowReviewForm(false)
+       fetchReviews(selectedBusiness.id)
+       Alert.alert("Success", "Review submitted successfully!")
+-    } catch { Alert.alert("Error", "Error submitting review. Please try again.") }
++    } catch (e) { alertCallableError(e, { title: "Review not submitted", onVerified: () => refreshReviewEligibility(selectedBusiness.id) }) }
+   }
+ 
+   const handleHireRequest = async () => {
+     if (authLoading) { Alert.alert("Please wait", "Checking authentication status..."); return }
+     if (!currentUser?.id && !currentUser?.uid) { Alert.alert("Authentication Required", "Please log in to request a service"); return }
+     try {
+-      await addDoc(collection(db, "userservices"), {
+-        businessId: selectedBusiness.id,
+-        businessName: selectedBusiness.name,
+-        userId: currentUser.id || currentUser.uid,
+-        userName: currentUser.name || currentUser.displayName || "Unknown User",
+-        userEmail: currentUser.email || "No email provided",
+-        requestedAt: new Date().toISOString(),
+-        status: "pending",
++      // Created by the backend (your name and verified email come from your account, not from this device). Retrying the
++      // same tap reuses the same request id, so a retry can never create a duplicate request.
++      serviceRequestIdRef.current = serviceRequestIdRef.current || newRequestId()
++      await callFunction("createServiceRequest", {
++        requestId: serviceRequestIdRef.current,
++        listingCollection: "business",
++        listingId: selectedBusiness.id,
+       })
++      serviceRequestIdRef.current = null
+       Alert.alert("Request Sent!", `Service request sent to ${selectedBusiness.name}.`)
+-    } catch { Alert.alert("Error", "Error submitting service request. Please try again.") }
++    } catch (e) { alertCallableError(e, { title: "Request not sent" }) }
+   }
+ 
+   // ── Business Profile (inside modal) ─────────────────────────────────────
+diff --git a/components/xplorescreens/ReservationForm.js b/components/xplorescreens/ReservationForm.js
+index b9241f3..c1a1d44 100644
+--- a/components/xplorescreens/ReservationForm.js
++++ b/components/xplorescreens/ReservationForm.js
+@@ -1,11 +1,13 @@
+ "use client"
+ 
+-import { useState, useEffect } from "react"
++import { useState, useEffect, useRef } from "react"
+ import {
+   Text, View, ScrollView, TouchableOpacity, Modal, TextInput, Alert, FlatList,
+ } from "react-native"
+ import { Ionicons } from "@expo/vector-icons"
+ import DateTimePicker from "@react-native-community/datetimepicker"
++import { callFunction, alertCallableError } from "../../utils/callable"
++import { newRequestId, toYMD } from "../../utils/requestId"
+ 
+ const ReservationForm = ({ visible, onClose, accommodation }) => {
+   const [checkInDate, setCheckInDate] = useState(new Date())
+@@ -74,7 +76,11 @@ const ReservationForm = ({ visible, onClose, accommodation }) => {
+ 
+   const calculateNights = () => Math.ceil(Math.abs(checkOutDate - checkInDate) / (1000 * 60 * 60 * 24))
+ 
+-  const handleSubmitReservation = () => {
++  const requestIdRef = useRef(null)
++  const submittingRef = useRef(false)
++
++  const handleSubmitReservation = async () => {
++    if (submittingRef.current) return
+     if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim()) {
+       Alert.alert("Missing info", "Please fill in all required fields")
+       return
+@@ -93,15 +99,38 @@ const ReservationForm = ({ visible, onClose, accommodation }) => {
+       breakfast: selectedBreakfast.label, specialRequests, nights: calculateNights(),
+     }
+ 
+-    Alert.alert(
+-      "Reservation Submitted",
+-      `Thank you ${guestName}! Your reservation for ${accommodation?.name} has been submitted. You will receive a confirmation email shortly.`,
+-      [{ text: "OK", onPress: () => {
+-        onClose()
+-        setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
+-        setGuests(1); setBreakfastOption("none")
+-      }}],
+-    )
++    // Send a real booking REQUEST to the accommodation (through the backend). The provider accepts or declines it; no
++    // confirmation email is promised because no email notification system exists yet.
++    submittingRef.current = true
++    try {
++      requestIdRef.current = requestIdRef.current || newRequestId()
++      const notes = [`Guest: ${guestName.trim()}`, `Check-out time: ${checkOutTimeString}`, `Breakfast: ${selectedBreakfast.label}`, specialRequests.trim() && `Requests: ${specialRequests.trim()}`].filter(Boolean).join(". ").slice(0, 500)
++      await callFunction("createBookingRequest", {
++        requestId: requestIdRef.current,
++        listingCollection: "accommodations",
++        listingId: accommodation?.id,
++        date: toYMD(checkInDate),
++        endDate: toYMD(checkOutDate),
++        time: checkInTimeString,
++        guests,
++        notes,
++        phone: guestPhone.trim(),
++      })
++      requestIdRef.current = null
++      Alert.alert(
++        "Request Sent",
++        `Thank you ${guestName}! Your booking request for ${accommodation?.name} has been sent. The accommodation will review it and respond.`,
++        [{ text: "OK", onPress: () => {
++          onClose()
++          setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
++          setGuests(1); setBreakfastOption("none")
++        }}],
++      )
++    } catch (e) {
++      alertCallableError(e, { title: "Request not sent" }) // the form stays open so nothing typed is lost
++    } finally {
++      submittingRef.current = false
++    }
+   }
+ 
+   const onCheckInDateChange = (event, selectedDate) => {
+diff --git a/components/xplorescreens/RestaurantReservationForm.js b/components/xplorescreens/RestaurantReservationForm.js
+index 8168780..143994d 100644
+--- a/components/xplorescreens/RestaurantReservationForm.js
++++ b/components/xplorescreens/RestaurantReservationForm.js
+@@ -1,11 +1,13 @@
+ "use client"
+ 
+-import { useState, useEffect } from "react"
++import { useState, useEffect, useRef } from "react"
+ import {
+   Text, View, ScrollView, TouchableOpacity, Modal, TextInput, Alert, FlatList,
+ } from "react-native"
+ import { Ionicons } from "@expo/vector-icons"
+ import DateTimePicker from "@react-native-community/datetimepicker"
++import { callFunction, alertCallableError } from "../../utils/callable"
++import { newRequestId, toYMD } from "../../utils/requestId"
+ 
+ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
+   const [reservationDate, setReservationDate] = useState(new Date())
+@@ -75,7 +77,11 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
+   const formatDate = (date) =>
+     date.toLocaleDateString("en-ZA", { weekday: "short", year: "numeric", month: "short", day: "numeric" })
+ 
+-  const handleSubmitReservation = () => {
++  const requestIdRef = useRef(null)
++  const submittingRef = useRef(false)
++
++  const handleSubmitReservation = async () => {
++    if (submittingRef.current) return
+     if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim() || !selectedTable) {
+       Alert.alert("Missing info", "Please fill in all required fields and select a table")
+       return
+@@ -89,15 +95,37 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
+       occasion: selectedOccasion.label, specialRequests,
+     }
+ 
+-    Alert.alert(
+-      "Reservation Submitted",
+-      `Thank you ${guestName}! Your reservation at ${restaurant?.name} for ${formatDate(reservationDate)} at ${reservationTimeString} has been submitted. You will receive a confirmation email shortly.`,
+-      [{ text: "OK", onPress: () => {
+-        onClose()
+-        setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
+-        setGuests(2); setOccasion("none"); setSelectedTable(null)
+-      }}],
+-    )
++    // Send a real table REQUEST to the restaurant (through the backend). The restaurant accepts or declines it; no
++    // confirmation email is promised because no email notification system exists yet.
++    submittingRef.current = true
++    try {
++      requestIdRef.current = requestIdRef.current || newRequestId()
++      const notes = [`Guest: ${guestName.trim()}`, `Table: ${selectedTable}`, `Occasion: ${selectedOccasion.label}`, specialRequests.trim() && `Requests: ${specialRequests.trim()}`].filter(Boolean).join(". ").slice(0, 500)
++      await callFunction("createBookingRequest", {
++        requestId: requestIdRef.current,
++        listingCollection: "restaurants",
++        listingId: restaurant?.id,
++        date: toYMD(reservationDate),
++        time: reservationTimeString,
++        guests,
++        notes,
++        phone: guestPhone.trim(),
++      })
++      requestIdRef.current = null
++      Alert.alert(
++        "Request Sent",
++        `Thank you ${guestName}! Your table request at ${restaurant?.name} for ${formatDate(reservationDate)} at ${reservationTimeString} has been sent. The restaurant will review it and respond.`,
++        [{ text: "OK", onPress: () => {
++          onClose()
++          setGuestName(""); setGuestEmail(""); setGuestPhone(""); setSpecialRequests("")
++          setGuests(2); setOccasion("none"); setSelectedTable(null)
++        }}],
++      )
++    } catch (e) {
++      alertCallableError(e, { title: "Request not sent" }) // the form stays open so nothing typed is lost
++    } finally {
++      submittingRef.current = false
++    }
+   }
+ 
+   const onDateChange = (event, selectedDate) => {
+diff --git a/functions/src/handlers/requests.js b/functions/src/handlers/requests.js
+index f7524c5..b5347cb 100644
+--- a/functions/src/handlers/requests.js
++++ b/functions/src/handlers/requests.js
+@@ -30,7 +30,7 @@ async function createRequest(kind, request) {
+   } else {
+     V.onlyKeys(d, ["requestId", "listingCollection", "listingId", "message", "phone"])
+     listingCollection = V.oneOf(d.listingCollection ?? "business", "listingCollection", SERVICE_COLLECTIONS)
+-    extra = { message: V.str(d.message, "message", { max: 1000 }), phone: V.optPhone(d.phone) || null }
++    extra = { message: V.optStr(d.message, "message", { max: 1000 }) || null, phone: V.optPhone(d.phone) || null }
+   }
+   const col = colFor(kind)
+   const id = `${ctx.uid}_${rid}`
+diff --git a/functions/test/requests_reviews.test.js b/functions/test/requests_reviews.test.js
+index 9a8f207..030e0f5 100644
+--- a/functions/test/requests_reviews.test.js
++++ b/functions/test/requests_reviews.test.js
+@@ -36,6 +36,10 @@ test("service request: created with server-derived identity; retry returns the s
+   await rejects(svc("cust", { requestId: "req-00000002", status: "completed" }), "invalid-argument")
+   await rejects(svc("cust", { requestId: "req-00000002", customerUid: "cust2" }), "invalid-argument")
+ })
++test("service request: the message is optional (the app's hire button has no message box)", async () => {
++  const r = await R.createServiceRequest(req("cust", { requestId: "req-00000007", listingId: "biz1" }))
++  assert.equal(r.status, "pending"); assert.equal(env.get("service-requests/cust_req-00000007").message, null)
++})
+ test("service request: capped at 10 pending per user", async () => {
+   for (let i = 0; i < 10; i++) await svc("cust", { requestId: `req-0000000${i}` })
+   await rejects(svc("cust", { requestId: "req-99999999" }), "resource-exhausted")
+diff --git a/utils/requestId.js b/utils/requestId.js
+new file mode 100644
+index 0000000..4fb580b
+--- /dev/null
++++ b/utils/requestId.js
+@@ -0,0 +1,7 @@
++// Client-generated idempotency key for backend requests. Reuse the SAME id when retrying one deliberate action (the server
++// then returns the existing record instead of creating a duplicate); create a new id for each new deliberate action.
++export const newRequestId = () =>
++  `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 6)}`
++
++// Local calendar date as YYYY-MM-DD (not UTC), as the backend expects
++export const toYMD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+-- 
+2.43.0
+

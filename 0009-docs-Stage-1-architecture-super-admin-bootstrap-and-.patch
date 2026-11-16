@@ -1,0 +1,170 @@
+From 27915c654091364cf503cbbd129dad0af44acc1d Mon Sep 17 00:00:00 2001
+From: "Claude (Stage 1)" <claude-stage1@users.noreply.local>
+Date: Sun, 15 Nov 2026 03:09:28 +0000
+Subject: [PATCH 09/10] docs: Stage 1 architecture, super-admin bootstrap and
+ testing guides
+
+---
+ docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md | 64 ++++++++++++++++++++++
+ docs/stage1/SUPER_ADMIN_BOOTSTRAP.md       | 31 +++++++++++
+ docs/stage1/TESTING.md                     | 39 +++++++++++++
+ 3 files changed, 134 insertions(+)
+ create mode 100644 docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md
+ create mode 100644 docs/stage1/SUPER_ADMIN_BOOTSTRAP.md
+ create mode 100644 docs/stage1/TESTING.md
+
+diff --git a/docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md b/docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md
+new file mode 100644
+index 0000000..6bb5dbd
+--- /dev/null
++++ b/docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md
+@@ -0,0 +1,64 @@
++# Stage 1 architecture and data model
++
++Project `xploresoweto` · Firestore and Cloud Functions in `africa-south1` · Functions: 2nd gen, Node 22, Admin SDK.
++Everything here is **prepared, not deployed**.
++
++## Principles
++1. **Clients read; sensitive writes are Cloud Functions.** A client may directly update only a few fields of its own `users/{uid}` profile. Every other create/update/delete (profiles, applications, organisations, memberships, invitations, bookings, service requests, reviews, audit logs, listing publication, loadshedding) is a callable function using the Admin SDK, which bypasses rules.
++2. **Staff need three things.** A claim (`superAdmin` / `editor`) is only a hint. Access requires the claim AND a verified email AND an active authoritative record (`super-admin/{uid}` or `platform-editors/{uid}`), checked in functions and in rules.
++3. **Organisation access = membership.** `organisation-members/{organisationId}_{userId}` documents (written only by functions) carry the role and server-resolved permissions. One user can have many memberships with different roles; nothing about organisations lives on the user document.
++4. **Retry-safe by construction.** Deterministic document ids (`uid`, `uid_requestId`, `orgId_uid`, `sha256(orgId|email)`) plus "already done → return the existing result" make every operation idempotent; concurrent calls are covered by Firestore transactions. Audit entries are written in the same transaction and only when state actually changed.
++5. **Rules are not filters.** Public content is readable only while `isActive == true`, so every public query asks for `where("isActive","==",true)` (central in `utils/publicContent.js`).
++
++## Collections (all created automatically on first write; nothing to create by hand)
++| Collection / id | Written by | Read by (client) |
++|---|---|---|
++| `users/{uid}` | `ensureUserProfile` (create); owner updates allow-listed fields | owner only (no listing, so no email exposure) |
++| `super-admin/{uid}` | **you, manually, once**; later `managePlatformRole` | active super admin |
++| `platform-editors/{uid}` | `managePlatformRole` | active super admin |
++| `audit-log/{auto}` | functions | active super admin |
++| `provider-applications/{uid_requestId}` | `submitProviderApplication`, `reviewProviderApplication` | applicant, active super admin |
++| `organisations/{applicationId}` | created on approval; members edit `description, contact, logoUrl` | active members, active super admin |
++| `organisation-members/{orgId_uid}` | functions | the member; members with `members.manage`; super admin |
++| `organisation-invitations/{sha256(orgId\|email)}` | functions | **nobody** (functions return masked emails) |
++| `listing-submissions/{orgId_requestId}` | `submitListing`, `reviewListingSubmission` | members with `content.manage`; staff |
++| `bookings/{uid_requestId}`, `service-requests/{uid_requestId}` | `create*Request`, `updateRequestStatus` | customer; members with `bookings.read` / `enquiries.manage`; super admin |
++| `reviews/{uid_collection_listingId}` | `submitReview` | any signed-in user |
++| existing content: accommodations, attractions, business, restaurants, recreation, events, news, announcements, transport, healthcare, emergency, publicservice, homescreen, xplore-menu, loadshedding | staff (CMS), `reviewListingSubmission`, `seedLoadshedding` | anyone, **only while `isActive == true`** |
++
++Not created and not granted: `admin`, `userservices` (replaced by `service-requests`), `Person-Of-Interest`, tours, itineraries, AI collections.
++
++## Cloud Functions (21)
++| Function | Caller must be |
++|---|---|
++| `ensureUserProfile` | signed in |
++| `managePlatformRole` | active super admin |
++| `seedLoadshedding` | active super admin |
++| `submitProviderApplication` | verified email |
++| `reviewProviderApplication` | active super admin (never the applicant) |
++| `setOrganisationStatus` | active super admin |
++| `inviteOrganisationMember`, `listOrganisationInvitations`, `revokeOrganisationInvitation` | verified; member with `members.manage` (role limits apply) |
++| `listMyInvitations`, `acceptOrganisationInvitation`, `declineOrganisationInvitation` | verified; email must equal the invited email |
++| `setMemberRole`, `removeOrganisationMember` | member with `members.manage` (or the member leaving) |
++| `createBookingRequest`, `createServiceRequest` | verified |
++| `updateRequestStatus` | provider (accept / decline / complete) or the customer (confirm / cancel) |
++| `checkReviewEligibility`, `submitReview` | verified; needs a **completed, customer-confirmed** request |
++| `submitListing` | verified; member with `content.manage` |
++| `reviewListingSubmission` | active super admin or editor |
++
++The last six are beyond the 14 you listed; they are needed so the existing booking, service-request and review features keep working without client-side trust, and for lifecycle step 9.
++
++### Roles
++owner: everything. manager: everything, but can only assign/modify/remove staff-level roles (employee, reservations manager, content manager) and never themselves. reservations manager: bookings read/manage, enquiries. content manager: edit organisation info, content/listings. employee: read bookings. Only owners create or change owners and managers; the last owner can never be removed or demoted. Permissions are resolved on the server from the role and re-checked on every call and in the rules.
++
++### Invitations
++256-bit random token returned once to the inviter; only its SHA-256 is stored; 7-day expiry; single use; revocable. The invitee needs a **verified** email equal to the invited one, and either the token or the in-app invitation id. Wrong person / wrong token / missing invitation all return the same error. The invitation id is a hash, so no email appears in any path or query.
++
++### Review eligibility (provider cannot unlock reviews alone)
++`pending → accepted → completed_by_provider → completed`. The provider performs the first three steps; **only the customer** can perform `confirmCompletion`. Only `completed` qualifies, one review per customer per listing. No client flag is consulted.
++
++## Content contract for the CMS (needed before the new rules go live)
++Every public document must contain `isActive: true` (documents without it are invisible, by design). The documented `homescreen/featured` document has no `isActive` field today and must get one. Staff-created listings may carry `organisationId` to become bookable.
++
++## Not covered by Stage 1
++Provider-facing screens, a customer "My requests"/confirm-completion screen, email notifications, payments, tours, AI. Without those screens the backend flows exist but nothing in the app triggers provider responses or customer confirmation yet (see STAGE1_REPORT).
+diff --git a/docs/stage1/SUPER_ADMIN_BOOTSTRAP.md b/docs/stage1/SUPER_ADMIN_BOOTSTRAP.md
+new file mode 100644
+index 0000000..4727ae6
+--- /dev/null
++++ b/docs/stage1/SUPER_ADMIN_BOOTSTRAP.md
+@@ -0,0 +1,31 @@
++# Creating the first Super Admin (manual, one time)
++
++`super-admin/{uid}` is the authoritative record; the `superAdmin` custom claim is derived from it. **Nothing is hardcoded, no UID or email is invented, and the tooling never creates or edits a super-admin record.** You create the first record; the script only verifies it and sets the claim.
++
++## Prerequisites
++* Node 22 and the Firebase project `xploresoweto` open in the Firebase console.
++* `gcloud auth application-default login` with a Google account that has Firebase Admin (or Owner) on `xploresoweto`. **No service-account key files**; the script refuses any key path inside this repository and refuses the old project.
++
++## Steps
++1. **Create the account.** Sign up in the app (or Console → Authentication → Add user). Use an email you control.
++2. **Verify the email** (click the link). Admin powers stay inert until the email is verified. *Documented exception:* if the account was created in the console and is still unverified, the bootstrap is allowed, is flagged `exception: true` in the audit log, and the account gains no powers until it verifies.
++3. **Copy the user's UID** (Console → Authentication → Users → "User UID").
++4. **Create the record by hand** (Console → Firestore → Start collection `super-admin` → Document ID = the UID) with exactly these fields:
++   `uid` (string, same as the document id), `email` (string, same as the Auth email), `displayName` (string), `role` = `super_admin`, `active` = `true` (boolean), `grantedBy` = `manual-bootstrap`, `createdAt` and `updatedAt` (timestamps).
++5. **Check state:** `cd functions && npm install && npm run super-admin -- status` (expects your record, `claim=false`).
++6. **Activate:** `npm run super-admin -- bootstrap --uid <THE_UID>`. It shows the account and asks you to type its email. It refuses if: the account or record is missing; `uid`/`role`/`active`/`email` don't match; the account is disabled; another active super admin exists (unless `--allow-multiple`).
++7. **It then** sets the claim, **reads it back to verify**, and writes an audit entry. Sign out and in (or refresh the token) to receive the claim.
++8. **Verify:** `npm run super-admin -- status` shows `active=true claim=true`.
++
++## Adding / removing Super Admins and editors later
++An existing active super admin calls `managePlatformRole` (`{action:"add"|"remove", role:"superAdmin"|"editor", uid}`), for example with `ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run call -- managePlatformRole '{"action":"add","role":"editor","uid":"…"}'`. The target must exist with a verified email. Removal deactivates the record (history kept), clears the claim and revokes sessions. **The last active super admin cannot be removed, and nobody can remove themselves.** Every change is written to `audit-log`.
++
++## Recovery and repair
++* `npm run super-admin -- sync --uid <UID>` aligns the claim with the record (clears it if the record is inactive).
++* If every super admin is lost, a project Owner repeats the manual steps above for a new account.
++* Editing a `super-admin` document in the console does not change the claim by itself; run `sync`.
++
++## Safety properties (and how they are verified)
++* Clients cannot write `super-admin`, `platform-editors` or `audit-log` (rules; emulator tests written, **not yet run**).
++* A claim alone, an active record alone, an inactive record, an unverified email, or a record with the wrong role/uid are all refused by the functions (**tested**, including a stale token after revocation).
++* The bootstrap library is tested to be read-only for the `super-admin` collection (**tested**).
+diff --git a/docs/stage1/TESTING.md b/docs/stage1/TESTING.md
+new file mode 100644
+index 0000000..48c2a47
+--- /dev/null
++++ b/docs/stage1/TESTING.md
+@@ -0,0 +1,39 @@
++# Stage 1 testing: what actually ran
++
++## Ran in the build environment (results are real)
++| Check | Result |
++|---|---|
++| Cloud Functions logic: 93 tests with an in-memory Admin SDK fake that models transactions (conflict retry, reads-before-writes), idempotency and concurrency (`cd functions && npm test`) | **93 pass** |
++| Mutation check: 10 critical protections deliberately broken one at a time (claim-only admin, last-super-admin, invitation email match, manager escalation, provider confirming completion, review unlock, self-approval, profile overwrite, cross-organisation membership, tampered permissions) | the suite failed for **every** mutation (two gaps found and fixed first) |
++| Security rules syntax + Firebase's recommended lint using Firebase's own ANTLR grammar (`security-rules`: `npm run lint`) | **pass**; the same linter rejects a deliberately broken file |
++| Static analysis of every changed app file (parse + undefined identifiers + undefined JSX components) | **0 errors** |
++| App-vs-rules-vs-backend consistency guard (collection lists equal; no users listing; no forbidden legacy patterns; Person-Of-Interest only behind its flag; role map equals the rules; region/project/runtime) | **pass**; fails if a forbidden pattern is reintroduced |
++| Super-admin script guards (no uid, old project, key inside repo) | **pass** |
++
++## NOT run (and why)
++| Not run | Reason | What to do |
++|---|---|---|
++| **Firestore/Storage rules against the Firebase emulator** (`security-rules/test`, ~80 cases written) | The emulator binaries cannot be downloaded in the build environment (storage.googleapis.com is blocked). | Run on your machine (see below). **Until then the rules are syntax-checked but their behaviour is unverified.** |
++| Callables against the Functions/Auth/Firestore emulators | same | optional integration step after the rules tests |
++| The mobile app on a device/emulator | no device here | smoke-test the checklist below |
++| Any deployment | not authorised | none |
++
++## Run on your machine (repository root; Java 11+ for emulators)
++```
++npm install -g firebase-tools
++cd functions && npm install && npm test            # 93 logic tests
++cd .. && npm --prefix security-rules install
++npm --prefix security-rules run lint               # rules syntax
++npm --prefix security-rules test                   # emulator: rules behaviour (FIRST RUN: expect to review failures)
++```
++Rules behaviours the emulator run must confirm (known uncertainties): the manager "list organisation members" query (rule uses `get()` with a path from `resource.data`), the Storage rules' two-lookup limit for staff reads of `listing-submissions`, and that filtered public queries pass while unfiltered ones are rejected.
++
++## Device smoke-test checklist (empty database, new project)
++1. Fresh install: Splash → Authentication. No Google button; login field says "Email address"; registration has no username field.
++2. Register → verification email arrives → alert shows success; app proceeds to enrollment (greeting, kasi only).
++3. Kill the app/airplane mode during registration → relaunch: either enrollment or the "We couldn't finish setting up your account / Try again" screen; Try again succeeds; no second account needed.
++4. Home with no content: bundled hero, no feed sections, "Township guides are coming soon".
++5. Xplore shows the 10 built-in category tiles; every category opens its existing empty state.
++6. Community: Events/News/Eskom only; no Person-Of-Interest card. Eskom: "No Data Available".
++7. Business: "Hire" and reservation forms show "Online requests aren't available for this listing yet" for unlinked listings; unverified email shows the verify prompt.
++8. Update over an old build: stale cache and old login are cleared once (no old-project content appears).
+-- 
+2.43.0
+
