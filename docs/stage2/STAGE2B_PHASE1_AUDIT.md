@@ -1,3 +1,5 @@
+> Status: Phase 1 record, written before implementation. Section 3 has one correction (marked) and section 7's file list is superseded by `STAGE2B_ARCHITECTURE.md`.
+
 # Stage 2B, Phase 1: repository and architecture audit
 
 Written before any Stage 2B code. Everything here comes from the repository, not from live Firestore data (production was not and must not be read).
@@ -37,7 +39,7 @@ Other files that matched a text search for "provider" (Stage 1 organisations, re
 | `ai/language.js` | 2. Reuse after modification | Kept; English templates only; isiZulu detected and answered in English with a notice (not claimed). |
 | `handlers/ai.js` | 2. Reuse after modification | Same callables minus the breaker; no secret. |
 | `ai/grounding.js` | 4. Unnecessary | It validates untrusted model prose. Our answers are composed from records, so grounding is by construction. Its checks (booking wording, availability, travel time) are replaced by a composer that cannot emit those claims, with tests. |
-| `ai/tools/registry.js`, `tools/schema.js` | 3. Provider-dependent | The model-facing tool layer is removed. Its useful logic (scoring, filtering, knowledge search, bookable check) is re-implemented deterministically in the engine and retrieval modules. |
+| `ai/tools/registry.js`, `tools/schema.js` | 3. Provider-dependent (the model-facing wrapper) / 2. Reusable (the query functions) | **Correction after implementation:** the tested query functions (events, news, emergency, transport, loadshedding, knowledge, listing lookup, bookable check) and the strict argument validator were kept and moved to `ai/retrieval/queries.js` and `retrieval/schema.js`. Only the model-facing tool-definition wrapper and the model-driven `searchListings` were removed; ranking is now done by `engine/ranking.js`. |
 | `ai/providers/*`, `secrets.js`, `prompt.js`, `cost.js` | 3. Provider-dependent | Removed. |
 | `ai/chat.js` | 3. Provider-dependent | Rewritten around the engine. |
 | Global usage document, budget thresholds, circuit breaker, `aiAdminSetBreaker` | 4. Unnecessary | Existed only to control paid API spend. Removing the global document also removes the single hot document identified in the Stage 2A report. A kill switch remains (`enabled` config, Super Admin only). |

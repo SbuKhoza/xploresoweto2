@@ -1,3 +1,5 @@
+> **SUPERSEDED (Stage 2B).** This document describes the Stage 2A design that called a paid external language-model API. That architecture was **withdrawn**: Stage 2B replaced it with a database-powered engine that needs **no** API key, secret or paid AI service. Nothing below is part of the current system, and **none of the setup, key-creation or deployment instructions in it should be followed**. It is kept only as history. Current documents: `README.md` in this folder.
+
 # Stage 2A review report: AI backend
 
 Branch `stage2a/ai-backend`, created from `stage1/firebase-transition` at the confirmed start commit `ab20e088752dad6d9ce8ba93c23a0330fccb0a7b`.

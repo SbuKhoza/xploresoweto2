@@ -1,3 +1,5 @@
+> **SUPERSEDED (Stage 2B).** This document describes the Stage 2A design that called a paid external language-model API. That architecture was **withdrawn**: Stage 2B replaced it with a database-powered engine that needs **no** API key, secret or paid AI service. Nothing below is part of the current system, and **none of the setup, key-creation or deployment instructions in it should be followed**. It is kept only as history. Current documents: `README.md` in this folder.
+
 # Stage 2A: verification record (checked 2026-11-18, before any provider code was written)
 
 Nothing below is assumed from memory: each item was read from Anthropic's published documentation or the installed SDK types.
