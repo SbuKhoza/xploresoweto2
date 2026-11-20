@@ -9,6 +9,7 @@ import { useNavigation } from "@react-navigation/native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import NetInfo from "@react-native-community/netinfo"
 import { auth } from "../Firebase/config"
+import { useEnrollment, DEFAULT_GREETING } from "../utils/enrollment"
 import { callFunction, resendVerificationEmail, refreshEmailVerification } from "../utils/callable"
 import { newRequestId } from "../utils/requestId"
 import { getUserLocation } from "../utils/getLocation"
@@ -133,6 +134,9 @@ const UserBubble = ({ text }) => (
 
 export default function SowetoAI() {
   const navigation = useNavigation()
+  const { enrollment } = useEnrollment()
+  const greeting = enrollment?.greeting || DEFAULT_GREETING          // chosen by the user at sign-up
+  const firstName = String(enrollment?.displayName || auth.currentUser?.displayName || "").trim().split(/\s+/)[0]
   const insets = useSafeAreaInsets()
   const scrollRef = useRef(null)
   const send = useRef(createSendState(newRequestId)).current
@@ -183,6 +187,7 @@ export default function SowetoAI() {
       send.fail()
       const d = describeAiError(e)
       if (d.kind === "verify") setVerified({ allowed: false, reason: "verify" })
+      if (d.kind === "missing") setConversationId(null)             // stale id: the retry starts a new conversation
       setError({ ...d, message })
       setText(message) // preserved
     } finally { setBusy(false) }
@@ -267,8 +272,8 @@ export default function SowetoAI() {
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
         <View style={{ flex: 1, marginHorizontal: 8 }}>
-          <Text numberOfLines={1} style={{ color: "#fff", fontWeight: "800", fontSize: 17 }}>The ultimate guide to Soweto</Text>
-          <Text numberOfLines={1} style={{ color: "#CFE0E5", fontSize: 11.5 }}>{usage ? `${usage.remainingToday} of ${usage.dailyLimit} messages left today` : "Your personal travel assistant"}</Text>
+          <Text numberOfLines={1} style={{ color: "#fff", fontWeight: "800", fontSize: 17 }}>Malloya</Text>
+          <Text numberOfLines={1} style={{ color: "#CFE0E5", fontSize: 11.5 }}>{usage ? `The ultimate guide to Soweto · ${usage.remainingToday} of ${usage.dailyLimit} left today` : "The ultimate guide to Soweto"}</Text>
         </View>
         <TouchableOpacity onPress={loadHistory} accessibilityLabel="Conversation history" style={{ padding: 6 }}><Ionicons name="time-outline" size={22} color="#fff" /></TouchableOpacity>
         <TouchableOpacity onPress={newChat} disabled={busy} accessibilityLabel="New conversation" style={{ padding: 6, opacity: busy ? 0.5 : 1 }}><Ionicons name="create-outline" size={22} color="#fff" /></TouchableOpacity>
@@ -287,7 +292,7 @@ export default function SowetoAI() {
               <View style={{ backgroundColor: "#fff", borderRadius: 20, padding: 16, ...shadow }}>
                 <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
                   <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: BRAND, alignItems: "center", justifyContent: "center" }}><Ionicons name="compass" size={22} color="#fff" /></View>
-                  <Text style={{ color: INK, fontWeight: "800", fontSize: 17, marginLeft: 10 }}>Sawubona! I'm your Soweto guide.</Text>
+                  <Text style={{ color: INK, fontWeight: "800", fontSize: 17, marginLeft: 10, flex: 1 }}>{`${greeting}${firstName ? `, ${firstName}` : ""}! I'm Malloya, your Soweto guide.`}</Text>
                 </View>
                 <Text style={{ color: "#5E7088", fontSize: 14, lineHeight: 20 }}>
                   Ask me about places to visit, restaurants, stays, events and culture. I answer from XploreSoweto's own listings, and I'll say so when something isn't confirmed.
@@ -307,7 +312,7 @@ export default function SowetoAI() {
 
           {busy ? (
             <View style={{ alignSelf: "flex-start", backgroundColor: "#fff", borderRadius: 18, borderTopLeftRadius: 6, paddingHorizontal: 14, paddingVertical: 12, flexDirection: "row", alignItems: "center", ...shadow }}>
-              <ActivityIndicator size="small" color={TEAL} /><Text style={{ color: MUTED, marginLeft: 8, fontSize: 13 }}>Looking through Soweto…</Text>
+              <ActivityIndicator size="small" color={TEAL} /><Text style={{ color: MUTED, marginLeft: 8, fontSize: 13 }}>Malloya is looking…</Text>
             </View>
           ) : null}
 
@@ -358,7 +363,7 @@ export default function SowetoAI() {
         <View style={{ flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 12, paddingTop: 8, paddingBottom: insets.bottom + 8, backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#E5EAEE" }}>
           <TextInput
             value={text} onChangeText={setText} editable={!busy && verified.allowed}
-            placeholder={verified.allowed ? "Ask about Soweto…" : "Verify your email to chat"} placeholderTextColor={MUTED}
+            placeholder={verified.allowed ? "Ask Malloya about Soweto…" : "Verify your email to chat"} placeholderTextColor={MUTED}
             multiline maxLength={1000} returnKeyType="default"
             style={{ flex: 1, maxHeight: 110, minHeight: 42, backgroundColor: "#F1F4F7", borderRadius: 21, paddingHorizontal: 16, paddingTop: Platform.OS === "ios" ? 11 : 8, paddingBottom: Platform.OS === "ios" ? 11 : 8, fontSize: 15, color: INK }}
           />

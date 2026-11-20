@@ -856,7 +856,7 @@ const Home = () => {
           )
         })()}
 
-        {/* ── The ultimate guide to Soweto: AI travel assistant (hidden unless FEATURES.aiAssistant) ── */}
+        {/* ── The ultimate guide to Soweto: Malloya, the AI travel assistant (hidden unless FEATURES.aiAssistant) ── */}
         {FEATURES.aiAssistant && (
           <View className="px-[16px] mb-5">
             <TouchableOpacity activeOpacity={0.92} onPress={() => navigation.navigate("SowetoAI")} accessibilityRole="button"
@@ -866,7 +866,7 @@ const Home = () => {
                 <View style={{ flex: 1, paddingRight: 12 }}>
                   <Text style={{ color: "#fff", fontSize: 19, fontWeight: "800" }}>The ultimate guide to Soweto</Text>
                   <Text style={{ color: "#CFE0E5", fontSize: 13, lineHeight: 18, marginTop: 6 }}>
-                    Discover places, plan experiences and explore Soweto with your personal travel assistant.
+                    Meet Malloya. Discover places, plan experiences and explore Soweto with your personal travel assistant.
                   </Text>
                   <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", backgroundColor: "#E8600A", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8, marginTop: 12 }}>
                     <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Start chatting</Text>
@@ -880,27 +880,6 @@ const Home = () => {
             </TouchableOpacity>
           </View>
         )}
-
-        {/* ── The Ultimate Guide to Soweto ── */}
-        <View className="px-[16px] mb-5">
-          <SectionHeader icon="book-outline" title={featuredImage?.title || "The Ultimate Guide to Soweto"} subtitle="Discover places, people and experiences." />
-          <TouchableOpacity activeOpacity={0.9} onPress={() => goXploreItem("XploreMain")}
-            className="rounded-2xl bg-surface" style={cardShadow}>
-            <View style={{ height: 92, borderRadius: 16, overflow: "hidden" }}>
-              {dataLoading ? (
-                <View className="w-full h-full bg-[#EDE8E2] justify-center items-center">
-                  <Ionicons name="image-outline" size={28} color="#C8CBD8" />
-                </View>
-              ) : (
-                <CoverImage
-                  source={featuredImage?.imageUrl ? { uri: featuredImage.imageUrl } : require("../assets/Soweto1.png")}
-                  fallbackIcon="map-outline"
-                  style={{ width: "100%", height: "100%" }}
-                />
-              )}
-            </View>
-          </TouchableOpacity>
-        </View>
 
         {/* ── Soweto Townships ── */}
         <View className="px-[16px]">

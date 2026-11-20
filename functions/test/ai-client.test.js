@@ -66,6 +66,10 @@ test("error mapping covers limits, validation, availability, auth and verificati
   assert.equal(describeAiError(E("unauthenticated")).kind, "auth")
   assert.equal(describeAiError(E("failed-precondition", "email-not-verified")).kind, "verify")
   assert.equal(describeAiError(E("internal", "ai-failed")).retry, true)
+  // a real conversation error vs the callable simply not existing (bare Firebase NOT_FOUND)
+  assert.equal(describeAiError(E("not-found", "conversation-not-found")).kind, "missing")
+  assert.equal(describeAiError(E("not-found", "NOT_FOUND")).kind, "unreachable")
+  assert.equal(describeAiError(E("not-found", undefined)).kind, "unreachable")
   assert.equal(describeAiError(E("deadline-exceeded")).kind, "server")
   assert.equal(describeAiError(null, { offline: true }).kind, "offline")
   assert.equal(describeAiError(undefined).kind, "server") // never throws
@@ -139,4 +143,12 @@ test("feature flag exists, is off by default and gates route and Home card", () 
   assert.match(read("utils/features.js"), /aiAssistant: process\.env\.EXPO_PUBLIC_AI_ASSISTANT === "true"/)
   assert.match(read("App.js"), /FEATURES\.aiAssistant && <Stack\.Screen name="SowetoAI"/)
   assert.match(read("screens/Home.js"), /FEATURES\.aiAssistant && \(/)
+})
+
+test("Malloya naming, greeting from enrollment, and the old Xplore guide card is gone", () => {
+  const read = (f) => fs.readFileSync(path.join(root, f), "utf8")
+  const ai = read("screens/SowetoAI.js")
+  assert.match(ai, />Malloya</); assert.match(ai, /I'm Malloya/); assert.match(ai, /enrollment\?\.greeting/)
+  assert.doesNotMatch(read("screens/Home.js"), /goXploreItem\("XploreMain"\)[\s\S]{0,200}Ultimate Guide/)
+  assert.doesNotMatch(read("screens/Home.js"), /Discover places, people and experiences/)
 })

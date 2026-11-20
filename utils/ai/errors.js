@@ -1,5 +1,5 @@
 // Maps callable errors (as produced by utils/callable.js: .code, .rawMessage, .details) to what the assistant UI should do.
-// kind: auth | verify | daily | burst | invalid | too-long | disabled | busy | offline | missing | server
+// kind: unreachable | auth | verify | daily | burst | invalid | too-long | disabled | busy | offline | missing | server
 const mins = (s) => { const m = Math.ceil(s / 60); return m <= 1 ? "about a minute" : m < 90 ? `${m} minutes` : `${Math.round(m / 60)} hours` }
 
 export function describeAiError(e, { offline = false } = {}) {
@@ -23,6 +23,9 @@ export function describeAiError(e, { offline = false } = {}) {
   }
   if (code === "unavailable" && raw === "ai-disabled") return { kind: "disabled", title: "Assistant unavailable", text: "The Soweto assistant is switched off right now. Please try again later.", retry: false }
   if (code === "aborted") return { kind: "busy", title: "Still working on it", text: "Your previous message is still being processed. Wait a moment, then retry.", retry: true }
-  if (code === "not-found") return { kind: "missing", title: "Conversation not found", text: "That conversation is no longer available. Start a new one.", retry: false }
+  // The backend's own conversation error carries the reason "conversation-not-found". A bare Firebase NOT_FOUND means the callable
+  // itself does not exist (not deployed, or wrong region/project), which is a different problem and must not be reported as a chat error.
+  if (code === "not-found" && raw === "conversation-not-found") return { kind: "missing", title: "That chat is no longer available", text: "Starting a fresh conversation. Tap Try again to send your message.", retry: true }
+  if (code === "not-found") return { kind: "unreachable", title: "Malloya isn't reachable yet", text: "The assistant service wasn't found on the server (the AI functions may not be deployed to this Firebase project/region, or the emulator isn't connected). Your message is kept.", retry: true }
   return { kind: "server", title: "Couldn't reach the assistant", text: "Something went wrong on our side or your connection dropped. Your message is kept; try again.", retry: true }
 }
