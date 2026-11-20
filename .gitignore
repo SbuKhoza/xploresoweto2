@@ -53,3 +53,7 @@ functions/.env.*
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+
+# --- Stage 2: local secrets for the Functions emulator (never commit) ---
+functions/.secret.local
+functions/.secret.*

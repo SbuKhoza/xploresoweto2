@@ -38,7 +38,7 @@ class FakeFirestore {
   batch() { return new Batch(this) }
   _read(path) { const d = this.store.get(path); return d ? clone(d) : undefined }
   _version(path) { return this.ver.get(path) || 0 }
-  _bump(path) { this.ver.set(path, this._version(path) + 1); const c = path.split("/")[0]; this.colVer.set(c, (this.colVer.get(c) || 0) + 1) }
+  _bump(path) { this.ver.set(path, this._version(path) + 1); const c = path.split("/").slice(0, -1).join("/"); this.colVer.set(c, (this.colVer.get(c) || 0) + 1) }
   _write(op) {
     const { type, path, data } = op
     const cur = this.store.get(path)
@@ -54,9 +54,9 @@ class FakeFirestore {
     }
     this._bump(path)
   }
-  _list(col) { return [...this.store.keys()].filter((p) => p.startsWith(`${col}/`) && p.split("/").length === 2) }
+  _list(col) { const n = col.split("/").length; return [...this.store.keys()].filter((p) => p.startsWith(`${col}/`) && p.split("/").length === n + 1) }
   async runTransaction(fn) {
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < 80; attempt++) {
       const tx = new Tx(this)
       const result = await fn(tx)
       if (tx.conflict()) continue // someone else committed to something we read: retry like Firestore does
@@ -70,24 +70,33 @@ class Col {
   constructor(db, name) { this.db = db; this.name = name }
   doc(id) { return new DocRef(this.db, this.name, id || `auto${++this.db.seq}`) }
   where(f, op, v) { return new Query(this.db, this.name, []).where(f, op, v) }
+  orderBy(f, dir) { return new Query(this.db, this.name, []).orderBy(f, dir) }
   limit(n) { return new Query(this.db, this.name, []).limit(n) }
   get() { return new Query(this.db, this.name, []).get() }
 }
 class DocRef {
   constructor(db, col, id) { this.db = db; this.col = col; this.id = id; this.path = `${col}/${id}` }
+  collection(name) { return new Col(this.db, `${this.path}/${name}`) }
   async get() { const d = this.db._read(this.path); return new DocSnap(this, d) }
   async set(data) { this.db._write({ type: "set", path: this.path, data }) }
   async update(data) { this.db._write({ type: "update", path: this.path, data }) }
+  async delete() { this.db._write({ type: "delete", path: this.path }) }
 }
 class DocSnap { constructor(ref, d) { this.ref = ref; this.id = ref.id; this.exists = d !== undefined; this._d = d } data() { return this._d ? clone(this._d) : undefined } }
 class Query {
-  constructor(db, col, filters, lim) { this.db = db; this.col = col; this.filters = filters; this.lim = lim }
-  where(f, op, v) { if (op !== "==") throw new Error(`fake supports == only (got ${op})`); return new Query(this.db, this.col, [...this.filters, [f, v]], this.lim) }
-  limit(n) { return new Query(this.db, this.col, this.filters, n) }
+  constructor(db, col, filters, lim, order) { this.db = db; this.col = col; this.filters = filters; this.lim = lim; this.order = order }
+  where(f, op, v) { if (op !== "==") throw new Error(`fake supports == only (got ${op})`); return new Query(this.db, this.col, [...this.filters, [f, v]], this.lim, this.order) }
+  orderBy(f, dir = "asc") { return new Query(this.db, this.col, this.filters, this.lim, [f, dir]) }
+  limit(n) { return new Query(this.db, this.col, this.filters, n, this.order) }
   async get() {
     let paths = this.db._list(this.col).filter((p) => { const d = this.db.store.get(p); return this.filters.every(([f, v]) => eq(d[f], v)) })
+    if (this.order) {
+      const [f, dir] = this.order, key = (p) => { const v = this.db.store.get(p)[f]; return v instanceof Ts ? v.ms : v }
+      paths = paths.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * (dir === "desc" ? -1 : 1) })
+    }
     if (this.lim) paths = paths.slice(0, this.lim)
-    return new QuerySnap(paths.map((p) => new DocSnap(new DocRef(this.db, this.col, p.split("/")[1]), this.db._read(p))))
+    const id = (p) => p.split("/").pop()
+    return new QuerySnap(paths.map((p) => new DocSnap(new DocRef(this.db, this.col, id(p)), this.db._read(p))))
   }
 }
 class QuerySnap { constructor(docs) { this.docs = docs; this.size = docs.length; this.empty = docs.length === 0 } forEach(fn) { this.docs.forEach(fn) } }
@@ -102,12 +111,14 @@ class Tx {
   set(ref, data) { this.ops.push({ type: "set", path: ref.path, data }); return this }
   create(ref, data) { this.ops.push({ type: "create", path: ref.path, data }); return this }
   update(ref, data) { this.ops.push({ type: "update", path: ref.path, data }); return this }
+  delete(ref) { this.ops.push({ type: "delete", path: ref.path }); return this }
   conflict() { return this.reads.some(([p, v]) => this.db._version(p) !== v) || this.colReads.some(([c, v]) => (this.db.colVer.get(c) || 0) !== v) }
 }
 class Batch {
   constructor(db) { this.db = db; this.ops = [] }
   set(ref, data) { this.ops.push({ type: "set", path: ref.path, data }); return this }
   update(ref, data) { this.ops.push({ type: "update", path: ref.path, data }); return this }
+  delete(ref) { this.ops.push({ type: "delete", path: ref.path }); return this }
   async commit() { this.ops.forEach((op) => this.db._write(op)) }
 }
 
