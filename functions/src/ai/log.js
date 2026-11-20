@@ -2,7 +2,7 @@
 // Structured logging that CANNOT carry message content: only allow-listed scalar fields are emitted. User ids are hashed.
 const logger = require("firebase-functions/logger")
 const { sha256hex } = require("../lib/crypto")
-const ALLOWED = new Set(["requestId", "uidHash", "purpose", "model", "iterations", "toolCalls", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "costMicros", "latencyMs", "outcome", "code", "kind", "flags", "problems", "fraction", "threshold", "spentMicros", "reservedMicros", "retryable", "status", "attempt", "tool", "count", "providerRequestId"])
+const ALLOWED = new Set(["requestId", "uidHash", "purpose", "model", "iterations", "toolCalls", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "costMicros", "latencyMs", "outcome", "code", "kind", "flags", "problems", "fraction", "threshold", "spentMicros", "reservedMicros", "retryable", "status", "attempt", "tool", "count", "providerRequestId", "tier", "stripped", "downgraded", "language"])
 let sink = null
 const setLogSinkForTests = (fn) => { sink = fn }
 const uidHash = (uid) => sha256hex(`uid:${uid}`).slice(0, 12)
