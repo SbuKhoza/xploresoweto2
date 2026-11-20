@@ -30,6 +30,7 @@ import OfflineIndicator from "./components/OfflineIndicator"
 import Eskom from "./components/eskom/Eskom"
 import { FEATURES } from "./utils/features"
 // Person-Of-Interest is excluded from the launch: the module is not even loaded while the flag is off
+const SowetoAI = FEATURES.aiAssistant ? require("./screens/SowetoAI").default : null
 const PoIst = FEATURES.personOfInterest ? require("./components/personofinterest/PoIst").default : null
 
 // Import Xplore sub-screens
@@ -300,6 +301,7 @@ const AppContent = () => {
             <Stack.Screen name="Splash"          component={Splash}           />
             {!user && <Stack.Screen name="Authentication" component={Authentication} />}
             {user  && <Stack.Screen name="MainApp"        component={MainGate} />}
+            {user  && FEATURES.aiAssistant && <Stack.Screen name="SowetoAI" component={SowetoAI} />}
           </Stack.Navigator>
         </NavigationContainer>
         </EnrollmentProvider>

@@ -6,6 +6,7 @@ import {
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
+import { FEATURES } from "../utils/features"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
@@ -854,6 +855,31 @@ const Home = () => {
             </View>
           )
         })()}
+
+        {/* ── The ultimate guide to Soweto: AI travel assistant (hidden unless FEATURES.aiAssistant) ── */}
+        {FEATURES.aiAssistant && (
+          <View className="px-[16px] mb-5">
+            <TouchableOpacity activeOpacity={0.92} onPress={() => navigation.navigate("SowetoAI")} accessibilityRole="button"
+              accessibilityLabel="The ultimate guide to Soweto. Open your personal travel assistant." style={cardShadow}>
+              <LinearGradient colors={["#1B4D5C", "#2A6B7E"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={{ borderRadius: 22, padding: 18, flexDirection: "row", alignItems: "center" }}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={{ color: "#fff", fontSize: 19, fontWeight: "800" }}>The ultimate guide to Soweto</Text>
+                  <Text style={{ color: "#CFE0E5", fontSize: 13, lineHeight: 18, marginTop: 6 }}>
+                    Discover places, plan experiences and explore Soweto with your personal travel assistant.
+                  </Text>
+                  <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", backgroundColor: "#E8600A", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8, marginTop: 12 }}>
+                    <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Start chatting</Text>
+                    <Ionicons name="arrow-forward" size={14} color="#fff" style={{ marginLeft: 6 }} />
+                  </View>
+                </View>
+                <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="compass" size={32} color="#fff" />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* ── The Ultimate Guide to Soweto ── */}
         <View className="px-[16px] mb-5">

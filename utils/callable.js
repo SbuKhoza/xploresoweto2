@@ -13,6 +13,8 @@ export const callFunction = async (name, data = {}) => {
     const code = String(e?.code || "internal").replace(/^functions\//, "")
     const err = new Error(friendlyCallableMessage(code, e?.message))
     err.code = code
+    err.rawMessage = e?.message // server reason code, e.g. "daily-limit" (additive; existing callers ignore it)
+    err.details = e?.details   // structured server details, e.g. { resetsInSeconds }
     throw err
   }
 }
