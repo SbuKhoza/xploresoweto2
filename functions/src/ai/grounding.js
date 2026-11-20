@@ -62,7 +62,7 @@ function validateAnswer(raw, { evidence, cfg, bookable = new Set(), detectedLang
     report.parseFailed = true
     // A non-JSON reply is still shown, but only as clearly-labelled general text and still passed through the sentence filters.
     const plain = typeof raw === "string" ? sanitizeText(raw, MAX_BLOCK_CHARS) : ""
-    return finish([{ type: "general", text: plain, refs: [] }], [], [], [], report, evidence, cfg, bookable, detectedLanguage, hasDistance, null)
+    return finish([{ type: "general", text: plain, refs: [], badNames: [] }], [], [], [], report, evidence, cfg, bookable, detectedLanguage, hasDistance, null)
   }
   const mentions = (Array.isArray(out.mentions) ? out.mentions : []).filter((m) => typeof m === "string").slice(0, 20)
   const known = [...evidence.values()].map((e) => normalizeName(e.name)).filter(Boolean)
