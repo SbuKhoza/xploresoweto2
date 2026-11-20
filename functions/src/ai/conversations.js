@@ -2,10 +2,10 @@
 // Conversation storage. Collections are CLIENT-INACCESSIBLE (rules deny all): every read/write goes through functions that check
 // ownership, so a user can never read, continue, list or delete another user's conversation. A non-owner gets the SAME
 // "not-found" as a missing conversation (no existence leak).
-//   ai-conversations/{cid}                { ownerUid, title, createdAt, updatedAt, messageCount, expireAt, lastModel, language }
+//   ai-conversations/{cid}                { ownerUid, title, createdAt, updatedAt, messageCount, expireAt, engine, context, language }
 //   ai-conversations/{cid}/messages/{mid} { ownerUid, conversationId, role, text, blocks?, cardRefs?, followUps?, ... , createdAt, expireAt }
 // Retention: expireAt = last activity + retention.days, used by a Firestore TTL policy as a BACKUP. User-triggered deletion below is
-// immediate and never depends on TTL. Tool results and precise location are never stored.
+// immediate and never depends on TTL. Precise location and retrieved records are never stored (only listing references and a small follow-up context).
 const { HttpsError } = require("firebase-functions/v2/https")
 const fb = require("../lib/firebase")
 const clock = require("../lib/clock")
@@ -31,29 +31,14 @@ async function findStoredReply(uid, cid, requestId) {
   const s = await msgsCol(cid).doc(`${requestId}_a`).get()
   return s.exists && s.data().ownerUid === uid ? { id: s.id, ...s.data() } : null
 }
-const textOf = (m) => (m.role === "user" ? m.text : [...(m.blocks || []).map((b) => b.text), (m.cardRefs || []).length ? `[Listings shown earlier: ${m.cardRefs.map((c) => `${c.name} (${c.ref})`).join("; ")}]` : ""].filter(Boolean).join(" "))
-async function loadHistory(uid, cid, cfg) {
-  if (!cfg.limits.maxHistoryMessages) return []
+// Follow-up context (small, bounded, written only by the server; see engine/context.js). Not conversation text.
+async function loadContext(uid, cid) {
   const conv = await loadOwned(uid, cid)
-  if (!conv) return []
-  const snap = await msgsCol(cid).orderBy("createdAt", "desc").limit(cfg.limits.maxHistoryMessages).get()
-  const out = []
-  let chars = 0
-  for (const d of snap.docs) { // newest first until the character budget is used
-    const m = d.data()
-    if (m.ownerUid !== uid) continue
-    const content = sanitizeText(textOf(m), 1500)
-    if (!content) continue
-    if (chars + content.length > cfg.limits.maxHistoryChars) break
-    chars += content.length
-    out.unshift({ role: m.role, content })
-  }
-  while (out.length && out[0].role !== "user") out.shift() // a conversation sent to the model must begin with a user turn
-  return out
+  return conv ? conv.context || null : null
 }
 
 // Idempotent: the assistant message id is derived from requestId, so a retry can never add a second copy.
-async function persistTurn({ uid, cid, requestId, userText, assistant, cfg }) {
+async function persistTurn({ uid, cid, requestId, userText, assistant, context, cfg }) {
   const FV = fb.FieldValue()
   return fb.db().runTransaction(async (tx) => {
     const cRef = convRef(cid), uRef = msgsCol(cid).doc(`${requestId}_u`), aRef = msgsCol(cid).doc(`${requestId}_a`)
@@ -70,7 +55,7 @@ async function persistTurn({ uid, cid, requestId, userText, assistant, cfg }) {
     tx.set(cRef, {
       ownerUid: uid, title: prev ? prev.title : sanitizeText(userText, 60) || "New conversation",
       createdAt: prev ? prev.createdAt : at, updatedAt: at2, messageCount: (prev ? prev.messageCount : 0) + 2, expireAt: exp,
-      lastModel: assistant.model || null, language: assistant.language || (prev && prev.language) || null,
+      engine: assistant.engine || null, context: context || (prev && prev.context) || null, language: assistant.language || (prev && prev.language) || null,
     })
     return { id: aRef.id, ...aDoc, duplicate: false }
   })
@@ -114,4 +99,4 @@ async function deleteAllForUser(uid) {
     for (const d of snap.docs) { await deleteMessages(d.id); await d.ref.delete(); conversations += 1 }
   }
 }
-module.exports = { deterministicConversationId, loadOwned, findStoredReply, loadHistory, persistTurn, listConversations, getConversation, deleteConversation, deleteAllForUser, convRef, msgsCol, notFound }
+module.exports = { deterministicConversationId, loadOwned, findStoredReply, loadContext, persistTurn, listConversations, getConversation, deleteConversation, deleteAllForUser, convRef, msgsCol, notFound }

@@ -10,11 +10,10 @@ const { writeAudit } = require("../lib/audit")
 const clock = require("../lib/clock")
 const { AI_COL } = require("../ai/constants")
 const cfgMod = require("../ai/config")
-const usageSvc = require("../ai/usage")
+const limits = require("../ai/ratelimit")
 const conv = require("../ai/conversations")
 const { runChat } = require("../ai/chat")
-const { hydrateRefs } = require("../ai/tools/cards")
-const log = require("../ai/log")
+const { hydrateRefs } = require("../ai/retrieval/cards")
 
 const verified = async (request) => G.requireVerified(await G.requireAuth(request))
 const CID = /^c_[a-f0-9]{24}$/
@@ -28,7 +27,7 @@ async function aiChat(request) {
 async function aiGetUsage(request) {
   const ctx = await verified(request)
   const cfg = await cfgMod.getAiConfig()
-  return { enabled: cfg.enabled, ...(await usageSvc.getUsageStatus(ctx.uid, cfg)), maxInputChars: cfg.limits.maxInputChars, retentionDays: cfg.retention.days,
+  return { enabled: cfg.enabled, ...(await limits.getUsageStatus(ctx.uid, cfg)), maxInputChars: cfg.limits.maxInputChars, retentionDays: cfg.retention.days,
     languages: Object.fromEntries(Object.entries(cfg.languages).filter(([, v]) => v.enabled).map(([k, v]) => [k, { verified: v.verified }])) }
 }
 async function aiListConversations(request) {
@@ -68,19 +67,8 @@ async function aiDeleteAllMyAiData(request) {
 async function aiAdminGetUsage(request) {
   await G.requireActiveSuperAdmin(request)
   const cfg = await cfgMod.getAiConfig()
-  return { summary: await usageSvc.getGlobalSummary(cfg), config: { enabled: cfg.enabled, models: cfg.models, limits: cfg.limits, budget: cfg.budget, retention: cfg.retention, languages: cfg.languages } }
-}
-async function aiAdminSetBreaker(request) {
-  const actor = await G.requireActiveSuperAdmin(request)
-  const d = V.object(request.data)
-  V.onlyKeys(d, ["action"])
-  const action = V.oneOf(d.action, "action", ["trip", "reset"])
-  const r = await usageSvc.setBreaker({ action })
-  const b = fb.db().batch()
-  writeAudit(b, { action: `ai.circuit_breaker.${action}`, actorUid: actor.uid, details: { was: r.was, now: r.now } })
-  await b.commit()
-  log.warn("ai.breaker.admin", { code: action })
-  return r
+  // No spend or token figures exist: the assistant calls no paid service. This returns the active settings only.
+  return { config: { enabled: cfg.enabled, limits: cfg.limits, retention: cfg.retention, languages: cfg.languages, cache: cfg.cache, retrieval: cfg.retrieval } }
 }
 async function aiAdminUpdateConfig(request) {
   const actor = await G.requireActiveSuperAdmin(request)
@@ -103,4 +91,4 @@ async function aiAdminUpdateConfig(request) {
   return { updated: keys }
 }
 
-module.exports = { aiChat, aiGetUsage, aiListConversations, aiGetConversation, aiDeleteConversation, aiDeleteAllMyAiData, aiAdminGetUsage, aiAdminSetBreaker, aiAdminUpdateConfig }
+module.exports = { aiChat, aiGetUsage, aiListConversations, aiGetConversation, aiDeleteConversation, aiDeleteAllMyAiData, aiAdminGetUsage, aiAdminUpdateConfig }

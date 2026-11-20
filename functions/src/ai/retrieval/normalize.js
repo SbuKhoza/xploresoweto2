@@ -4,6 +4,7 @@
 // `evidence` (server-side copy used by the grounding validator and to build cards). Missing information is reported, never guessed.
 const { sanitizeText } = require("../sanitize")
 const { readCoords, approxKm } = require("../geo")
+const { BOOKABLE_COLLECTIONS: BOOKABLE } = require("../constants") // a listing linked to a provider organisation can receive a booking REQUEST (the provider decides)
 
 const pick = (d, ...keys) => { for (const k of keys) { const v = d[k]; if (v !== undefined && v !== null && v !== "") return v } return undefined }
 const SAST_MS = 2 * 3600000
@@ -86,7 +87,7 @@ function summarizeListing(collection, id, d, ctx, { longDescription = false } = 
   const missing = []
   if (!price.known) missing.push("price"); if (!hoursText) missing.push("opening_hours"); if (!coords) missing.push("coordinates"); if (rating === null) missing.push("rating"); if (!m.description) missing.push("description")
   m.missing = missing
-  const evidence = { ref, kind: "listing", collection, id, name: m.name, category: m.category, address: m.address, priceText: price.text, priceNumbers: price.numbers, hoursText, openStatus: m.openNow, rating, reviewCount, approxKm: km, descText: m.description || "", imageUrl: firstImage(d), phone: m.phone, bookable: null }
+  const evidence = { ref, kind: "listing", collection, id, name: m.name, category: m.category, address: m.address, priceText: price.text, priceNumbers: price.numbers, hoursText, openStatus: m.openNow, rating, reviewCount, approxKm: km, descText: m.description || "", imageUrl: firstImage(d), phone: m.phone, bookable: BOOKABLE.includes(collection) && typeof d.organisationId === "string" }
   return { model: m, evidence, coords, price }
 }
 module.exports = { pick, toMillis, ymd, sastParts, sastDayStartMs, SAST_MS, parsePrice, numbersIn, computeOpenStatus, summarizeListing, collectTags, firstImage }

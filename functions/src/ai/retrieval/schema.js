@@ -1,7 +1,7 @@
 "use strict"
-// Minimal strict argument validation for tool inputs. The model's arguments are untrusted input: unknown keys are rejected,
+// Minimal strict argument validation for query inputs. Arguments are treated as untrusted input: unknown keys are rejected,
 // every value is type- and range-checked, and collection names can only be chosen from an enum. There is no free-form query,
-// filter object or path argument anywhere, so the model cannot express an arbitrary database query.
+// filter object or path argument anywhere, so no caller can express an arbitrary database query.
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 function validateArgs(schema, input) {
   const src = input === undefined || input === null ? {} : input
@@ -34,17 +34,4 @@ function validateArgs(schema, input) {
   }
   return out
 }
-function toJsonSchema(schema) {
-  const properties = {}, required = []
-  for (const [name, f] of Object.entries(schema)) {
-    const p = f.type === "stringArray" ? { type: "array", items: { type: "string", maxLength: f.itemMax || 40 }, maxItems: f.maxItems || 5 } : { type: f.type === "integer" ? "integer" : f.type }
-    if (f.type === "string") { p.maxLength = f.max || 100; if (f.enum) p.enum = f.enum }
-    if (f.min !== undefined && f.type !== "string") p.minimum = f.min
-    if (f.max !== undefined && f.type !== "string") p.maximum = f.max
-    if (f.description) p.description = f.description
-    properties[name] = p
-    if (f.required) required.push(name)
-  }
-  return { type: "object", properties, required, additionalProperties: false }
-}
-module.exports = { validateArgs, toJsonSchema }
+module.exports = { validateArgs }

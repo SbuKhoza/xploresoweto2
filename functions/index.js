@@ -8,10 +8,7 @@ const opts = { region: REGION, maxInstances: 10, cors: true }
 // NOTE (App Check): not enforced in Stage 1 (the JS SDK on React Native needs a native-attestation provider). Per-user limits
 // are enforced inside each function; see docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md.
 const wrap = (handler) => onCall(opts, (request) => handler(request))
-// Stage 2A (AI). Same region/instance caps. ONLY aiChat is bound to the Anthropic secret and may call the provider; it also gets a
-// longer timeout for the bounded tool loop. All other AI functions never see the key.
-const { ANTHROPIC_API_KEY } = require("./src/ai/secrets")
-const wrapChat = (handler) => onCall({ ...opts, secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 90, memory: "512MiB", maxInstances: 10 }, (request) => handler(request))
+// Stage 2B (database-powered assistant): no secret, no external AI service. Same wrapper as every other callable.
 
 const profile = require("./src/handlers/profile")
 const platform = require("./src/handlers/platform")
@@ -51,13 +48,12 @@ module.exports = {
   submitListing: wrap(listings.submitListing),
   reviewListingSubmission: wrap(listings.reviewListingSubmission),
   // Stage 2A: AI backend (not deployed until approved)
-  aiChat: wrapChat(ai.aiChat),
+  aiChat: wrap(ai.aiChat),
   aiGetUsage: wrap(ai.aiGetUsage),
   aiListConversations: wrap(ai.aiListConversations),
   aiGetConversation: wrap(ai.aiGetConversation),
   aiDeleteConversation: wrap(ai.aiDeleteConversation),
   aiDeleteAllMyAiData: wrap(ai.aiDeleteAllMyAiData),
   aiAdminGetUsage: wrap(ai.aiAdminGetUsage),
-  aiAdminSetBreaker: wrap(ai.aiAdminSetBreaker),
   aiAdminUpdateConfig: wrap(ai.aiAdminUpdateConfig),
 }
