@@ -201,4 +201,27 @@ describe("Firestore rules (Stage 1, proposed)", () => {
       }
     })
   })
+
+  describe("AI assistant collections are server-only (Stage 2A)", () => {
+    const paths = ["ai-conversations/c_1", "ai-conversations/c_1/messages/m1", "ai-usage/u_alice_2026-11-14", "ai-usage/g_2026-11", "ai-config/default"]
+    beforeEach(async () => {
+      await env.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore()
+        for (const p of paths) await setDoc(doc(db, p), { ownerUid: "alice", text: "private", spentMicros: 1 })
+      })
+    })
+    it("no client (owner, other user, anonymous, editor, super admin) can read any AI document", async () => {
+      for (const ctx of [as_("alice"), as_("bob"), anon(), as_("ed", ED), as_("root", SA)]) for (const p of paths) await assertFails(getDoc(doc(ctx, p)))
+    })
+    it("no client can list AI collections, even filtered to their own uid", async () => {
+      await assertFails(getDocs(query(collection(as_("alice"), "ai-conversations"), where("ownerUid", "==", "alice"))))
+      await assertFails(getDocs(collection(as_("alice"), "ai-conversations/c_1/messages")))
+      await assertFails(getDocs(collection(as_("root", SA), "ai-usage"))); await assertFails(getDocs(collection(as_("root", SA), "ai-config")))
+    })
+    it("no client can create, change or delete AI documents (usage limits and the budget cannot be tampered with)", async () => {
+      for (const ctx of [as_("alice"), as_("root", SA), anon()]) for (const p of paths) {
+        await assertFails(setDoc(doc(ctx, p), { ownerUid: "alice", requests: 0 })); await assertFails(updateDoc(doc(ctx, p), { requests: 0, spentMicros: 0 })); await assertFails(deleteDoc(doc(ctx, p)))
+      }
+    })
+  })
 })

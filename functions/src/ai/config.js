@@ -17,7 +17,7 @@ const DEFAULTS = Object.freeze({
   effort: { routine: "low", planning: "medium" },
   maxOutputTokens: { routine: 2000, planning: 4500 }, // thinking counts toward max_tokens, so leave headroom
   limits: { dailyMessages: 10, burstPerMinute: 3, burstWindowSeconds: 60, maxInputChars: 1000, maxHistoryMessages: 12, maxHistoryChars: 6000 },
-  loop: { maxIterations: 5, maxToolCalls: 8, toolTimeoutMs: 8000, providerTimeoutMs: 45000, totalDeadlineMs: 85000, providerRetries: 1, toolResultMaxChars: 6000 },
+  loop: { maxIterations: 5, maxToolCalls: 8, toolTimeoutMs: 8000, providerTimeoutMs: 45000, totalDeadlineMs: 70000, providerRetries: 1, toolResultMaxChars: 6000 },
   budget: { monthlyUsd: 50, warnFractions: [0.5, 0.8], tripFraction: 1.0, inflightStaleSeconds: 300 },
   retention: { days: 90 },
   languages: { en: { enabled: true, verified: true }, zu: { enabled: true, verified: false } },
@@ -64,7 +64,7 @@ function validateConfig(c) {
   const O = c.loop || {}
   need(int(O.maxIterations, 1, 8), "loop.maxIterations"); need(int(O.maxToolCalls, 1, 20), "loop.maxToolCalls")
   need(int(O.toolTimeoutMs, 500, 30000), "loop.toolTimeoutMs"); need(int(O.providerTimeoutMs, 3000, 100000), "loop.providerTimeoutMs")
-  need(int(O.totalDeadlineMs, 5000, 100000), "loop.totalDeadlineMs"); need(int(O.providerRetries, 0, 3), "loop.providerRetries")
+  need(int(O.totalDeadlineMs, 5000, 80000), "loop.totalDeadlineMs"); need(int(O.providerRetries, 0, 3), "loop.providerRetries")
   need(int(O.toolResultMaxChars, 500, 20000), "loop.toolResultMaxChars")
   const B = c.budget || {}
   need(num(B.monthlyUsd, 1, 1000000), "budget.monthlyUsd"); need(num(B.tripFraction, 0.1, 1.5), "budget.tripFraction")

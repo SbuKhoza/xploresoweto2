@@ -159,6 +159,18 @@ service cloud.firestore {
       allow write: if false;                  // submitReview verifies a completed, customer-confirmed request
     }
 
+    // ---------------------------------------------------------------- AI assistant (Stage 2A): SERVER-ONLY
+    // Clients have NO direct access to any AI collection. Every read and write goes through the aiXxx Cloud Functions, which check that the
+    // caller owns the conversation (a foreign id looks like a missing one), enforce usage limits, and never return internal fields.
+    // This is deliberately stricter than "owner can read": stored records hold the grounded answer and card references, not raw tool data,
+    // and a direct read would bypass card re-validation (a listing suspended after the answer must show as unavailable).
+    match /ai-conversations/{conversationId} {
+      allow read, write: if false;
+      match /messages/{messageId} { allow read, write: if false; }
+    }
+    match /ai-usage/{usageId}   { allow read, write: if false; }   // per-user and global counters, budget and circuit breaker
+    match /ai-config/{configId} { allow read, write: if false; }   // changed only by aiAdminUpdateConfig (Super Admin, audited)
+
     // everything else is denied (Person-Of-Interest, any legacy or future collection)
     match /{document=**} { allow read, write: if false; }
   }

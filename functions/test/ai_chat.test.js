@@ -145,6 +145,12 @@ test("budget thresholds are recorded once (50% and 80%); the monthly spend and d
   const th = env.list("audit-log").filter((a) => a.action === "ai.budget.threshold").map((a) => a.details.threshold)
   assert.deepEqual(th.sort(), [0.5, 0.8]); assert.ok(!globalDoc().breakerTrippedAt)
 })
+test("the overall deadline is enforced: a turn that runs out of time ends cleanly, refunds the daily message and settles the reservation", async () => {
+  const slow = (req, n) => { env.time.now += 71000; return resp({ toolCalls: [toolCall("getNews", {}, `tu_${n}`)] }) } // the first call "takes" 71 s
+  const p = use([slow, say("never reached")])
+  await rejects(ask(), "unavailable", "ai-provider-unavailable")
+  assert.equal(p.calls.length, 1); assert.equal(usageDoc().requests, 0); assert.deepEqual(usageDoc().inflight, {}); assert.equal(globalDoc().reservedMicros, 0); assert.ok(usageDoc().costMicros > 0) // the call that did happen is still paid for in the books
+})
 test("model routing: planning keywords use the planning model, everything else the routine model; both from config", async () => {
   const p = use([say("ok")])
   await ask("u1", "Plan my 2 day itinerary in Soweto"); await ask("u2", "Where is the nearest clinic?"); await ask("u3", "Ngicela uhlelo lwezinsuku ezintathu eSoweto")
