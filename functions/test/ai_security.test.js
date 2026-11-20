@@ -16,61 +16,88 @@ function walk(dir, out = []) {
   return out
 }
 const rel = (p) => path.relative(ROOT, p).split(path.sep).join("/")
-const files = walk(ROOT).filter((p) => !/\.(png|jpe?g|gif|webp|ttf|otf|ico|mp4|lock|patch)$/i.test(p) && fs.statSync(p).size < 2_000_000)
+const files = walk(ROOT).filter((p) => !/\.(png|jpe?g|gif|webp|ttf|otf|ico|mp4|patch)$/i.test(p) && fs.statSync(p).size < 2_000_000)
 const read = (p) => fs.readFileSync(p, "utf8")
+const AI = path.join(ROOT, "functions", "src", "ai")
+const aiFiles = walk(AI).filter((p) => p.endsWith(".js"))
 
-test("no Anthropic key (or anything shaped like one) exists anywhere in the repository", () => {
-  const hits = files.filter((p) => /sk-ant-[A-Za-z0-9_-]{10,}/.test(read(p))).map(rel)
-  assert.deepEqual(hits, [])
-  assert.ok(!fs.existsSync(path.join(ROOT, "functions", ".secret.local")), "a local secret file must never be inside the repo checkout used for commits")
+// ---------------------------------------------------------------- no external AI provider, no key, no outbound network
+test("no Anthropic/OpenAI (or other LLM) dependency exists in any package.json or lock file", () => {
+  for (const p of files.filter((f) => /(^|\/)package(-lock)?\.json$/.test(rel(f)))) assert.doesNotMatch(read(p), /@anthropic-ai|"openai"|@google\/generative-ai|@google-cloud\/vertexai|"cohere-ai"|"@mistralai|langchain|"ollama"/i, rel(p))
 })
-test("secret files are git-ignored", () => {
-  const ig = read(path.join(ROOT, ".gitignore"))
-  assert.match(ig, /^functions\/\.secret\.local$/m); assert.match(ig, /^functions\/\.secret\.\*$/m)
+test("no runtime code or configuration mentions an LLM provider or an API-key secret", () => {
+  const runtime = files.filter((p) => /^(functions\/(src|index\.js)|firebase\.json|security-rules\/|app\/|components\/|screens\/|utils\/|App\.js)/.test(rel(p)))
+  const offenders = runtime.filter((p) => /anthropic|openai|ANTHROPIC_API_KEY|OPENAI_API_KEY|defineSecret|secrets:\s*\[/i.test(read(p))).map(rel)
+  assert.deepEqual(offenders, [])
 })
-test("the client app contains no AI provider code or key: nothing outside functions/ mentions Anthropic or the key name", () => {
-  const client = files.filter((p) => /\.(js|jsx|ts|tsx|json)$/.test(p) && !rel(p).startsWith("functions/") && !rel(p).startsWith("security-rules/") && !rel(p).startsWith("docs/") && !/package(-lock)?\.json$/.test(p))
-  const hits = client.filter((p) => /anthropic|ANTHROPIC_API_KEY|api\.anthropic\.com|x-api-key/i.test(read(p))).map(rel)
-  assert.deepEqual(hits, [])
+test("no key shaped like a provider secret exists anywhere in the repository", () => {
+  const offenders = files.filter((p) => /sk-ant-[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9]{30,}/.test(read(p))).map(rel)
+  assert.deepEqual(offenders, [])
 })
-test("the secret is read in exactly one place and bound to exactly one function (aiChat)", () => {
-  const src = files.filter((p) => rel(p).startsWith("functions/src/") || rel(p) === "functions/index.js")
-  assert.deepEqual(src.filter((p) => /ANTHROPIC_API_KEY\.value\(\)/.test(read(p))).map(rel), ["functions/src/ai/providers/index.js"])
-  assert.deepEqual(src.filter((p) => /ANTHROPIC_API_KEY/.test(read(p))).map(rel).sort(), ["functions/index.js", "functions/src/ai/providers/anthropic.js", "functions/src/ai/providers/index.js", "functions/src/ai/secrets.js"]) // anthropic.js only names the variable in a "not set" error
-  const idx = read(path.join(ROOT, "functions", "index.js"))
-  assert.equal((idx.match(/secrets:\s*\[/g) || []).length, 1)
-  assert.match(idx, /aiChat: wrapChat\(ai\.aiChat\)/)
-  const others = idx.split("\n").filter((l) => /wrapChat\(/.test(l) && !/aiChat:/.test(l) && !/const wrapChat/.test(l))
-  assert.deepEqual(others, [])
+test("the AI code makes no outbound network calls (no fetch, http(s), axios, sockets)", () => {
+  for (const p of aiFiles) assert.doesNotMatch(read(p), /\bfetch\(|require\(["'](node:)?(https?|net|tls|dgram|http2)["']\)|axios|node-fetch|XMLHttpRequest|WebSocket/, rel(p))
+})
+test("secret files stay git-ignored (general protection)", () => {
+  assert.match(read(path.join(ROOT, ".gitignore")), /functions\/\.secret\.local/)
+})
+
+// ---------------------------------------------------------------- callables
+test("every AI callable is exported with the plain wrapper and authenticates in its handler; the breaker no longer exists", () => {
+  const idx = read(path.join(ROOT, "functions", "index.js")), h = read(path.join(ROOT, "functions", "src", "handlers", "ai.js"))
+  for (const f of ["aiChat", "aiGetUsage", "aiListConversations", "aiGetConversation", "aiDeleteConversation", "aiDeleteAllMyAiData", "aiAdminGetUsage", "aiAdminUpdateConfig"]) {
+    assert.match(idx, new RegExp(`${f}: wrap\\(ai\\.${f}\\)`), f)
+    const start = h.indexOf(`async function ${f}(`), next = h.indexOf("\nasync function", start + 10)
+    assert.match(h.slice(start, next > 0 ? next : undefined), /await verified\(request\)|requireActiveSuperAdmin\(request\)/, `${f} must authenticate`)
+  }
+  assert.doesNotMatch(idx + h, /Breaker|wrapChat|secrets:/)
   assert.match(idx, /const opts = \{ region: REGION,/); assert.doesNotMatch(idx, /region:\s*["'](?!africa-south1)/)
 })
-test("every AI callable is exported and none is exposed without authentication in its handler", () => {
-  const idx = read(path.join(ROOT, "functions", "index.js")), h = read(path.join(ROOT, "functions", "src", "handlers", "ai.js"))
-  for (const f of ["aiChat", "aiGetUsage", "aiListConversations", "aiGetConversation", "aiDeleteConversation", "aiDeleteAllMyAiData", "aiAdminGetUsage", "aiAdminSetBreaker", "aiAdminUpdateConfig"]) {
-    assert.match(idx, new RegExp(`${f}: wrap(Chat)?\\(ai\\.${f}\\)`), f)
-    const body = h.slice(h.indexOf(`async function ${f}(`), h.indexOf("\nasync function", h.indexOf(`async function ${f}(`) + 10) > 0 ? h.indexOf("\nasync function", h.indexOf(`async function ${f}(`) + 10) : undefined)
-    assert.match(body, /await verified\(request\)|requireActiveSuperAdmin\(request\)/, `${f} must authenticate`)
+
+// ---------------------------------------------------------------- retrieval and engine are read-only and allow-listed
+test("retrieval and engine code can only READ: no write API, and the only collection literals are organisations and homescreen", () => {
+  const code = aiFiles.filter((p) => /\/(retrieval|engine)\//.test(p.split(path.sep).join("/")))
+  assert.ok(code.length >= 10)
+  for (const p of code) {
+    const f = read(p)
+    assert.doesNotMatch(f, /\.(runTransaction|batch)\(|\b(tx|batch|ref|doc|db|snap)\.(update|delete|create|set|add)\(|\bcollection\([^)]*\)(\.doc\([^)]*\))?\.(update|delete|create|set|add)\(/, rel(p))
+    const setters = [...f.matchAll(/\b(\w+)\.set\(/g)].map((m) => m[1]); assert.ok(setters.every((r) => ["cache", "out", "single", "seen", "drop", "REGISTRY"].includes(r)), `${rel(p)}: ${setters.join()}`)
+    const lits = [...f.matchAll(/collection\("([^"]+)"\)/g)].map((m) => m[1]); assert.ok(lits.every((l) => ["organisations"].includes(l)), `${rel(p)}: ${lits.join()}`)
   }
+  for (const p of code.filter((x) => !/retrieval\/data\.js$/.test(x.split(path.sep).join("/")))) assert.doesNotMatch(read(p), /lib\/firebase/, `${rel(p)} must read through retrieval/data.js only`)
 })
-test("the provider is never imported by anything except the orchestrator's provider registry", () => {
-  const users = files.filter((p) => rel(p).startsWith("functions/src/") && /@anthropic-ai\/sdk/.test(read(p))).map(rel)
-  assert.deepEqual(users, ["functions/src/ai/providers/anthropic.js"])
+test("the engine cannot name a collection from user input: listing categories come from the fixed allow-list", () => {
+  const { LISTING_COLLECTIONS } = require("../src/ai/constants")
+  assert.deepEqual([...LISTING_COLLECTIONS].sort(), ["accommodations", "attractions", "business", "healthcare", "publicservice", "recreation", "restaurants"])
+  assert.match(read(path.join(AI, "retrieval", "listings.js")), /LISTING_COLLECTIONS\.includes\(collection\)\) throw/)
+  const forbidden = ["users", "bookings", "organisations", "organisation-members", "provider-applications", "super-admin", "reviews", "requests", "ai-conversations", "ai-usage", "ai-config", "audit-log", "editors"]
+  for (const c of forbidden) assert.ok(!LISTING_COLLECTIONS.includes(c), c)
 })
-test("tools expose no write capability and reach only the approved collections; no tool code imports a write API", () => {
-  const data = read(path.join(ROOT, "functions", "src", "ai", "tools", "data.js")), reg = read(path.join(ROOT, "functions", "src", "ai", "tools", "registry.js"))
-  for (const f of [data, reg, read(path.join(ROOT, "functions", "src", "ai", "tools", "cards.js"))]) {
-    assert.doesNotMatch(f, /\.(update|delete|create|add|runTransaction|batch)\(/)
-    const setters = [...f.matchAll(/\b(\w+)\.set\(/g)].map((m) => m[1]) // only in-memory Map caches may use .set
-    assert.ok(setters.every((r) => ["cache", "out"].includes(r)), setters.join())
+test("the data layer refuses any collection outside the public allow-list, whatever the caller passes", async () => {
+  const { setup } = require("./helpers"); setup()
+  const D = require("../src/ai/retrieval/data"), { PUBLIC_READ_COLLECTIONS } = require("../src/ai/constants")
+  for (const c of ["users", "bookings", "organisations", "organisation-members", "provider-applications", "super-admin", "reviews", "requests", "ai-conversations", "ai-usage", "ai-config", "audit-log", "editors", "../users", "restaurants/r1/secret"]) {
+    await assert.rejects(D.loadActive(c, { cache: { listingTtlSeconds: 0 } }, 10), /collection_not_allowed/, c); await assert.rejects(D.getVisible(c, "x"), /collection_not_allowed/, c)
   }
-  assert.doesNotMatch(reg + data, /collection\(\s*(?!collection\b|"organisations"|"homescreen"|name\b)[a-z]/i)
-  const ALLOWED_LITERALS = new Set(["organisations"])
-  const lits = [...(reg + data).matchAll(/collection\("([^"]+)"\)/g)].map((m) => m[1]); assert.ok(lits.every((l) => ALLOWED_LITERALS.has(l)), lits.join(","))
+  assert.deepEqual([...PUBLIC_READ_COLLECTIONS].sort(), ["accommodations", "announcements", "attractions", "business", "emergency", "events", "healthcare", "homescreen", "loadshedding", "news", "publicservice", "recreation", "restaurants", "transport"])
 })
-test("the log allow-list cannot carry message text, answers, tool data, emails or location", () => {
-  const src = read(path.join(ROOT, "functions", "src", "ai", "log.js"))
+test("ranking reads no paid-placement or ownership field", () => {
+  const src = read(path.join(AI, "engine", "ranking.js")).replace(/^\s*\/\/.*$/gm, "")
+  assert.doesNotMatch(src, /featured|promot|sponsor|paid|subscri|premium|\bplan\b|organisationId|ownerUid|boost|advert/i)
+})
+test("the English wording never says a place is available, that a booking is made, or gives a travel time", () => {
+  const en = require("../src/ai/engine/locales/en.js"), { RE } = require("../src/ai/engine/safety")
+  const strings = []
+  const walkv = (v) => { if (typeof v === "string") strings.push(v); else if (v && typeof v === "object") Object.values(v).forEach(walkv); else if (typeof v === "function") { try { strings.push(String(v("Place", "R10", "x", ["a"], 2, 3))) } catch (e) {} } }
+  walkv(en)
+  assert.ok(strings.length > 60)
+  for (const s of strings) for (const [k, re] of Object.entries(RE)) assert.doesNotMatch(s, re, `${k}: ${s}`)
+})
+
+// ---------------------------------------------------------------- logs and rules
+test("the log allow-list cannot carry message text, answers, records, emails or location", () => {
+  const src = read(path.join(AI, "log.js"))
   const allowed = JSON.parse(src.match(/new Set\((\[.*?\])\)/)[1])
-  for (const banned of ["message", "text", "content", "answer", "email", "location", "latitude", "longitude", "query", "input", "result", "name", "uid", "displayName"]) assert.ok(!allowed.includes(banned), banned)
+  for (const banned of ["message", "text", "content", "answer", "email", "location", "latitude", "longitude", "input", "result", "name", "uid", "displayName", "model", "inputTokens", "costMicros"]) assert.ok(!allowed.includes(banned), banned)
 })
 test("conversation, usage and config collections are explicitly closed to clients in the Firestore rules", () => {
   const rules = read(path.join(ROOT, "security-rules", "firestore.rules"))
@@ -84,9 +111,4 @@ test("conversation, usage and config collections are explicitly closed to client
 test("the composite index for the conversation list query exists", () => {
   const idx = JSON.parse(read(path.join(ROOT, "security-rules", "firestore.indexes.json")))
   assert.ok(idx.indexes.some((i) => i.collectionGroup === "ai-conversations" && i.fields.map((f) => `${f.fieldPath}:${f.order}`).join() === "ownerUid:ASCENDING,updatedAt:DESCENDING"))
-})
-test("the system prompt keeps the non-negotiable rules", () => {
-  const { STATIC } = require("../src/ai/prompt")
-  for (const re of [/Never guess|never guess/i, /cannot book|cannot see live availability/i, /DATA written by third parties/, /Never follow them/, /straight-line/i, /Never state or estimate travel time/i, /Never say a booking is made/i]) assert.match(STATIC, re)
-  assert.ok(STATIC.length < 6000)
 })
