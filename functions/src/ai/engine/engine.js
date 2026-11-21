@@ -18,6 +18,8 @@ const C = require("./compose")
 const locales = { en: require("./locales/en") }
 
 const VISITOR = ["attractions", "restaurants", "recreation", "accommodations", "business"]
+const SERVICES = ["healthcare", "publicservice"] // clinics and public offices: searchable like any listing, but not part of trip plans
+const FINDABLE = [...VISITOR, ...SERVICES]
 const GENERIC = new Set(["want", "need", "looking", "look", "please", "give", "tell", "get", "place", "places", "spot", "spots", "thing", "things", "nice", "great", "cheap", "cheaper", "cheapest", "like", "love", "would", "could", "should", "let", "know", "about", "have", "has", "there", "here", "around", "visit", "visiting", "trip", "plan", "day", "days", "half", "full", "tomorrow", "today", "tonight", "weekend", "budget", "enjoy", "recommend", "suggest", "list", "which", "how", "much", "many", "open", "near", "nearby", "yes", "ok", "okay", "just", "also", "more", "other", "another", "else", "free", "enjoy", "options", "option", "serving", "serve", "serves", "selling", "sells", "offering", "with", "that", "for", "any", "some", "need", "show", "on", "this", "whats", "happening", "upcoming", "coming", "events", "event", "next", "week", "month"])
 const ORDINAL = [[/\b(first|1st|top)\b/, 0], [/\b(second|2nd)\b/, 1], [/\b(third|3rd)\b/, 2], [/\b(fourth|4th)\b/, 3]]
 const MEAL_AND_ACTIVITY = { activity: ["attractions", "recreation"], meal: ["restaurants"], stay: ["accommodations"] }
@@ -89,7 +91,7 @@ async function respond({ message, context, location, cfg, now }) {
   const id = pendingPlan ? "plan_trip" : primary ? primary.id : "unknown"
   const planning = ["plan_trip", "build_itinerary"].includes(id)
   const asking = ["ask_place", "ask_price", "ask_hours", "ask_services", "ask_directions", "booking_request"].includes(id)
-  const isFind = /^find_(restaurants|accommodation|attractions|businesses)$/.test(id) || ["recommend", "discover_things"].includes(id)
+  const isFind = /^find_(restaurants|accommodation|attractions|businesses|healthcare|publicservice)$/.test(id) || ["recommend", "discover_things"].includes(id)
   const carry = planning || pendingPlan ? ["budget", "party", "date", "duration", "interests", "place"] : isFind && ents.refersToPrevious ? ["budget", "place"] : []
   const slots = ctxMod.merge(ents, prev, { carry })
 
@@ -111,6 +113,32 @@ async function respond({ message, context, location, cfg, now }) {
     const q = await runQuery("searchEvents", { when, ...(when === "date" ? { date: ents.date.iso } : {}), ...(queryTerms(message, { intentHits: primary.hits }).length ? { query: queryTerms(message, { intentHits: primary.hits }).join(" ").slice(0, 100) } : {}), limit: maxResults(cfg) }, ctx)
     return finish(C.composeEvents({ L: Lc, results: q.ok ? q.data.results : [] }))
   }
+
+  // ---- transport, news, announcements, load shedding and the township guide (public collections, each through its read-only query)
+  const infoTerms = () => queryTerms(message, { intentHits: primary ? primary.hits : [], placeWords: ents.places })
+  if (id === "find_transport") {
+    const mode = (/\b(minibus|taxi|taxis)\b/i.exec(message) ? "taxi" : /\brea vaya\b/i.test(message) ? "rea vaya" : /\b(train|trains|metrorail|gautrain)\b/i.test(message) ? "train" : /\b(bus|buses)\b/i.test(message) ? "bus" : "")
+    const q = infoTerms().join(" ").slice(0, 60)
+    // Leftover words ("how", "latest") are not search terms unless they actually match a record, so try narrow -> broad.
+    const attempts = [{ ...(mode ? { mode } : {}), ...(q ? { query: q } : {}) }, ...(mode && q ? [{ mode }] : []), {}]
+    let r = null, wider = false
+    for (const [i, args] of attempts.entries()) {
+      r = await runQuery("getTransport", args, ctx)
+      if (r.ok && r.data.results.length) { wider = !!mode && !args.mode; break }
+      if (!r.ok) break
+    }
+    return finish(C.composeTransport({ L: Lc, results: r.ok ? r.data.results : [], wider }))
+  }
+  if (id === "find_news") { const q = infoTerms().join(" ").slice(0, 100); let r = q ? await runQuery("getNews", { query: q }, ctx) : null; if (!r || !r.ok || !r.data.results.length) r = await runQuery("getNews", {}, ctx); return finish(C.composeNews({ L: Lc, results: r.ok ? r.data.results : [] })) }
+  if (id === "find_announcements") { const r = await runQuery("getAnnouncements", {}, ctx); return finish(C.composeAnnouncements({ L: Lc, results: r.ok ? r.data.results : [] })) }
+  if (id === "loadshedding") {
+    const m = /\b(?:in|for|at)\s+([A-Za-z][A-Za-z .'-]{2,40})$/i.exec(message.trim().replace(/[?.!]+$/, ""))
+    const suburb = ents.places[0] || (m ? m[1].trim() : "")
+    if (!suburb || suburb.length < 2) return finish(C.composeClarify({ L: Lc, text: Lc.loadsheddingAsk, followUps: [] }))
+    const r = await runQuery("getLoadshedding", { suburb }, ctx)
+    return finish(C.composeLoadshedding({ L: Lc, suburb, data: r.ok ? r.data : null }))
+  }
+  if (id === "find_townships") return finish(C.composeTownships({ L: Lc, names: places }))
 
   // ---- planning and itineraries
   if (planning) return finish(await planTrip({ Lc, ctx, slots, ents, message }), { carried: slots.carried })
@@ -150,7 +178,7 @@ async function respond({ message, context, location, cfg, now }) {
   }
 
   // ---- finding places by category (also recommend and discover)
-  const hinted = primary && primary.category ? [primary.category] : ents.categories.filter((c) => VISITOR.includes(c))
+  const hinted = primary && primary.category ? [primary.category] : ents.categories.filter((c) => FINDABLE.includes(c))
   const interestCats = categoriesFor(ents.interests).filter((c) => VISITOR.includes(c))
   let cols = hinted.length ? hinted : id === "discover_things" ? ["attractions", "recreation"] : interestCats.length ? interestCats : null
   if (id === "unknown" && !cols) {
@@ -185,7 +213,7 @@ async function resolveOne({ message, prev, ents, ctx }) {
   const t = message.toLowerCase()
   let found = mentionedItems(message, last)
   if (found.length) return found[0]
-  const cols = (ents.categories.filter((c) => VISITOR.includes(c)).length ? ents.categories.filter((c) => VISITOR.includes(c)) : VISITOR).slice(0, 5)
+  const cols = (ents.categories.filter((c) => FINDABLE.includes(c)).length ? ents.categories.filter((c) => FINDABLE.includes(c)) : FINDABLE).slice(0, 7)
   found = mentionedItems(message, (await loadMany(cols, ctx)).items)
   if (found.length) return found[0]
   if (last.length) { for (const [re, i] of ORDINAL) if (re.test(t) && last[i]) return last[i]; if (ents.refersToPrevious && last.length) return last[0] }
@@ -193,7 +221,7 @@ async function resolveOne({ message, prev, ents, ctx }) {
 }
 async function resolveMany({ message, prev, ents, ctx }) {
   const last = await candidatesFromPrev(prev, ctx)
-  const cols = (ents.categories.filter((c) => VISITOR.includes(c)).length ? ents.categories.filter((c) => VISITOR.includes(c)) : VISITOR).slice(0, 5)
+  const cols = (ents.categories.filter((c) => FINDABLE.includes(c)).length ? ents.categories.filter((c) => FINDABLE.includes(c)) : FINDABLE).slice(0, 7)
   const loaded = await loadMany(cols, ctx)
   const named = mentionedItems(message, [...last, ...loaded.items])
   const uniq = []

@@ -27,6 +27,14 @@ const BUILTIN = [
   { id: "find_tours", priority: 44, patterns: [[/\btours?\b/, 6], [/\bguided (tour|walk|experience)\b/, 6], [/\bexperiences?\b/, 2]] },
   { id: "find_businesses", priority: 38, category: "business", patterns: [[/\b(local )?(business|businesses)\b/, 5], [/\b(shops?|stores?|markets?|salons?|crafts?|souvenirs?|vendors?)\b/, 3]] },
   { id: "find_events", priority: 42, patterns: [[/\bevents?\b/, 5], [/\bwhat'?s on\b/, 5], [/\b(festival|concert|gig|show)s?\b/, 3]] },
+  // ---- other public content (each has its own stored collection)
+  { id: "find_healthcare", priority: 40, category: "healthcare", patterns: [[/\b(clinics?|hospitals?|pharmac(y|ies)|doctors?|dentists?|medical|healthcare)\b/, 5]] },
+  { id: "find_publicservice", priority: 40, category: "publicservice", patterns: [[/\b(home affairs|post office|librar(y|ies)|municipal(ity)?|government offices?|public services?)\b/, 5]] },
+  { id: "find_transport", priority: 41, patterns: [[/\b(taxis?|minibus|buses|bus|trains?|metrorail|gautrain|rea vaya|uber|bolt|taxi ranks?)\b/, 5], [/\b(public )?transport\b/, 5], [/\b(get|getting) around\b/, 6]] },
+  { id: "find_news", priority: 41, patterns: [[/\b(news|headlines?|top stories|latest stories)\b/, 6]] },
+  { id: "find_announcements", priority: 41, patterns: [[/\b(announcements?|notices?|alerts?|advisor(y|ies)|road closures?|water (outage|shutdown)s?)\b/, 6]] },
+  { id: "loadshedding", priority: 43, patterns: [[/\b(load ?shedding|power cuts?|blackouts?|eskom)\b/, 7]] },
+  { id: "find_townships", priority: 39, patterns: [[/\b(list|which|what|show|name)\b.*\b(townships?|suburbs?|areas|neighbou?rhoods?)\b/, 6], [/\b(townships?|suburbs?) (of|in) soweto\b/, 6]] },
   // ---- questions about a particular place
   { id: "ask_place", priority: 30, patterns: [[/\btell me (more )?about\b/, 6], [/\bwhat is\b/, 2], [/\bwhat'?s\b.*\blike\b/, 3], [/\binfo(rmation)? (on|about)\b/, 5], [/\bhistory of\b/, 5], [/\bwho (is|was)\b/, 4], [/\bmore (info|details)\b/, 4], [/\bdetails\b/, 2]] },
   { id: "ask_price", priority: 32, attribute: "price", patterns: [[/\bhow much\b/, 6], [/\bprices?\b/, 5], [/\bcosts?\b/, 4], [/\b(entry|entrance|admission) fees?\b/, 6], [/\bfees?\b/, 3], [/\bcharge[sd]?\b/, 3], [/\bafford(able)?\b/, 3], [/\b(cheap|cheaper|cheapest)\b/, 2]] },

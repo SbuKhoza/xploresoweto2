@@ -134,7 +134,31 @@ function composeTours({ L, what, matches }) {
   if (!matches.length) return out([block("unverified", L.noTourData(what))], [], [L.follow.cats, L.follow.plan])
   return out([block("verified", L.tourIntro(matches.length, what), { refs: matches.map((e) => e.item.ref) }), block("verified", matches.map((e, i) => `${i + 1}. ${title(e.item.model)} — ${factLine(e.item, L)}`).join("\n"), { refs: matches.map((e) => e.item.ref) })], matches.map((e) => e.item.evidence), [L.follow.details])
 }
+function composeTransport({ L, results, wider }) {
+  if (!results.length) return out([block("unverified", L.transportNone)], [], [L.follow.cats, L.follow.plan])
+  const blocks = [block("verified", `${L.transportIntro(results.length)}\n${results.map((t) => `• ${L.transportLine(t)}`).join("\n")}`, { refs: results.map((t) => t.ref) })]
+  if (wider) blocks.unshift(block("unverified", L.transportWider))
+  blocks.push(block("unverified", L.transportNote))
+  return out(blocks, [], [L.follow.plan, L.follow.stay])
+}
+function composeNews({ L, results }) {
+  if (!results.length) return out([block("unverified", L.newsNone)], [], [L.follow.plan])
+  return out([block("verified", `${L.newsIntro(results.length)}\n${results.map((r) => `• ${L.newsLine(r)}`).join("\n")}`, { refs: results.map((r) => r.ref) })], [], [L.follow.plan])
+}
+function composeAnnouncements({ L, results }) {
+  if (!results.length) return out([block("unverified", L.announcementsNone)], [], [L.follow.plan])
+  return out([block("verified", `${L.announcementsIntro(results.length)}\n${results.map((r) => `• ${L.announcementLine(r)}`).join("\n")}`, { refs: results.map((r) => r.ref) })], [], [L.follow.plan])
+}
+function composeLoadshedding({ L, suburb, data }) {
+  if (!data || !data.found) return out([block("unverified", L.loadsheddingNone(suburb))], [], [])
+  const lines = Object.entries(data.stages).slice(0, 4).map(([stage, days]) => L.loadsheddingStage(stage, Object.entries(days).map(([d, r]) => `${d} ${r.join(", ") || "none"}`).join("; ")))
+  return out([block("verified", [L.loadsheddingIntro(data.suburb), ...lines].join("\n"), { refs: [data.ref] }), block("unverified", L.loadsheddingNote)], [], [])
+}
+function composeTownships({ L, names }) {
+  if (!names.length) return out([block("unverified", L.townshipsNone)], [], [L.follow.cats])
+  return out([block("knowledge", `${L.townshipsIntro(names.length)}\n${names.join(", ")}`, { sources: ["XploreSoweto township guide (platform content, authored by XploreSoweto)"] })], [], [L.follow.cats, L.follow.plan])
+}
 const composeClarify = ({ L, text, followUps }) => ({ ...out([block("unverified", text)], [], followUps || []), clarification: true })
 const composeStatic = ({ L, key }) => out([block("verified", L[key])], [], key === "greeting" || key === "help" || key === "unknown" ? [L.follow.cats, L.follow.stay, L.follow.plan] : [])
 
-module.exports = { composeFind, composeAsk, composeCompare, composePlan, composeKnowledge, composeEvents, composeEmergency, composeTours, composeClarify, composeStatic, factLine, block }
+module.exports = { composeFind, composeAsk, composeCompare, composePlan, composeKnowledge, composeEvents, composeEmergency, composeTours, composeTransport, composeNews, composeAnnouncements, composeLoadshedding, composeTownships, composeClarify, composeStatic, factLine, block }
