@@ -21,7 +21,7 @@ const DEFAULTS = Object.freeze({
     enabled: false, // kill switch: OFF until the privacy notice, privacy policy and POPIA review are settled and a Super Admin turns it on
     resetEpoch: 0, // bump to clear a "blocked" breaker (billing/quota/key problem) after the operator has fixed it
     limits: { dailySuccessPerUser: 10, dailyAttemptsPerUser: 25, maxInputTokens: 3000, maxOutputTokens: 500, dailyGlobalTokens: 1500000, maxConcurrentPerInstance: 2, recoveryConcurrent: 2, timeoutMs: 8000 },
-    breaker: { failureThreshold: 5, windowSeconds: 60, cooldownSeconds: 60, recoverySeconds: 60, leaseSeconds: 30 },
+    breaker: { failureThreshold: 5, windowSeconds: 60, recoverySeconds: 60, leaseSeconds: 30 },
   },
 })
 
@@ -48,14 +48,14 @@ function validateConfig(c) {
   const N = c.luna || {}, NL = N.limits || {}, NB = N.breaker || {}
   const only = (o, keys, name) => need(isObj(o) && Object.keys(o).every((k) => keys.includes(k)), `${name}.unknown-key`) // no model/provider/key/price settings can be smuggled in
   only(N, ["enabled", "resetEpoch", "limits", "breaker"], "luna"); only(NL, ["dailySuccessPerUser", "dailyAttemptsPerUser", "maxInputTokens", "maxOutputTokens", "dailyGlobalTokens", "maxConcurrentPerInstance", "recoveryConcurrent", "timeoutMs"], "luna.limits")
-  only(NB, ["failureThreshold", "windowSeconds", "cooldownSeconds", "recoverySeconds", "leaseSeconds"], "luna.breaker")
+  only(NB, ["failureThreshold", "windowSeconds", "recoverySeconds", "leaseSeconds"], "luna.breaker")
   need(typeof N.enabled === "boolean", "luna.enabled"); need(int(N.resetEpoch, 0, 1000000), "luna.resetEpoch")
   need(int(NL.dailySuccessPerUser, 1, CEILINGS.dailySuccessPerUser), "luna.limits.dailySuccessPerUser"); need(int(NL.dailyAttemptsPerUser, 1, CEILINGS.dailyAttemptsPerUser), "luna.limits.dailyAttemptsPerUser")
   need(int(NL.maxInputTokens, 100, CEILINGS.maxInputTokens), "luna.limits.maxInputTokens"); need(int(NL.maxOutputTokens, 20, CEILINGS.maxOutputTokens), "luna.limits.maxOutputTokens")
   need(int(NL.dailyGlobalTokens, 10000, CEILINGS.dailyGlobalTokens), "luna.limits.dailyGlobalTokens"); need(int(NL.maxConcurrentPerInstance, 1, CEILINGS.maxConcurrentPerInstance), "luna.limits.maxConcurrentPerInstance")
   need(int(NL.recoveryConcurrent, 1, CEILINGS.recoveryConcurrent), "luna.limits.recoveryConcurrent"); need(int(NL.timeoutMs, 1000, CEILINGS.timeoutMs), "luna.limits.timeoutMs")
   need(Number.isInteger(NL.dailyAttemptsPerUser) && Number.isInteger(NL.dailySuccessPerUser) && NL.dailyAttemptsPerUser >= NL.dailySuccessPerUser, "luna.limits.attempts>=successes")
-  need(int(NB.failureThreshold, 1, 50), "luna.breaker.failureThreshold"); need(int(NB.windowSeconds, 5, 600), "luna.breaker.windowSeconds"); need(int(NB.cooldownSeconds, 5, 900), "luna.breaker.cooldownSeconds")
+  need(int(NB.failureThreshold, 1, 50), "luna.breaker.failureThreshold"); need(int(NB.windowSeconds, 5, 600), "luna.breaker.windowSeconds");
   need(int(NB.recoverySeconds, 5, 600), "luna.breaker.recoverySeconds"); need(int(NB.leaseSeconds, 10, 120), "luna.breaker.leaseSeconds")
   need(Number.isInteger(NL.timeoutMs) && Number.isInteger(NB.leaseSeconds) && NL.timeoutMs + LEASE_MARGIN_MS <= NB.leaseSeconds * 1000, "luna.breaker.lease>timeout")
   return p

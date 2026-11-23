@@ -45,30 +45,37 @@ Luna's allowance is separate from Malloya's 50/day and 5/min.
 ## Circuit breaker (`ai-usage/luna-breaker`, shared by all instances)
 | Trigger | Result | Cleared by |
 |---|---|---|
-| 5 counted failures in 60 s (5xx, timeout, network, unusable or incomplete response, 408/409/425, unexpected 4xx) | open, cooldown 60 s (doubles per failed probe, max 900 s) | cooldown, then ONE global probe, then recovery (2 concurrent calls for 60 s), then closed |
-| 429 rate limit | open, honours `Retry-After` (max 900 s) | same |
+| **3 consecutive counted failures** (5xx, timeout, network, unusable or incomplete response, 408/409/425, unexpected 4xx), OR **5 counted failures within 60 s** | open, cooldown step 0 = 60 s | cooldown, then ONE global probe, then recovery (2 concurrent calls for 60 s), then closed |
+| any provider response (even one our validator rejects) | resets the consecutive-failure count | automatic |
+| failed probe, or a failed call during recovery | open, next step of the ladder **60, 120, 300, 600, 900 s** (stays at 900 s) | as above; the ladder restarts at 60 s once the breaker has closed |
+| 429 rate limit | open at the current step, or `Retry-After` if longer (max 900 s) | same |
 | 429 billing/quota code, 401/403 | **blocked** | operator raises `luna.resetEpoch` |
 | **400 / 404 / 405 / 413 / 415 / 422** (our request, model name or endpoint is wrong) | **blocked** | operator raises `luna.resetEpoch` |
-| **8 rejected outputs among the last 10 validated responses** (our validator refused them) | open for **900 s** | cooldown, then probe/recovery as above |
-| **3 actual input-token reports above the input limit** (calibration no longer matches reality) | **blocked** (`blockedKind: input_overrun`) | operator raises `luna.resetEpoch`, after re-calibrating |
-Notes: a rejected output is the provider behaving, so it never counts as a provider failure; it only feeds the 8-of-10 rule. The rejection window and the overrun counter live in the breaker document and survive open/probe/recovery cycles;
-a reset (`resetEpoch`) clears them. A clean history writes nothing on the hot path. Breaker owners (probe lease, recovery slots) are `sha256(["owner", uid, requestId])`, never the raw requestId, so two users sending the same requestId occupy two slots.
+| **8 rejected outputs among the last 10 validated responses** | open for **900 s** | cooldown, then probe/recovery as above |
+| **3 actual input-token reports above the input limit** | **blocked** (`blockedKind: input_overrun`) | operator raises `luna.resetEpoch`, after re-calibrating |
+The cooldown ladder is fixed in code (`COOLDOWN_STEPS`); there is no `cooldownSeconds` setting any more. The rejection window, the consecutive count and the overrun counter live in the breaker document and survive state changes; a reset (`resetEpoch`) clears them.
+A clean history writes nothing on the hot path. Breaker owners (probe lease, recovery slots) are `sha256(["owner", uid, requestId])`, never the raw requestId.
+
+### Fail-closed on a lost breaker update (round 3)
+Before round 3, a failed breaker transaction was swallowed, so a lost "blocked" or "open" event let paid calls continue. Now:
+1. `report()` retries the transaction once.
+2. If it still fails, the event is written as its own **hold document** `ai-usage/luna_h_{owner}` (a plain set; it does not depend on the hot breaker document) and the instance also stops calling Luna for 60 s in memory (an extra layer, never the only one).
+3. **Every instance's `admit()` first lists the hold documents** (`lunaHold == true`, single-field equality: no composite index). While any exists nobody is admitted. `admit()` replays the held events into the breaker in one transaction, using the same reducer as `report()`, and deletes them. If the replay fails, `admit()` refuses again.
+   A hold from before an operator reset (older `resetEpoch`) is dropped; a hold that cannot be read is replayed as a failure that opens the breaker.
+4. Malloya's deterministic answer is returned in every one of these cases; users see no error.
+Cost: `admit()` now does one extra small query per Luna-eligible request (only after all the cheap gates have passed). Nothing is written on the hot path.
+**Residual case, stated plainly:** if the breaker transaction AND the hold write both fail, only this instance's in-memory hold remains (60 s). That means Firestore is broadly unavailable; in that situation the other instances cannot read the breaker or the hold query either, and `admit()` denies on any read failure. A partial outage that lets reads through but fails every write to two different documents is not covered by anything stronger than the 60 s local hold plus the per-user, global and per-instance limits.
 
 ## Consent race
 The consent record is read INSIDE the same transaction that stores the answer (`persistTurn` -> `luna.read(tx)`). If consent was withdrawn (or the notice version no longer matches) while the provider call was running,
 Malloya's original deterministic wording is stored and returned, the request record is settled as `consent-withdrawn`, the real token cost is still charged to the user's and global counters, and **no success is counted**.
 The chat response always returns what was actually stored. Tests: gated mocked provider, withdraw during the call, release, verify the stored text and counters.
 
-## Request-record retention (`luna_r_*`)
-**Rule:** the same requestId must never cause a second provider call. That is only true while the `luna_r_*` record exists, so its lifetime is the lifetime of the guarantee.
-**Is 3 days enough? No.** The record is the only guard once the stored reply is gone: stored replies live `retention.days` (default 90, maximum 365), and a user can delete a conversation or all conversations at any time, which removes the stored reply immediately.
-After that, a client that replays an old requestId reaches Luna again and only the record stops a second paid call. Three days left a gap of up to a year.
-**Change in this round (a proposal that STRENGTHENS the guarantee; nothing was weakened):** `REQUEST_RECORD_TTL_DAYS = 400` = the 365-day maximum reply retention plus 35 days of margin.
-**Honest limits:** (1) 400 days is bounded, not absolute: a client replaying a requestId more than 400 days later could trigger one more paid call; that call is still capped by the per-user daily limits (10 successes / 25 attempts) and the global budget.
-(2) No Firestore TTL policy is configured for `expireAt` on `ai-usage` yet. Until one is, records do not expire at all (stricter than 400 days). Deciding to create that policy is a separate approval (it is a Firebase change and is not made here).
-(3) Storage cost is one small document (about 200 bytes) per paid call, at most 25 per user per day.
-**Alternative if you want the guarantee to be absolute:** store no `expireAt` on `luna_r_*` records (never expire). The cost is unbounded growth of those small documents; it can be added by removing one line. Say so if you prefer it.
-The per-user and per-shard counters keep their 3-day expiry (they are day-scoped counters, not guards).
+## Request-record retention (`luna_r_*`): NO expiry (round 3)
+**Rule:** the same uid + requestId must never cause a second provider call, after any number of days. `luna_r_*` records therefore have **no `expireAt`** and nothing deletes them. The day-scoped counters (`luna_u_*`, `luna_g_*`) keep their 3-day expiry, separately. No Firestore TTL policy is created by this branch; if one is ever created for `expireAt` it will not touch `luna_r_*` because they carry no such field.
+(Round 2 had proposed 400 days; ChatGPT's review asked for the absolute rule, which this implements. Test: "RECORDS: ... never reaches the provider again, even years later".)
+**Storage trade-off:** one small document (about 200 bytes) per paid call, at most 25 per user per day, forever. Worst case per user is about 5 KB per day; for example 1,000 active Luna users at the daily cap would add roughly 1.8 GB over a year. Realistic use is far lower (10 successful answers per user per day maximum, and only template phrases are eligible). Firestore storage is billed per GB-month; there is no automatic clean-up. If growth ever matters it can be revisited as an explicit decision (for example an archive job), not silently.
+**Privacy trade-off:** the document id is a truncated SHA-256 of uid + requestId, and the body holds the uid, day, state, token counts and timestamps. It contains **no conversation text, no message, no template text and no reply**. It is a pseudonymous usage record kept to prevent duplicate paid calls and to account for spend. Because it never expires it also **outlives conversation deletion and, today, account deletion** (the backend has no account-deletion hook). Whether that retention is acceptable, and whether to add an erasure path for a deleted account (the id can be recomputed from uid + requestId only when the requestId is known, so erasure by uid would need a `uid` query on `luna_r_*`), is a privacy/POPIA decision for the owner and must be settled before activation. The AI notice makes no retention promise either way and was not changed.
 
 ## Token-budget control (why 3,000 is protected before the call)
 The set of possible payloads is **closed** (templates x languages, today: `greeting:en`, `thanks:en`). `calibration.json` holds each payload's hash and the API-reported input-token count.

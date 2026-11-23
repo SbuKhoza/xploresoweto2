@@ -329,3 +329,58 @@ test("CEILINGS e2e: a crafted over-ceiling config reaching tryRewrite is clamped
   await accept("a24"); seedUser("a24", 0, 24); assert.equal((await tryFor("a24", 1)).applied, true)
   assert.equal(calls.length - n0, 2) // only the two allowed requests reached the (mock) provider
 })
+
+// ================================================================== ROUND 3
+const breakerMod = require("../src/ai/luna/breaker")
+const txFailsForBreaker = (when) => {
+  const real = env.db.runTransaction.bind(env.db)
+  env.db.runTransaction = async (fn) => {
+    if (!when()) return real(fn)
+    let touches = false; const probe = { get: async (r) => { if (r.path === "ai-usage/luna-breaker") touches = true; return { exists: false, data: () => ({}) } }, set() {}, delete() {} }
+    try { await fn(probe) } catch (e) { /* only inspecting which documents the callback reads */ }
+    if (touches) throw Object.assign(new Error("UNAVAILABLE: simulated"), { code: 14 })
+    return real(fn)
+  }
+  return () => { env.db.runTransaction = real }
+}
+const holdDocs = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_h_"))
+test("FAIL CLOSED e2e: a lost AUTH failure update cannot let any instance keep spending; the user still gets Malloya's answer; repair replays the block", async () => {
+  await accept("u1"); await accept("u2"); await accept("u3"); let broken = true; const restore = txFailsForBreaker(() => broken)
+  install(async () => ({ ok: false, kind: "auth", ms: 2 })); assert.equal(textOf(await chatT("u1", "thanks")), THANKS) // instance A: provider fails, breaker update lost
+  assert.equal(calls.length, 1); assert.equal(holdDocs().length, 1); assert.equal(env.get("ai-usage/luna-breaker"), undefined)
+  install(async () => goodOut()); breakerMod.resetLocalForTests() // instance B has no in-memory state at all
+  for (const u of ["u2", "u3", "u2"]) assert.equal(textOf(await chatT(u, "thanks")), THANKS) // deterministic fallback, and NO further paid call
+  assert.equal(calls.length, 1)
+  broken = false; breakerMod.resetLocalForTests(); assert.equal(textOf(await chatT("u2", "thanks")), THANKS); assert.equal(calls.length, 1) // replayed: now a real block
+  assert.deepEqual([env.get("ai-usage/luna-breaker").state, env.get("ai-usage/luna-breaker").blockedKind], ["blocked", "auth"]); assert.equal(holdDocs().length, 0)
+  restore()
+})
+test("FAIL CLOSED e2e: with the breaker failing, a Luna SUCCESS is still delivered, and the lost update is replayed later without extra calls", async () => {
+  await accept("u1"); let broken = true; const restore = txFailsForBreaker(() => broken)
+  env.seed("ai-usage/luna-breaker", { ...breakerMod.closed(0), invalid: [1, 1, 1, 1, 1, 1, 1] }) // 7 rejected in the window; the 8th will be lost
+  install(async () => goodOut("bad words 123")); assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(calls.length, 1); assert.equal(holdDocs().length, 1)
+  install(async () => goodOut()); assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(calls.length, 1) // held: no new call
+  broken = false; breakerMod.resetLocalForTests(); await chatT("u1", "thanks"); assert.equal(env.get("ai-usage/luna-breaker").state, "open"); assert.equal(env.get("ai-usage/luna-breaker").cooldownSeconds, 900); assert.equal(calls.length, 1)
+  restore()
+})
+test("FAIL CLOSED e2e: many instances at once while the breaker is failing: no paid call is made after the first lost update", async () => {
+  const users = ["m1", "m2", "m3", "m4", "m5", "m6"]; for (const u of users) await accept(u); const restore = txFailsForBreaker(() => true)
+  install(async () => ({ ok: false, kind: "bad_request", ms: 2 })); await chatT("m1", "thanks"); assert.equal(calls.length, 1)
+  install(async () => goodOut()); const out = []; for (const u of users.slice(1)) { breakerMod.resetLocalForTests(); out.push(textOf(await chatT(u, "thanks"))) }
+  assert.ok(out.every((t) => t === THANKS)); assert.equal(calls.length, 1); restore()
+})
+test("RECORDS: luna_r_* has no expireAt in any state, and the same uid+requestId never reaches the provider again, even years later", async () => {
+  await accept("u1"); install(async () => goodOut()); const idOk = "req-keep-ok-0001", idFail = "req-keep-fail-0002"
+  assert.equal(textOf(await chat("u1", "thanks", { requestId: idOk })), REWRITE)
+  install(async () => ({ ok: false, kind: "timeout", ms: 5 })); env.time.now += 13000; await chatT("u1", "thanks", { requestId: idFail }) // a second call that failed
+  const recs = env.list("ai-usage").filter((d) => d.id.startsWith("luna_r_")); assert.equal(recs.length, 2)
+  for (const x of recs) { assert.equal("expireAt" in x, false, x.state); assert.equal(x.state, "settled") }
+  assert.ok(env.list("ai-usage").filter((d) => d.id.startsWith("luna_u_") || d.id.startsWith("luna_g_")).every((d) => d.expireAt)) // the daily counters still expire
+  const before = calls.length, blocks = [{ type: "verified", text: THANKS }], cfg = cfgMod.merge(cfgMod.DEFAULTS, { luna: { enabled: true } })
+  for (const years of [1, 5]) {
+    env.time.now += years * 365 * 86400000; install(async () => goodOut()); breakerMod.resetLocalForTests()
+    for (const id of [idOk, idFail]) { const again = await luna.tryRewrite({ uid: "u1", requestId: id, cfg, intent: "thanks", blocks, language: "en", noticeVersion: 1 }); assert.equal(again.applied, false, id) }
+  }
+  assert.equal(calls.length, before) // never a second paid call for either requestId
+  assert.equal(env.list("ai-usage").filter((d) => d.id.startsWith("luna_r_")).length, 2) // and nothing deleted them
+})

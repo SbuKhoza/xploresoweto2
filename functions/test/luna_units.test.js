@@ -146,14 +146,30 @@ const bcfg = (o) => cfgWith(o)
 const state = () => env.get("ai-usage/luna-breaker")
 const tick = (s) => { env.time.now += s * 1000 }
 const failN = async (n, kind = "timeout", cfg = bcfg()) => { for (let i = 0; i < n; i++) await breaker.report({ owner: `r${i}`, mode: "normal", ok: false, kind, cfg }) }
-test("breaker: closed by default; five counted failures inside the window open it; successes never write", async () => {
+// A failure followed by a provider answer: the answer resets the consecutive run, so only the 5-in-60-seconds trigger can fire.
+const failSpread = async (n, cfg = bcfg()) => { for (let i = 0; i < n; i++) { await breaker.report({ owner: `s${i}`, mode: "normal", ok: false, kind: "timeout", cfg }); await breaker.report({ owner: `k${i}`, mode: "normal", ok: true, cfg }) } }
+test("breaker: closed by default; successes never write", async () => {
   const cfg = bcfg(); assert.deepEqual(await breaker.admit({ owner: "a", cfg }), { allowed: true, mode: "normal" })
   await breaker.report({ owner: "a", mode: "normal", ok: true, cfg }); assert.equal(state(), undefined)
-  await failN(4); assert.equal(state().state, "closed"); await failN(1); assert.equal(state().state, "open")
+})
+test("breaker trigger A: 3 CONSECUTIVE counted failures open it (2 do not)", async () => {
+  const cfg = bcfg(); await failN(2); assert.equal(state().state, "closed"); assert.equal(state().consecutive, 2); await failN(1); assert.equal(state().state, "open"); assert.equal(state().cooldownSeconds, 60)
   assert.deepEqual(await breaker.admit({ owner: "b", cfg }), { allowed: false, reason: "open" })
 })
-test("breaker: failures outside the window do not accumulate", async () => {
-  const cfg = bcfg(); await failN(4); tick(61); await failN(4); assert.equal(state().state, "closed"); await failN(1); assert.equal(state().state, "open")
+test("breaker trigger A: a successful provider response resets the consecutive run", async () => {
+  const cfg = bcfg(); await failN(2); await breaker.report({ owner: "ok", mode: "normal", ok: true, cfg }); assert.equal(state().consecutive, 0); await failN(2); assert.equal(state().state, "closed"); await failN(1); assert.equal(state().state, "open")
+  // a rejected-but-delivered response also proves the provider is answering
+  env = F.setupWorld(); await failN(2); await breaker.report({ owner: "rj", mode: "normal", ok: true, rejected: true, cfg }); assert.equal(state().consecutive, 0)
+})
+test("breaker trigger B: 5 counted failures within 60 s open it even when answers are interleaved (no 3 in a row)", async () => {
+  const cfg = bcfg(); await failSpread(4, cfg); assert.equal(state().state, "closed"); assert.equal(state().failures.length, 4); await failSpread(1, cfg); assert.equal(state().state, "open"); assert.equal(state().cooldownSeconds, 60)
+})
+test("breaker trigger B: failures outside the 60 s window do not accumulate", async () => {
+  const cfg = bcfg(); await failSpread(4, cfg); tick(61); await failSpread(4, cfg); assert.equal(state().state, "closed"); await failSpread(1, cfg); assert.equal(state().state, "open")
+})
+test("breaker triggers: rate-limit still opens at once; blocked kinds still block at once; neither needs 3", async () => {
+  const cfg = bcfg(); await breaker.report({ owner: "x", mode: "normal", ok: false, kind: "rate_limit", retryAfterSeconds: 200, cfg }); assert.deepEqual([state().state, state().cooldownSeconds], ["open", 200])
+  env = F.setupWorld(); await breaker.report({ owner: "y", mode: "normal", ok: false, kind: "billing", cfg }); assert.equal(state().state, "blocked")
 })
 test("breaker: after the cooldown exactly ONE probe is allowed globally, even from many instances at once", async () => {
   const cfg = bcfg(); await failN(5); tick(61)
@@ -352,10 +368,103 @@ test("breaker: a late success report cannot un-block a blocked breaker or change
   const cfg = bcfg(); await breaker.report({ owner: "a", mode: "normal", ok: false, kind: "auth", cfg }); const before = JSON.stringify(state())
   await okReport(cfg, { rejected: true }); await okReport(cfg, { overrun: true }); assert.equal(JSON.stringify(state()), before)
 })
-test("retention: request records live 400 days (longer than the longest replay window), user/shard counters stay short-lived", async () => {
-  assert.equal(K.REQUEST_RECORD_TTL_DAYS, 400)
+test("retention: request records carry NO expireAt (never expire); the day-scoped counters still expire after 3 days", async () => {
+  assert.equal(K.REQUEST_RECORD_TTL_DAYS, undefined) // the constant no longer exists
   const t = await ticketOf("ttl-user", "req-ttl00001", cfgWith(), 900); assert.equal(t.ok, true)
   const rec = env.list("ai-usage").find((d) => d.id.startsWith("luna_r_")); const days = (ts) => Math.round((ts.toMillis() - env.time.now) / 86400000)
-  assert.equal(days(rec.expireAt), 400); assert.equal(days(env.list("ai-usage").find((d) => d.id.startsWith("luna_u_")).expireAt), 3)
-  assert.ok(400 > cfgMod.DEFAULTS.retention.days && 400 > 365) // outlives stored replies (max 365 days) and the 90-day default
+  assert.equal(rec.expireAt, undefined); assert.equal(days(env.list("ai-usage").find((d) => d.id.startsWith("luna_u_")).expireAt), 3)
+})
+
+// ================================================================== ROUND 3: cooldown ladder, fail-closed breaker, record retention
+const breakerTxFails = (when) => { // make every transaction that touches the breaker document throw while `when()` is true; returns a restore function
+  const real = env.db.runTransaction.bind(env.db)
+  env.db.runTransaction = async (fn) => {
+    if (!when()) return real(fn)
+    let touches = false; const probe = { get: async (r) => { if (r.path === "ai-usage/luna-breaker") touches = true; return { exists: false, data: () => ({}) } }, set() {}, delete() {} }
+    try { await fn(probe) } catch (e) { /* ignore: only used to see which documents the callback touches */ }
+    if (touches) throw Object.assign(new Error("UNAVAILABLE: simulated breaker transaction failure"), { code: 14 })
+    return real(fn)
+  }
+  return () => { env.db.runTransaction = real }
+}
+const holds = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_h_"))
+test("cooldown ladder: 60, 120, 300, 600, 900 s after repeated failed probes, then it stays at 900", async () => {
+  assert.deepEqual([...K.COOLDOWN_STEPS], [60, 120, 300, 600, 900])
+  const cfg = bcfg(); await failN(3); const seen = [state().cooldownSeconds]
+  for (let i = 0; i < 6; i++) {
+    tick(state().cooldownSeconds + 1); const g = await breaker.admit({ owner: `p${i}`, cfg }); assert.equal(g.mode, "probe")
+    await breaker.report({ owner: `p${i}`, mode: "probe", ok: false, kind: "timeout", cfg }); assert.equal(state().state, "open"); seen.push(state().cooldownSeconds)
+  }
+  assert.deepEqual(seen, [60, 120, 300, 600, 900, 900, 900])
+})
+test("cooldown ladder: not simple doubling (120 -> 300, not 240), and every step is honoured by admit()", async () => {
+  const cfg = bcfg(); await failN(3); tick(61); await breaker.admit({ owner: "a", cfg }); await breaker.report({ owner: "a", mode: "probe", ok: false, kind: "timeout", cfg }); assert.equal(state().cooldownSeconds, 120)
+  tick(119); assert.equal((await breaker.admit({ owner: "b", cfg })).allowed, false); tick(2); assert.equal((await breaker.admit({ owner: "c", cfg })).mode, "probe")
+  await breaker.report({ owner: "c", mode: "probe", ok: false, kind: "timeout", cfg }); assert.equal(state().cooldownSeconds, 300); assert.equal(state().cooldownStep, 2)
+})
+test("cooldown ladder: Retry-After longer than the step wins (capped at 900); a failed recovery call also climbs a step; a clean recovery resets the ladder", async () => {
+  const cfg = bcfg(); await failN(3); tick(61); await breaker.admit({ owner: "a", cfg }); await breaker.report({ owner: "a", mode: "probe", ok: false, kind: "rate_limit", retryAfterSeconds: 5000, cfg }); assert.equal(state().cooldownSeconds, 900)
+  env = F.setupWorld(); await failN(3); tick(61); await breaker.admit({ owner: "a", cfg }); await breaker.report({ owner: "a", mode: "probe", ok: true, cfg }); assert.deepEqual([state().state, state().cooldownStep], ["recovery", 0])
+  await breaker.admit({ owner: "r", cfg }); await breaker.report({ owner: "r", mode: "recovery", ok: false, kind: "server", cfg }); assert.deepEqual([state().state, state().cooldownSeconds], ["open", 120])
+  tick(121); await breaker.admit({ owner: "a2", cfg }); await breaker.report({ owner: "a2", mode: "probe", ok: true, cfg }); tick(61)
+  assert.deepEqual(await breaker.admit({ owner: "z", cfg }), { allowed: true, mode: "normal" }); assert.equal(state().state, "closed"); assert.equal(state().cooldownStep, 0)
+  await failN(3); assert.equal(state().cooldownSeconds, 60) // a new incident starts at the bottom of the ladder again
+})
+test("cooldown ladder: the breaker config no longer has a cooldownSeconds knob (the ladder is fixed)", () => {
+  assert.equal("cooldownSeconds" in cfgMod.DEFAULTS.luna.breaker, false)
+  assert.ok(cfgMod.validateConfig(cfgMod.merge(cfgMod.DEFAULTS, { luna: { breaker: { cooldownSeconds: 10 } } })).length > 0)
+})
+
+test("FAIL CLOSED: a lost breaker update leaves a durable hold; every instance is refused until it has been replayed; the replay applies the lost event", async () => {
+  const cfg = bcfg(); await failN(2); const restore = breakerTxFails(() => true)
+  await breaker.report({ owner: "lost", mode: "normal", ok: false, kind: "timeout", cfg }) // the 3rd consecutive failure, whose update is lost
+  restore(); assert.equal(holds().length, 1); assert.equal(state().state, "closed") // the breaker document itself never got the event
+  breaker.resetLocalForTests() // "another instance": no in-memory flag at all
+  const g = await breaker.admit({ owner: "other", cfg })
+  assert.equal(g.allowed, false); assert.equal(g.reason, "open") // replay opened it (3 consecutive), so the lost failure was not lost
+  assert.equal(holds().length, 0); assert.equal(state().state, "open")
+})
+test("FAIL CLOSED: while the breaker is still failing, admit() keeps refusing on EVERY instance (hold present, replay fails)", async () => {
+  const cfg = bcfg(); let broken = true; const restore = breakerTxFails(() => broken)
+  await breaker.report({ owner: "lost", mode: "normal", ok: false, kind: "auth", cfg }); assert.equal(holds().length, 1)
+  for (let i = 0; i < 5; i++) { breaker.resetLocalForTests(); assert.deepEqual(await breaker.admit({ owner: `i${i}`, cfg }), { allowed: false, reason: "breaker-update-pending" }) }
+  broken = false; breaker.resetLocalForTests()
+  assert.deepEqual(await breaker.admit({ owner: "later", cfg }), { allowed: false, reason: "blocked" }) // the lost HARD block is now in force
+  assert.equal(state().blockedKind, "auth"); assert.equal(holds().length, 0); restore()
+})
+test("FAIL CLOSED: a lost hard-block or billing event can never be forgotten; a lost SUCCESS in probe mode does not wedge anything", async () => {
+  const cfg = bcfg(); await failN(3); tick(61); await breaker.admit({ owner: "pr", cfg }); let broken = true; const restore = breakerTxFails(() => broken)
+  await breaker.report({ owner: "pr", mode: "probe", ok: true, cfg }); assert.equal(holds().length, 1); assert.equal(state().state, "half_open")
+  broken = false; breaker.resetLocalForTests(); assert.equal((await breaker.admit({ owner: "n", cfg })).allowed, true) // replay moved it to recovery; calls admitted in recovery mode
+  assert.equal(state().state, "recovery"); restore()
+})
+test("FAIL CLOSED: the local hold protects this instance even when the hold document cannot be written either", async () => {
+  const cfg = bcfg()
+  const restoreTx = breakerTxFails(() => true)
+  const dp = Object.getPrototypeOf(env.db.collection("ai-usage").doc("x")); const orig = dp.set; dp.set = async function (d) { if (this.path.includes("luna_h_")) throw new Error("hold write failed"); return orig.call(this, d) }
+  try {
+    await breaker.report({ owner: "lost", mode: "normal", ok: false, kind: "billing", cfg }); assert.equal(holds().length, 0)
+    restoreTx(); assert.deepEqual(await breaker.admit({ owner: "same", cfg }), { allowed: false, reason: "breaker-update-pending" }) // in-memory layer only
+    tick(61); assert.equal((await breaker.admit({ owner: "same", cfg })).allowed, true) // expires: documented residual case
+  } finally { dp.set = orig }
+})
+test("FAIL CLOSED: a hold from before an operator reset is dropped and deleted", async () => {
+  env.seed("ai-usage/luna_h_old", { lunaHold: true, ev: { owner: "o", mode: "normal", ok: false, kind: "auth" }, epoch: 0, at: env.time.now })
+  assert.deepEqual(await breaker.admit({ owner: "a", cfg: bcfg({ resetEpoch: 1 }) }), { allowed: true, mode: "normal" }); assert.equal(holds().length, 0)
+})
+test("FAIL CLOSED: a corrupt hold document is treated as a failure that opens the breaker (never ignored)", async () => {
+  env.seed("ai-usage/luna_h_bad", { lunaHold: true, garbage: true, epoch: 0, at: env.time.now })
+  const g = await breaker.admit({ owner: "a", cfg: bcfg() }); assert.deepEqual([g.allowed, g.reason], [false, "open"]); assert.equal(holds().length, 0)
+})
+test("FAIL CLOSED: an unreadable hold query denies (Luna off)", async () => {
+  const realCol = env.db.collection.bind(env.db); env.db.collection = (n) => { const c = realCol(n); c.where = () => ({ limit: () => ({ get: async () => { throw new Error("query failed") } }) }); return c }
+  try { assert.deepEqual(await breaker.admit({ owner: "b", cfg: bcfg() }), { allowed: false, reason: "breaker-unreadable" }) } finally { env.db.collection = realCol }
+})
+test("FAIL CLOSED: report() retries once before it gives up (one transient failure leaves no hold)", async () => {
+  const cfg = bcfg(); let n = 0; const restore = breakerTxFails(() => n++ < 1)
+  await breaker.report({ owner: "t", mode: "normal", ok: false, kind: "timeout", cfg }); restore(); assert.equal(holds().length, 0); assert.equal(state().consecutive, 1)
+})
+test("FAIL CLOSED: report() never throws, whatever fails", async () => {
+  const cfg = bcfg(); const real = env.db.runTransaction; env.db.runTransaction = async () => { throw new Error("boom") }; const rc = env.db.collection.bind(env.db); env.db.collection = () => { throw new Error("no db") }
+  await breaker.report({ owner: "t", mode: "normal", ok: false, kind: "timeout", cfg }); env.db.runTransaction = real; env.db.collection = rc
 })

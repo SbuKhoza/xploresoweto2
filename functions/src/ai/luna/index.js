@@ -15,7 +15,7 @@ const { NOTICE_VERSION, effectiveCfg } = require("./constants")
 const manifest = require("./calibration.json")
 
 let deps = { callResponses: provider.callResponses, hasKey: provider.hasKey, manifest }
-const setDepsForTests = (d) => { deps = { callResponses: provider.callResponses, hasKey: provider.hasKey, manifest, ...d } }
+const setDepsForTests = (d) => { breaker.resetLocalForTests(); deps = { callResponses: provider.callResponses, hasKey: provider.hasKey, manifest, ...d } }
 let inflight = 0 // per-INSTANCE concurrency. Global ceiling = this limit x the deployed maxInstances of aiChat (verify at deploy time).
 const inflightNow = () => inflight
 

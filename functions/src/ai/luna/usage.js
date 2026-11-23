@@ -12,7 +12,7 @@ const clock = require("../../lib/clock")
 const { sha256hex } = require("../../lib/crypto")
 const { AI_COL } = require("../constants")
 const consent = require("../consent")
-const { GLOBAL_SHARDS, REQUEST_RECORD_TTL_DAYS, KINDS } = require("./constants")
+const { GLOBAL_SHARDS, KINDS } = require("./constants")
 
 const col = () => fb.db().collection(AI_COL.usage)
 const userRef = (uid, day) => col().doc(`luna_u_${uid}_${day}`)
@@ -43,7 +43,7 @@ async function begin({ uid, requestId, cfg, reserveTokens }) {
       if (u.attempts >= L.dailyAttemptsPerUser) return { ok: false, reason: "daily-attempts" }
       const g = gs.exists ? { ...newShard(day, shard), ...gs.data() } : newShard(day, shard)
       if (g.tokens + reserveTokens > perShard) return { ok: false, reason: "global-budget", full: true }
-      tx.set(requestRef(uid, requestId), { uid, day, shard, state: "called", reserved: reserveTokens, calledAt: stamp(), expireAt: ttl(REQUEST_RECORD_TTL_DAYS) })
+      tx.set(requestRef(uid, requestId), { uid, day, shard, state: "called", reserved: reserveTokens, calledAt: stamp() }) // deliberately NO expireAt (see constants.js)
       tx.set(userRef(uid, day), { ...u, attempts: u.attempts + 1, updatedAt: stamp(), expireAt: ttl(3) })
       tx.set(shardRef(day, shard), { ...g, tokens: g.tokens + reserveTokens, calls: g.calls + 1, updatedAt: stamp(), expireAt: ttl(3) })
       return { ok: true, day, shard, reserved: reserveTokens }

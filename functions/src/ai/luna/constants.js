@@ -6,10 +6,8 @@ const MODEL = "gpt-6-luna" // fixed in code: not configurable at runtime
 const ENDPOINT = "https://api.openai.com/v1/responses"
 const NOTICE_VERSION = 1 // bump when the AI Service Notice wording changes: consent then has to be given again
 const GLOBAL_SHARDS = 8 // global token budget is spread over this many documents so no single document becomes a hot spot
-// How long the durable per-request record ("this requestId has already been sent to the provider") lives before Firestore may delete it.
-// The rule is: the same requestId must NEVER cause a second provider call. That is only true while the record exists, so the TTL must outlast
-// the longest time a stale request can still be replayed. It is 400 days (see docs/stage2/LUNA_PHASE1.md, "Request-record retention").
-const REQUEST_RECORD_TTL_DAYS = 400
+// luna_r_* request records ("this uid+requestId was already sent to the provider") have NO expireAt and are never deleted by any policy:
+// the same requestId must never cause a second paid call, however many days later. Only the day-scoped counters (luna_u_*, luna_g_*) expire.
 const BYTE_CEILING = 6000 // SECONDARY guard on the request body size. It is NOT proof of a token limit (see calibration.json)
 
 // Failure kinds the provider layer reports. Each is classified for the breaker and for budget accounting.
@@ -37,6 +35,12 @@ const INVALID_OUTPUT = Object.freeze({ window: 10, threshold: 8, cooldownSeconds
 // Actual input-token reports above the configured input limit mean the calibration no longer matches reality: that many hard-block Luna until an operator acts.
 const INPUT_OVERRUN_LIMIT = 3
 const MAX_COOLDOWN_SECONDS = 900
+// Agreed cooldown ladder after repeated failed recovery probes (not simple doubling); it stays at the last step until the breaker closes again.
+const COOLDOWN_STEPS = Object.freeze([60, 120, 300, 600, 900])
+// Counted failures open the breaker on EITHER trigger: this many in a row (any provider response resets the run), or luna.breaker.failureThreshold (5) inside windowSeconds (60).
+const CONSECUTIVE_FAILURES = 3
+// If a breaker update cannot be committed, Luna is held off on this instance for this long even when the durable hold could not be written either.
+const LOCAL_HOLD_MS = 60000
 const LEASE_MARGIN_MS = 2000 // a probe lease / recovery slot must outlive the provider timeout by at least this much
 
 // Returns cfg with every Luna limit clamped to its ceiling and the breaker lease lengthened so it always outlives the provider timeout.
@@ -47,4 +51,4 @@ function effectiveCfg(cfg) {
   return { ...cfg, luna: { ...L, limits: { ...lim, ...out }, breaker: { ...B, leaseSeconds: Math.max(Number.isFinite(B.leaseSeconds) ? B.leaseSeconds : 0, minLease) } } }
 }
 
-module.exports = { MODEL, ENDPOINT, NOTICE_VERSION, GLOBAL_SHARDS, REQUEST_RECORD_TTL_DAYS, BYTE_CEILING, KINDS, BILLING_CODES, CEILINGS, INVALID_OUTPUT, INPUT_OVERRUN_LIMIT, MAX_COOLDOWN_SECONDS, LEASE_MARGIN_MS, effectiveCfg }
+module.exports = { MODEL, ENDPOINT, NOTICE_VERSION, GLOBAL_SHARDS, BYTE_CEILING, KINDS, BILLING_CODES, CEILINGS, INVALID_OUTPUT, INPUT_OVERRUN_LIMIT, MAX_COOLDOWN_SECONDS, COOLDOWN_STEPS, CONSECUTIVE_FAILURES, LOCAL_HOLD_MS, LEASE_MARGIN_MS, effectiveCfg }
