@@ -655,3 +655,37 @@ test("GUARD: a denying guard makes begin() commit NOTHING (no record, no attempt
   assert.deepEqual([r.ok, r.reason], [false, "breaker-changed"]); assert.equal(env.list("ai-usage").length, 0)
   const ok = await usage.begin({ uid: "g1", requestId: "req-g1-0001", cfg: ucfg(), reserveTokens: 600, guard: async () => ({ ok: true }) }); assert.equal(ok.ok, true); assert.equal(recs().length, 1) // the same requestId is still usable: nothing was burnt
 })
+
+// ================================================================== ROUND 6: late successes and consecutive failures; reset epoch at the commit point
+test("LATE SUCCESS: two counted failures, then a success from a request that STARTED BEFORE them, then a third failure -> the breaker opens (the older success erased nothing)", async () => {
+  const t0 = env.time.now; tick(1)
+  await outc("f1", "normal", false, "timeout"); tick(1); await outc("f2", "normal", false, "timeout"); assert.equal(state().consecutive, 2)
+  await outc("old", "normal", true, undefined, { startedAt: t0 }); assert.equal(state().consecutive, 2); assert.equal(state().state, "closed") // the older answer is not evidence about NOW
+  await outc("f3", "normal", false, "timeout"); assert.equal(state().state, "open")
+})
+test("LATE SUCCESS: a success from a request that started AFTER the failures still ends the consecutive run (legitimate reset preserved); so does one with no start time", async () => {
+  await outc("f1", "normal", false, "timeout"); tick(1); await outc("f2", "normal", false, "timeout"); tick(1)
+  await outc("new", "normal", true, undefined, { startedAt: env.time.now }); assert.equal(state().consecutive, 0)
+  await outc("f3", "normal", false, "timeout"); assert.equal(state().state, "closed") // 1 consecutive, 3 in the window but under the 5 threshold
+  await outc("f4", "normal", false, "timeout"); await outc("legacy", "normal", true); assert.equal(state().consecutive, 0)
+})
+test("LATE SUCCESS: an older success still does its bookkeeping: rejected outputs enter the ring and input overruns count, while the failure run is untouched", async () => {
+  const t0 = env.time.now; tick(1); await outc("f1", "normal", false, "timeout"); tick(1); await outc("f2", "normal", false, "timeout")
+  await outc("o1", "normal", true, undefined, { startedAt: t0, rejected: true, overrun: true })
+  assert.deepEqual([state().consecutive, state().overruns, state().invalid.length], [2, 1, 1])
+  await outc("o2", "normal", true, undefined, { startedAt: t0, overrun: true }); await outc("o3", "normal", true, undefined, { startedAt: t0, overrun: true }); assert.equal(state().state, "blocked"); assert.equal(state().blockedKind, "input_overrun") // thresholds unchanged
+})
+test("LATE SUCCESS: 8 rejected among the last 10 still opens the breaker for 900 s when the answers are older than the failures", async () => {
+  const t0 = env.time.now; tick(1); await outc("f1", "normal", false, "timeout"); tick(1)
+  for (let i = 0; i < 8; i++) await outc(`r${i}`, "normal", true, undefined, { startedAt: t0, rejected: true })
+  assert.equal(state().state, "open"); assert.equal(state().cooldownSeconds, 900)
+})
+test("EPOCH GUARD: guardInTx refuses a configuration whose resetEpoch is older than the breaker document's (normal, probe and recovery), and accepts an equal or newer one", async () => {
+  const g = (owner, mode, epoch) => env.db.runTransaction((tx) => breaker.guardInTx(tx, { owner, mode, cfg: cfgWith({ resetEpoch: epoch }) }))
+  env.seed("ai-usage/luna-breaker", { ...breaker.closed(1) })
+  assert.deepEqual(await g("o", "normal", 0), { ok: false, reason: "config-stale" }); assert.deepEqual(await g("o", "normal", 1), { ok: true }); assert.deepEqual(await g("o", "normal", 2), { ok: true })
+  env.seed("ai-usage/luna-breaker", { ...breaker.closed(1), state: "half_open", lease: { owner: "o", expiresAt: env.time.now + 30000 } })
+  assert.equal((await g("o", "probe", 0)).reason, "config-stale"); assert.equal((await g("o", "probe", 1)).ok, true)
+  env.seed("ai-usage/luna-breaker", { ...breaker.closed(1), state: "recovery", recoveryUntil: env.time.now + 600000, inflight: { o: env.time.now + 30000 } })
+  assert.equal((await g("o", "recovery", 0)).reason, "config-stale"); assert.equal((await g("o", "recovery", 1)).ok, true)
+})

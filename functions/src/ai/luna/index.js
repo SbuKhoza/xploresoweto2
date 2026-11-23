@@ -10,6 +10,7 @@ const provider = require("./provider")
 const prompt = require("./prompt")
 const { validateRewrite } = require("./validate")
 const usage = require("./usage")
+const clock = require("../../lib/clock")
 const breaker = require("./breaker")
 const { NOTICE_VERSION, effectiveCfg } = require("./constants")
 const manifest = require("./calibration.json")
@@ -48,14 +49,14 @@ async function tryRewrite({ uid, requestId, cfg, intent, blocks, language, notic
     inflight += 1
     const owner = breaker.ownerKey(uid, requestId)
     try {
-      const gate = await breaker.admit({ owner, cfg })
+      const gate = await breaker.admit({ owner, cfg }); const startedAt = clock.now().getTime() // the call is "older" than any failure recorded after this moment
       if (!gate.allowed) return skip(`breaker:${gate.reason}`)
       const reserve = cal.inputTokens + L.limits.maxOutputTokens // the most this call can possibly cost
       const ticket = await usage.begin({ uid, requestId, cfg, reserveTokens: reserve, guard: (tx) => breaker.guardInTx(tx, { owner, mode: gate.mode, cfg }) }) // durable "called" commit BEFORE the network request
       if (!ticket.ok) { await breaker.release({ owner, mode: gate.mode }); return skip(`usage:${ticket.reason}`) }
       const res = await deps.callResponses({ payload, maxOutputTokens: L.limits.maxOutputTokens, reasoningEffort: cal.reasoningEffort, timeoutMs: L.limits.timeoutMs })
       if (!res.ok) {
-        const rep = await breaker.report({ owner, mode: gate.mode, ok: false, kind: res.kind, retryAfterSeconds: res.retryAfterSeconds, cfg })
+        const rep = await breaker.report({ owner, mode: gate.mode, ok: false, kind: res.kind, retryAfterSeconds: res.retryAfterSeconds, startedAt, cfg })
         await usage.settleFailure({ uid, requestId, ticket, kind: res.kind, usage: res.usage || null, pending: rep.reported ? null : rep.event }).catch(() => {})
         log.warn("ai.luna.failed", { uidHash: log.uidHash(uid), kind: res.kind, latencyMs: res.ms })
         return skip(`provider:${res.kind}`)
@@ -63,7 +64,7 @@ async function tryRewrite({ uid, requestId, cfg, intent, blocks, language, notic
       const v = validateRewrite(tpl, res.text)
       const overrun = !!(res.usage && res.usage.input > L.limits.maxInputTokens)
       // The provider behaved (it answered), so this is a success report; rejected/overrun feed the breaker's own bookkeeping.
-      const rep = await breaker.report({ owner, mode: gate.mode, ok: true, rejected: !v.ok, overrun, cfg })
+      const rep = await breaker.report({ owner, mode: gate.mode, ok: true, rejected: !v.ok, overrun, startedAt, cfg })
       const pending = rep.reported ? null : rep.event // breaker update lost: the outcome rides on the request record (replayed by every instance's admit())
       if (overrun) log.error("ai.luna.calibration_drift", { uidHash: log.uidHash(uid), kind: "input-over-limit" })
       if (!v.ok) {

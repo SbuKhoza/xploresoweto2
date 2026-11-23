@@ -25,7 +25,7 @@ const { sha256hex } = require("../../lib/crypto")
 const { KINDS, INVALID_OUTPUT, INPUT_OVERRUN_LIMIT, MAX_COOLDOWN_SECONDS, COOLDOWN_STEPS, CONSECUTIVE_FAILURES, LOCAL_HOLD_MS, UNRESOLVED } = require("./constants")
 
 const ref = () => fb.db().collection(AI_COL.usage).doc("luna-breaker")
-const closed = (epoch = 0) => ({ state: "closed", failures: [], consecutive: 0, invalid: [], overruns: 0, cooldownStep: 0, cooldownSeconds: 0, cooldownUntil: 0, lease: null, recoveryUntil: 0, inflight: {}, blockedKind: null, resetEpoch: epoch })
+const closed = (epoch = 0) => ({ state: "closed", failures: [], consecutive: 0, lastFailureAt: 0, invalid: [], overruns: 0, cooldownStep: 0, cooldownSeconds: 0, cooldownUntil: 0, lease: null, recoveryUntil: 0, inflight: {}, blockedKind: null, resetEpoch: epoch })
 const stamp = () => ({ updatedAt: fb.FieldValue().serverTimestamp() })
 const MAX_COOLDOWN = MAX_COOLDOWN_SECONDS
 // The breaker owner (probe lease / recovery slot holder) is derived from BOTH the uid and the requestId. requestId alone is client-chosen:
@@ -126,7 +126,7 @@ function reduce(b, ev, cfg, now) {
       if (rule === "open") next = openStep(0, retryAfterSeconds)
       else {
         const failures = [...(b.failures || []).filter((t) => now - t < B.windowSeconds * 1000), now], consecutive = (b.consecutive || 0) + 1
-        next = consecutive >= CONSECUTIVE_FAILURES || failures.length >= B.failureThreshold ? openStep(0) : { ...b, failures, consecutive }
+        next = consecutive >= CONSECUTIVE_FAILURES || failures.length >= B.failureThreshold ? openStep(0) : { ...b, failures, consecutive, lastFailureAt: now }
       }
     }
   }
@@ -136,7 +136,11 @@ function reduce(b, ev, cfg, now) {
   let invalid = [...(b.invalid || []), rejected ? 1 : 0].slice(-W)
   const overruns = (b.overruns || 0) + (overrun ? 1 : 0)
   if (!invalid.includes(1)) invalid = [] // nothing rejected in the window: keep the document small
-  let cur = { ...(next || b), invalid, overruns, consecutive: 0 } // any answer from the provider ends a run of consecutive failures
+  // A provider answer ends the run of consecutive failures, unless the request STARTED BEFORE the latest counted failure: its answer is older than that evidence and must not erase it.
+  // (No start time on the event = treat as current. Rejected outputs and overruns are still booked below either way.)
+  const older = Number.isFinite(ev.startedAt) && ev.startedAt < (b.lastFailureAt || 0)
+  const base = next || b
+  let cur = { ...base, invalid, overruns, consecutive: older ? base.consecutive || 0 : 0 }
   if (overruns >= INPUT_OVERRUN_LIMIT) cur = block("input_overrun")
   else if (cur.state !== "open" && cur.state !== "blocked" && invalid.reduce((a, x) => a + x, 0) >= INVALID_OUTPUT.threshold) {
     cur = { ...cur, state: "open", failures: [], invalid: [], lease: null, inflight: {}, cooldownStep: COOLDOWN_STEPS.length - 1, cooldownSeconds: INVALID_OUTPUT.cooldownSeconds, cooldownUntil: now + INVALID_OUTPUT.cooldownSeconds * 1000, blockedKind: null }
@@ -144,7 +148,7 @@ function reduce(b, ev, cfg, now) {
   return cur
 }
 
-const evOf = ({ owner, mode, ok, kind, retryAfterSeconds, rejected = false, overrun = false, cfg }) => ({ epoch: (cfg && cfg.luna && cfg.luna.resetEpoch) || 0, owner, mode, ok: !!ok, kind: kind || null, retryAfterSeconds: retryAfterSeconds || 0, rejected: !!rejected, overrun: !!overrun })
+const evOf = ({ owner, mode, ok, kind, retryAfterSeconds, rejected = false, overrun = false, startedAt, cfg }) => ({ ...(Number.isFinite(startedAt) ? { startedAt } : {}), epoch: (cfg && cfg.luna && cfg.luna.resetEpoch) || 0, owner, mode, ok: !!ok, kind: kind || null, retryAfterSeconds: retryAfterSeconds || 0, rejected: !!rejected, overrun: !!overrun })
 
 async function commitEvent(ev, cfg) { // one transaction; throws on failure
   await fb.db().runTransaction(async (tx) => {
@@ -228,6 +232,8 @@ async function clearUnresolved(firstPage, cfg) {
 async function guardInTx(tx, { owner, mode, cfg }) {
   const s = await tx.get(ref()), b = s.exists ? { ...closed(), ...s.data() } : closed(), now = clock.now().getTime()
   if (b.state === "blocked") return { ok: false, reason: "breaker-blocked" }
+  // A configuration older than the last operator reset: the breaker would DISCARD this call's outcome (epoch floor in reduce), so it must not start a paid call.
+  if ((cfg.luna.resetEpoch || 0) < (b.resetEpoch || 0)) return { ok: false, reason: "config-stale" }
   if (mode === "normal") return b.state === "closed" ? { ok: true } : { ok: false, reason: "breaker-changed" }
   if (mode === "probe") return b.state === "half_open" && b.lease && b.lease.owner === owner && b.lease.expiresAt > now ? { ok: true } : { ok: false, reason: "breaker-changed" }
   if (mode === "recovery") return b.state === "recovery" && ((b.inflight || {})[owner] || 0) > now ? { ok: true } : { ok: false, reason: "breaker-changed" }

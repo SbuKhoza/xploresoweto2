@@ -156,3 +156,9 @@ No rules or indexes change. `ai-consent` and the new `ai-usage` documents are cl
 **Residual races (bounded).** (a) A call already past the guard may still be in flight when the breaker changes: at most 2 per instance, 20 globally. (b) The gap between the `called` commit and the HTTP send is not closable. (c) A late counted failure ignored because its owner no longer holds the probe delays re-opening by at most one probe cycle (lease >= 30 s). (d) Grace stays 90 s.
 
 Tests: 24 new (units 93, flow 49 after Round 5); suite total 377. Mutation results: `mutation-check-r5.txt`.
+
+## Round 6: late successes and stale configuration
+
+**Late success vs consecutive failures.** Each call records `startedAt` (the moment admission was granted). The breaker records `lastFailureAt` on every counted failure in the closed state. A provider answer ends the consecutive-failure run only if its request started at or after `lastFailureAt`; an older answer is not evidence about the present and leaves the run intact. Rejected outputs (invalid ring) and input overruns are booked exactly as before. An event without `startedAt` (e.g. a pre-upgrade pending event) is treated as current. Thresholds are unchanged (3 consecutive / 5 in 60 s). Residual: a success from a request that started before a failure but is genuinely newer evidence is ignored for the run: this errs toward opening, by at most one extra failure.
+
+**Reset epoch at the commit point.** The epoch floor in `reduce` silently discards the outcome of any call made with an older `resetEpoch`, so such a call (billing/auth failures included) could never open or block the breaker. `guardInTx` therefore refuses it up front (`config-stale`, skip reason `usage:config-stale`; no record, attempt or reservation). It uses the breaker document already read by the guard: no extra read. A stale instance recovers as soon as its configuration refreshes.

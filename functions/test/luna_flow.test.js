@@ -497,3 +497,20 @@ test("HARD BLOCK e2e: a provider answer arriving after the breaker was blocked c
   g.release(); assert.equal((await p).applied, true); assert.equal(env.get("ai-usage/luna-breaker").state, "blocked"); assert.equal(env.get("ai-usage/luna-breaker").blockedKind, "auth")
   const cfg1 = mkCfg({ resetEpoch: 1 }); assert.equal((await breakerMod.admit({ owner: "op", cfg: cfg1 })).allowed, true) // only the operator reset clears it
 })
+
+// ================================================================== ROUND 6
+test("LATE SUCCESS e2e: a call admitted BEFORE two failures finishes successfully AFTER them; a third failure still opens the breaker", async () => {
+  await accept("u1"); const g = gate(); install(async () => { await g.p; return goodOut() })
+  const p = rewrite("u1", "req-ls-0001"); await until(() => calls.length === 1); env.time.now += 1000
+  await breakerMod.report({ owner: "f1", mode: "normal", ok: false, kind: "timeout", cfg: mkCfg() }); env.time.now += 1000; await breakerMod.report({ owner: "f2", mode: "normal", ok: false, kind: "timeout", cfg: mkCfg() })
+  g.release(); assert.equal((await p).applied, true); assert.equal(env.get("ai-usage/luna-breaker").consecutive, 2) // its text is delivered, but it does not erase the failures
+  await breakerMod.report({ owner: "f3", mode: "normal", ok: false, kind: "timeout", cfg: mkCfg() }); assert.equal(env.get("ai-usage/luna-breaker").state, "open")
+})
+test("STALE CONFIG e2e: after an operator reset, an instance still holding the OLD resetEpoch cannot begin a paid call (no provider call, no record, no budget); a current instance can", async () => {
+  await accept("u1"); env.seed("ai-usage/luna-breaker", { ...breakerMod.closed(0), state: "blocked", blockedKind: "billing" })
+  assert.equal((await rewrite("u1", "req-ep-0001", mkCfg({ resetEpoch: 1 }))).applied, true) // the operator's reset takes effect through the current instance
+  assert.equal(env.get("ai-usage/luna-breaker").state, "closed"); assert.equal(env.get("ai-usage/luna-breaker").resetEpoch, 1); const before = calls.length, recs0 = recsF().length
+  const r = await rewrite("u1", "req-ep-0002", mkCfg({ resetEpoch: 0 })); assert.equal(r.applied, false); assert.equal(r.skipped, "usage:config-stale")
+  assert.equal(calls.length, before); assert.equal(recsF().length, recs0); assert.equal(recsF().find((d) => d.id.includes("0002")), undefined)
+  assert.equal((await rewrite("u1", "req-ep-0003", mkCfg({ resetEpoch: 1 }))).applied, true)
+})
