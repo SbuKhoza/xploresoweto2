@@ -120,7 +120,7 @@ describe("Firestore rules (Stage 1, proposed)", () => {
       for (const uid of ["empA", "resA"]) await assertFails(updateDoc(doc(as_(uid), "organisations/orgA"), { description: "x" }))
     })
     it("protected organisation fields cannot be changed by members", async () => {
-      for (const patch of [{ name: "New" }, { ownerUid: "alice" }, { approvalStatus: "approved" }, { active: false }, { verificationStatus: "unverified" }, { organisationType: "business" }])
+      for (const patch of [{ name: "New" }, { ownerUid: "alice" }, { approvalStatus: "suspended" }, { active: false }, { verificationStatus: "unverified" }, { organisationType: "business" }])
         await assertFails(updateDoc(doc(as_("ownerA"), "organisations/orgA"), patch))
     })
     it("a member of one organisation cannot touch another, and a suspended organisation cannot be edited", async () => {
