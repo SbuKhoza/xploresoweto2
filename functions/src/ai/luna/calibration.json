@@ -1,0 +1,17 @@
+{
+  "status": "uncalibrated",
+  "model": "gpt-6-luna",
+  "reasoningEffort": null,
+  "calibratedAt": null,
+  "note": "Run `npm run luna:calibrate` (needs OPENAI_API_KEY in your local environment; makes about 3 paid calls). Until every payload has inputTokens, Luna is skipped and Malloya answers deterministically.",
+  "payloads": {
+    "greeting:en": {
+      "sha256": "7cb7ba1ce0b73da29d1d70421c895809f14bbaa2bfe2b6ef5851cfe13c602fa2",
+      "inputTokens": null
+    },
+    "thanks:en": {
+      "sha256": "66cbee8acd9c3a8ff80f90653dd3d4646ee664f29639da4ddfda6322ea197ea0",
+      "inputTokens": null
+    }
+  }
+}

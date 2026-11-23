@@ -10,7 +10,9 @@
     "test": "node --test \"test/*.test.js\"",
     "check": "node --check index.js && node --test \"test/*.test.js\"",
     "super-admin": "node scripts/super-admin.js",
-    "call": "node scripts/call.js"
+    "call": "node scripts/call.js",
+    "luna:calibrate": "node scripts/luna-calibrate.js",
+    "luna:hashes": "node scripts/luna-calibrate.js --hashes-only"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",

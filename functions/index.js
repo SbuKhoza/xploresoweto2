@@ -2,13 +2,18 @@
 // XploreSoweto trusted backend (Cloud Functions 2nd gen). NOT DEPLOYED until explicitly approved.
 // Every function runs in africa-south1, requires authentication, validates its input and authorises on the server.
 const { onCall } = require("firebase-functions/v2/https")
+const { defineSecret } = require("firebase-functions/params")
 const { REGION } = require("./src/lib/constants")
 
 const opts = { region: REGION, maxInstances: 10, cors: true }
 // NOTE (App Check): not enforced in Stage 1 (the JS SDK on React Native needs a native-attestation provider). Per-user limits
 // are enforced inside each function; see docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md.
 const wrap = (handler) => onCall(opts, (request) => handler(request))
-// Stage 2B (database-powered assistant): no secret, no external AI service. Same wrapper as every other callable.
+// Stage 2B (database-powered assistant). Malloya itself needs no secret. The OPTIONAL Luna wording layer uses ONE secret, bound to aiChat
+// ONLY (no other function can read it). The secret must exist in Secret Manager before aiChat is deployed:
+//   firebase functions:secrets:set OPENAI_API_KEY --project xploresoweto   (entered by the owner; never committed, logged or sent to the app)
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY")
+const withOpenAiKey = (handler) => onCall({ ...opts, secrets: [OPENAI_API_KEY] }, (request) => handler(request))
 
 const profile = require("./src/handlers/profile")
 const platform = require("./src/handlers/platform")
@@ -48,7 +53,8 @@ module.exports = {
   submitListing: wrap(listings.submitListing),
   reviewListingSubmission: wrap(listings.reviewListingSubmission),
   // Stage 2A: AI backend (not deployed until approved)
-  aiChat: wrap(ai.aiChat),
+  aiChat: withOpenAiKey(ai.aiChat),
+  aiSetLunaConsent: wrap(ai.aiSetLunaConsent),
   aiGetUsage: wrap(ai.aiGetUsage),
   aiListConversations: wrap(ai.aiListConversations),
   aiGetConversation: wrap(ai.aiGetConversation),

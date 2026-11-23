@@ -13,6 +13,10 @@ const cfgMod = require("../ai/config")
 const limits = require("../ai/ratelimit")
 const conv = require("../ai/conversations")
 const { runChat } = require("../ai/chat")
+const consent = require("../ai/consent")
+const lunaUsage = require("../ai/luna/usage")
+const lunaBreaker = require("../ai/luna/breaker")
+const { NOTICE_VERSION } = require("../ai/luna/constants")
 const { hydrateRefs } = require("../ai/retrieval/cards")
 
 const verified = async (request) => G.requireVerified(await G.requireAuth(request))
@@ -27,8 +31,20 @@ async function aiChat(request) {
 async function aiGetUsage(request) {
   const ctx = await verified(request)
   const cfg = await cfgMod.getAiConfig()
-  return { enabled: cfg.enabled, ...(await limits.getUsageStatus(ctx.uid, cfg)), maxInputChars: cfg.limits.maxInputChars, retentionDays: cfg.retention.days,
+  // Luna wording layer: what the app needs to show the notice and the user's own choice. Never fails the usage call.
+  let lunaInfo = { available: false, noticeVersion: NOTICE_VERSION, consent: { active: false } }
+  try { if (cfg.luna.enabled) lunaInfo = { available: true, noticeVersion: NOTICE_VERSION, consent: { active: (await consent.getConsent(ctx.uid)).active }, ...(await lunaUsage.userStatus(ctx.uid, cfg)) } } catch (e) { /* keep the default */ }
+  return { enabled: cfg.enabled, luna: lunaInfo, ...(await limits.getUsageStatus(ctx.uid, cfg)), maxInputChars: cfg.limits.maxInputChars, retentionDays: cfg.retention.days,
     languages: Object.fromEntries(Object.entries(cfg.languages).filter(([, v]) => v.enabled).map(([k, v]) => [k, { verified: v.verified }])) }
+}
+// Record or withdraw the user's acknowledgement of the AI Service Notice. Withdrawing stops Luna immediately and deletes NOTHING.
+async function aiSetLunaConsent(request) {
+  const ctx = await verified(request)
+  const d = V.object(request.data)
+  V.onlyKeys(d, ["action", "noticeVersion"])
+  if (d.action !== "accept" && d.action !== "withdraw") throw new HttpsError("invalid-argument", "invalid-action")
+  if (d.action === "accept" && d.noticeVersion !== NOTICE_VERSION) throw new HttpsError("invalid-argument", "notice-version-mismatch", { current: NOTICE_VERSION })
+  return { consent: await consent.setConsent(ctx.uid, d.action) }
 }
 async function aiListConversations(request) {
   const ctx = await verified(request)
@@ -67,8 +83,10 @@ async function aiDeleteAllMyAiData(request) {
 async function aiAdminGetUsage(request) {
   await G.requireActiveSuperAdmin(request)
   const cfg = await cfgMod.getAiConfig()
-  // No spend or token figures exist: the assistant calls no paid service. This returns the active settings only.
-  return { config: { enabled: cfg.enabled, limits: cfg.limits, retention: cfg.retention, languages: cfg.languages, cache: cfg.cache, retrieval: cfg.retrieval } }
+  // Numbers only. The Luna block shows the settings, the breaker state and today's global token use (never any text or user data).
+  let luna = { enabled: cfg.luna.enabled }
+  try { const b = await lunaBreaker.peek(); luna = { ...cfg.luna, breaker: { ...cfg.luna.breaker, state: b ? b.state : "unreadable", blockedKind: b ? b.blockedKind || null : null }, today: await lunaUsage.globalToday() } } catch (e) { /* keep the short form */ }
+  return { config: { enabled: cfg.enabled, limits: cfg.limits, retention: cfg.retention, languages: cfg.languages, cache: cfg.cache, retrieval: cfg.retrieval, luna } }
 }
 async function aiAdminUpdateConfig(request) {
   const actor = await G.requireActiveSuperAdmin(request)
@@ -91,4 +109,4 @@ async function aiAdminUpdateConfig(request) {
   return { updated: keys }
 }
 
-module.exports = { aiChat, aiGetUsage, aiListConversations, aiGetConversation, aiDeleteConversation, aiDeleteAllMyAiData, aiAdminGetUsage, aiAdminUpdateConfig }
+module.exports = { aiChat, aiSetLunaConsent, aiGetUsage, aiListConversations, aiGetConversation, aiDeleteConversation, aiDeleteAllMyAiData, aiAdminGetUsage, aiAdminUpdateConfig }

@@ -93,7 +93,8 @@ test("usage summary and admin config: no spend figures, and a provider/model key
   await ask("u1", "hi")
   const u = await H.aiGetUsage(req("u1", {})); assert.deepEqual([u.dailyLimit, u.usedToday, u.remainingToday], [50, 1, 49]); assert.ok(!/cost|usd|budget|token/i.test(Object.keys(u).join()))
   const sa = makeSuperAdmin(env, "root")
-  const g = await H.aiAdminGetUsage(sa({})); assert.ok(!/budget|spent|model|token/i.test(JSON.stringify(g)))
+  const g = await H.aiAdminGetUsage(sa({})); const { luna: lunaInfo, ...nonLuna } = g.config
+  assert.ok(!/budget|spent|model|token/i.test(JSON.stringify(nonLuna))); assert.equal(lunaInfo.enabled, false) // Luna block: numbers and states only (asserted in luna.test.js)
   await rejects(H.aiAdminGetUsage(req("u1", {})), "permission-denied")
   assert.deepEqual((await H.aiAdminUpdateConfig(sa({ patch: { limits: { dailyMessages: 20 } } }))).updated, ["limits"])
   for (const patch of [{ models: { routine: "x" } }, { provider: "x" }, { budget: { monthlyUsd: 1 } }, { pricing: {} }]) await rejects(H.aiAdminUpdateConfig(sa({ patch })), "invalid-argument", "uneditable-setting")

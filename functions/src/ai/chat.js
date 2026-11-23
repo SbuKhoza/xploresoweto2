@@ -13,6 +13,7 @@ const { cardFromEvidence, hydrateRefs } = require("./retrieval/cards")
 const { validCoords } = require("./geo")
 const { sanitizeText } = require("./sanitize")
 const log = require("./log")
+const luna = require("./luna")
 
 const ENGINE = "database-v1"
 const ID = /^[A-Za-z0-9_-]{8,64}$/
@@ -21,7 +22,7 @@ const bad = (m) => new HttpsError("invalid-argument", m)
 
 function parseInput(data, cfg) {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw bad("invalid-input")
-  const extra = Object.keys(data).filter((k) => !["message", "conversationId", "requestId", "location"].includes(k))
+  const extra = Object.keys(data).filter((k) => !["message", "conversationId", "requestId", "location", "aiNoticeVersion"].includes(k))
   if (extra.length) throw bad("invalid-input")
   const message = typeof data.message === "string" ? data.message.replace(/\r\n?/g, "\n").trim() : ""
   if (!message || CONTROL.test(message)) throw bad("invalid-message")
@@ -38,7 +39,9 @@ function parseInput(data, cfg) {
     if (typeof l !== "object" || Array.isArray(l) || Object.keys(l).some((k) => !["latitude", "longitude"].includes(k)) || !validCoords(l)) throw bad("invalid-location")
     location = { latitude: l.latitude, longitude: l.longitude }
   }
-  return { message, requestId: data.requestId, conversationId, location }
+  // Capability signal ONLY (an old app never sends it): it is not proof of consent, which is read from ai-consent on the server.
+  const noticeVersion = Number.isInteger(data.aiNoticeVersion) ? data.aiNoticeVersion : null
+  return { message, requestId: data.requestId, conversationId, location, noticeVersion }
 }
 
 function responseShape(assistant, cards, offers, cfg) {
@@ -78,7 +81,10 @@ async function runChat({ uid, data, cfg }) {
     for (const e of out.evidence) { if (e && e.ref && !seen.has(e.ref) && ["listing", "event"].includes(e.kind) && cards.length < 12) { seen.add(e.ref); cards.push(cardFromEvidence(e)) } }
     const offers = cards.filter((c) => out.bookingOffers.includes(c.ref)).map((c) => ({ ref: c.ref, title: c.title }))
     const assistant = { blocks: out.blocks, cardRefs: cards.map((c) => ({ ref: c.ref, name: c.title })), followUps: out.followUps, bookingOfferRefs: offers.map((o) => o.ref), language: out.language, engine: ENGINE, distanceNote: out.blocks.some((b) => /straight-line/i.test(b.text)) ? "Approximate straight-line distance, not driving distance or travel time." : null }
-    const saved = await conv.persistTurn({ uid, cid, requestId: input.requestId, userText: sanitizeText(input.message, cfg.limits.maxInputChars), assistant, context: out.context, cfg })
+    // Optional wording layer: hands back the SAME blocks unless a server-designated, fact-free phrase was validly reworded. Never throws.
+    const lr = await luna.tryRewrite({ uid, requestId: input.requestId, cfg, intent: out.intent, blocks: out.blocks, language: out.language, noticeVersion: input.noticeVersion })
+    assistant.blocks = lr.blocks
+    const saved = await conv.persistTurn({ uid, cid, requestId: input.requestId, userText: sanitizeText(input.message, cfg.limits.maxInputChars), assistant, context: out.context, cfg, luna: lr.commit })
     result = { conversationId: cid, messageId: saved.id, ...responseShape(assistant, cards, offers, cfg), duplicate: saved.duplicate === true }
     outcome = "ok"
     log.info("ai.chat.ok", { uidHash: log.uidHash(uid), intent: out.intent, language: out.language, cards: cards.length })

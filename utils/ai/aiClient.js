@@ -1,15 +1,18 @@
 // Pure (no React Native / Firebase imports) client logic for the Soweto assistant, so it can be unit-tested with `node --test`.
 // The Firebase callable is injected: in the app it is utils/callable.js `callFunction`.
 
+import { LUNA_NOTICE_VERSION, consentPayload } from "./notice.js"
+
 export const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,64}$/
 export const MAX_MESSAGE_CHARS_FALLBACK = 1000
 
-// Builds the exact aiChat payload. Only the fields the backend accepts: message, requestId, conversationId?, location?{latitude,longitude}.
+// Builds the exact aiChat payload. Only the fields the backend accepts: message, requestId, conversationId?, location?{latitude,longitude},
+// aiNoticeVersion (a capability signal: "this app can show the AI Service Notice". It is NOT consent; consent is recorded on the server).
 export function buildChatPayload({ message, requestId, conversationId, location }) {
   const text = typeof message === "string" ? message.trim() : ""
   if (!text) throw new Error("empty-message")
   if (!REQUEST_ID_RE.test(String(requestId || ""))) throw new Error("invalid-request-id")
-  const payload = { message: text, requestId }
+  const payload = { message: text, requestId, aiNoticeVersion: LUNA_NOTICE_VERSION }
   if (conversationId) payload.conversationId = conversationId
   if (location && Number.isFinite(location.latitude) && Number.isFinite(location.longitude)) {
     payload.location = { latitude: location.latitude, longitude: location.longitude } // nothing else is forwarded
@@ -42,6 +45,7 @@ export function createAiApi(call) {
   return {
     chat: (args) => call("aiChat", buildChatPayload(args)),
     usage: () => call("aiGetUsage", {}),
+    setLunaConsent: (action) => call("aiSetLunaConsent", consentPayload(action)),
     list: () => call("aiListConversations", {}),
     open: (conversationId) => call("aiGetConversation", { conversationId }),
     remove: (conversationId) => call("aiDeleteConversation", { conversationId }),

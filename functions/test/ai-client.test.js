@@ -11,9 +11,9 @@ const load = (f) => import(pathToFileURL(path.join(root, "utils", "ai", f)).href
 
 test("chat payload: only accepted fields, trimmed, valid requestId", async () => {
   const { buildChatPayload } = await load("aiClient.js")
-  assert.deepEqual(buildChatPayload({ message: "  hi  ", requestId: "abcd1234" }), { message: "hi", requestId: "abcd1234" })
+  assert.deepEqual(buildChatPayload({ message: "  hi  ", requestId: "abcd1234" }), { message: "hi", requestId: "abcd1234", aiNoticeVersion: 1 })
   const p = buildChatPayload({ message: "near me", requestId: "abcd1234", conversationId: "c_" + "a".repeat(24), location: { latitude: -26.2, longitude: 27.9, accuracy: 5, altitude: 1 } })
-  assert.deepEqual(Object.keys(p).sort(), ["conversationId", "location", "message", "requestId"])
+  assert.deepEqual(Object.keys(p).sort(), ["aiNoticeVersion", "conversationId", "location", "message", "requestId"])
   assert.deepEqual(p.location, { latitude: -26.2, longitude: 27.9 }) // accuracy/altitude never forwarded
   assert.throws(() => buildChatPayload({ message: "  ", requestId: "abcd1234" }), /empty-message/)
   assert.throws(() => buildChatPayload({ message: "x", requestId: "short" }), /invalid-request-id/)
@@ -47,7 +47,7 @@ test("api wrapper calls the right callables with the right payloads", async () =
   const { createAiApi } = await load("aiClient.js")
   const calls = []
   const api = createAiApi(async (n, d) => { calls.push([n, d]); return {} })
-  await api.chat({ message: "hi", requestId: "abcd1234" }); await api.usage(); await api.list(); await api.open("c_x"); await api.remove("c_x"); await api.removeAll()
+  await api.chat({ message: "hi", requestId: "abcd1234", aiNoticeVersion: 1 }); await api.usage(); await api.list(); await api.open("c_x"); await api.remove("c_x"); await api.removeAll()
   assert.deepEqual(calls.map((c) => c[0]), ["aiChat", "aiGetUsage", "aiListConversations", "aiGetConversation", "aiDeleteConversation", "aiDeleteAllMyAiData"])
   assert.deepEqual(calls[3][1], { conversationId: "c_x" })
 })
@@ -132,7 +132,7 @@ test("app code stays provider-free and only uses the ai* callables; no direct Fi
   const files = ["screens/SowetoAI.js", ...fs.readdirSync(path.join(root, "utils", "ai")).map((f) => "utils/ai/" + f)]
   for (const f of files) {
     const src = fs.readFileSync(path.join(root, f), "utf8")
-    assert.doesNotMatch(src, /anthropic|openai|gemini|api[_-]?key/i, f)
+    if (f !== "utils/ai/notice.js") assert.doesNotMatch(src, /anthropic|openai|gemini|api[_-]?key/i, f) // the notice must name the provider; nothing else may
     assert.doesNotMatch(src, /firebase\/firestore|ai-conversations/, f)
     for (const m of src.matchAll(/callFunction\(\s*"([A-Za-z]+)"|call\(\s*"([A-Za-z]+)"/g)) assert.match(m[1] || m[2], /^ai[A-Z]/, f)
   }
@@ -151,4 +151,23 @@ test("Malloya naming, greeting from enrollment, and the old Xplore guide card is
   assert.match(ai, />Malloya</); assert.match(ai, /I'm Malloya/); assert.match(ai, /enrollment\?\.greeting/)
   assert.doesNotMatch(read("screens/Home.js"), /goXploreItem\("XploreMain"\)[\s\S]{0,200}Ultimate Guide/)
   assert.doesNotMatch(read("screens/Home.js"), /Discover places, people and experiences/)
+})
+
+test("AI Service Notice: pure helpers, the panel follows the backend, accept/withdraw payloads are exact, and the notice names the provider without any key or endpoint", async () => {
+  const N = await load("notice.js"), { createAiApi } = await load("aiClient.js")
+  assert.deepEqual(N.lunaPanel(undefined), { visible: false, on: false, showNotice: false }) // older backend: nothing is shown
+  assert.deepEqual(N.lunaPanel({ available: false, noticeVersion: 1, consent: { active: false } }), { visible: false, on: false, showNotice: false })
+  assert.deepEqual(N.lunaPanel({ available: true, noticeVersion: 1, consent: { active: false } }), { visible: true, on: false, showNotice: true })
+  assert.deepEqual(N.lunaPanel({ available: true, noticeVersion: 1, consent: { active: true } }), { visible: true, on: true, showNotice: false })
+  assert.deepEqual(N.lunaPanel({ available: true, noticeVersion: 2, consent: { active: true } }), { visible: false, on: false, showNotice: false }) // app and backend disagree on the notice version: stay off
+  assert.deepEqual(N.consentPayload("accept"), { action: "accept", noticeVersion: 1 }); assert.deepEqual(N.consentPayload("withdraw"), { action: "withdraw" })
+  assert.throws(() => N.consentPayload("delete"), /invalid-action/)
+  const sent = []; const api = createAiApi(async (name, data) => { sent.push([name, data]); return {} })
+  await api.setLunaConsent("accept"); await api.setLunaConsent("withdraw"); assert.deepEqual(sent, [["aiSetLunaConsent", { action: "accept", noticeVersion: 1 }], ["aiSetLunaConsent", { action: "withdraw" }]])
+  assert.match(N.LUNA_NOTICE_TEXT, /OpenAI's GPT-6 Luna/); assert.doesNotMatch(N.LUNA_NOTICE_TEXT, /securely|zero[- ]data|not stored|never stored/i) // no security or retention promise we cannot verify
+  assert.doesNotMatch(fs.readFileSync(path.join(root, "utils", "ai", "notice.js"), "utf8"), /api[_-]?key|api\.openai|https?:|sk-|fetch\(/i)
+  assert.equal(N.LUNA_DELETE_ALL_LABEL, "Delete all my conversations"); assert.match(N.LUNA_DELETE_ALL_NOTE, /counters and your choice.*kept/)
+  const screen = fs.readFileSync(path.join(root, "screens", "SowetoAI.js"), "utf8")
+  assert.doesNotMatch(screen, /Delete all my assistant data/); assert.match(screen, /api\.setLunaConsent/); assert.doesNotMatch(screen, /(callFunction|call)\(\s*"aiSetLunaConsent"/) // only through the api wrapper
+  assert.equal(N.LUNA_NOTICE_VERSION, Number(fs.readFileSync(path.join(root, "functions", "src", "ai", "luna", "constants.js"), "utf8").match(/const NOTICE_VERSION = (\d+)/)[1])) // app and backend agree
 })

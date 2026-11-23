@@ -38,13 +38,16 @@ async function loadContext(uid, cid) {
 }
 
 // Idempotent: the assistant message id is derived from requestId, so a retry can never add a second copy.
-async function persistTurn({ uid, cid, requestId, userText, assistant, context, cfg }) {
+// `luna` (optional): hooks from luna/usage.prepareSuccess. Its reads/writes join THIS transaction, so a Luna-reworded answer and the
+// usage it consumed are committed together or not at all, and a duplicate (already persisted) turn never counts twice.
+async function persistTurn({ uid, cid, requestId, userText, assistant, context, cfg, luna }) {
   const FV = fb.FieldValue()
   return fb.db().runTransaction(async (tx) => {
     const cRef = convRef(cid), uRef = msgsCol(cid).doc(`${requestId}_u`), aRef = msgsCol(cid).doc(`${requestId}_a`)
     const [cSnap, aSnap] = [await tx.get(cRef), await tx.get(aRef)]
     if (cSnap.exists && cSnap.data().ownerUid !== uid) throw notFound()
     if (aSnap.exists) return { id: aSnap.id, ...aSnap.data(), duplicate: true }
+    if (luna) await luna.read(tx)
     const exp = expiry(cfg.retention.days)
     const at = fb.Timestamp().fromMillis(clock.now().getTime())
     const at2 = fb.Timestamp().fromMillis(clock.now().getTime() + 1) // keeps the user message strictly before its reply
@@ -57,6 +60,7 @@ async function persistTurn({ uid, cid, requestId, userText, assistant, context, 
       createdAt: prev ? prev.createdAt : at, updatedAt: at2, messageCount: (prev ? prev.messageCount : 0) + 2, expireAt: exp,
       engine: assistant.engine || null, context: context || (prev && prev.context) || null, language: assistant.language || (prev && prev.language) || null,
     })
+    if (luna) luna.write(tx)
     return { id: aRef.id, ...aDoc, duplicate: false }
   })
 }

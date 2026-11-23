@@ -1,8 +1,9 @@
 // "The ultimate guide to Soweto" — chat with the database-powered assistant (Stage 2B backend, callables ai*).
-// No LLM and no provider key in the app: every answer comes from the Cloud Function, which reads XploreSoweto's own listings.
+// No provider key or endpoint in the app: every answer comes from the Cloud Function, which reads XploreSoweto's own listings.
+// The optional "AI wording" is decided and recorded on the backend; the app only shows the AI Service Notice (utils/ai/notice.js) and the user's choice.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Image, Modal, Alert, Keyboard,
+  View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Image, Modal, Alert, Keyboard, Switch,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useNavigation } from "@react-navigation/native"
@@ -15,6 +16,7 @@ import { newRequestId } from "../utils/requestId"
 import { getUserLocation } from "../utils/getLocation"
 import { createAiApi, createSendState } from "../utils/ai/aiClient"
 import { describeAiError } from "../utils/ai/errors"
+import { LUNA_NOTICE_TITLE, LUNA_NOTICE_TEXT, LUNA_DELETE_ALL_LABEL, LUNA_DELETE_ALL_NOTE, lunaPanel } from "../utils/ai/notice"
 import { assistantItemFromResponse, itemsFromConversation, blockStyle, screenForCard } from "../utils/ai/blocks"
 import { canCallAssistant, locationDecision } from "../utils/ai/gates"
 import { TEAL, BRAND, INK, MUTED, STAR } from "../components/xplorescreens/shared/theme"
@@ -152,6 +154,8 @@ export default function SowetoAI() {
   const [verifyMsg, setVerifyMsg] = useState("")
   const [locAsk, setLocAsk] = useState(null)     // text waiting for the user's location choice
   const [locOptOut, setLocOptOut] = useState(false)
+  const [luna, setLuna] = useState(null)         // the `luna` block of aiGetUsage: whether the optional AI wording is offered and whether the user accepted the notice
+  const [noticeHidden, setNoticeHidden] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState({ loading: false, error: null, rows: [] })
 
@@ -159,7 +163,7 @@ export default function SowetoAI() {
   useEffect(() => { setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60) }, [items, busy, error, locAsk])
 
   const loadUsage = useCallback(async () => {
-    try { const u = await api.usage(); setUsage({ dailyLimit: u.dailyLimit, remainingToday: u.remainingToday }); setRetentionDays(u.retentionDays ?? null) } catch { /* usage is optional */ }
+    try { const u = await api.usage(); setUsage({ dailyLimit: u.dailyLimit, remainingToday: u.remainingToday }); setRetentionDays(u.retentionDays ?? null); setLuna(u.luna || null) } catch { /* usage is optional */ }
   }, [])
   useEffect(() => { if (verified.allowed) loadUsage() }, [verified.allowed, loadUsage])
 
@@ -239,8 +243,13 @@ export default function SowetoAI() {
       catch (e) { Alert.alert("Couldn't delete", describeAiError(e).text) }
     } },
   ])
-  const deleteAll = () => Alert.alert("Delete all my assistant data",
-    "This permanently deletes every conversation you've had with the assistant. It can't be undone.", [
+  const panel = lunaPanel(luna)
+  const chooseLuna = async (action) => { // accept / withdraw the AI Service Notice (recorded by the backend; withdrawing deletes no conversation)
+    try { await api.setLunaConsent(action); setLuna((l) => ({ ...l, consent: { active: action === "accept" } })); if (action === "accept") setNoticeHidden(true) }
+    catch (e) { Alert.alert("Couldn't save your choice", describeAiError(e).text) }
+  }
+  const deleteAll = () => Alert.alert(LUNA_DELETE_ALL_LABEL,
+    LUNA_DELETE_ALL_NOTE, [
     { text: "Cancel", style: "cancel" },
     { text: "Delete everything", style: "destructive", onPress: async () => {
       try { const r = await api.removeAll(); newChat(); setHistory({ loading: false, error: null, rows: [] }); Alert.alert("Deleted", `${r.conversations ?? 0} conversation(s) deleted.`) }
@@ -287,6 +296,16 @@ export default function SowetoAI() {
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0}>
         <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ padding: 14, paddingBottom: 8 }} keyboardShouldPersistTaps="handled">
+          {panel.showNotice && !noticeHidden ? (
+            <View style={{ backgroundColor: "#fff", borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#D6E4E8", ...shadow }}>
+              <Text style={{ color: INK, fontWeight: "800", fontSize: 14, marginBottom: 4 }}>{LUNA_NOTICE_TITLE}</Text>
+              <Text style={{ color: "#5E7088", fontSize: 12.5, lineHeight: 18 }}>{LUNA_NOTICE_TEXT}</Text>
+              <View style={{ flexDirection: "row", marginTop: 10 }}>
+                <TouchableOpacity onPress={() => chooseLuna("accept")} style={{ flex: 1, backgroundColor: TEAL, borderRadius: 10, paddingVertical: 9, alignItems: "center", marginRight: 6 }}><Text style={{ color: "#fff", fontWeight: "800" }}>OK, use it</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => setNoticeHidden(true)} style={{ flex: 1, borderWidth: 1, borderColor: "#C9D6DC", borderRadius: 10, paddingVertical: 9, alignItems: "center", marginLeft: 6 }}><Text style={{ color: INK, fontWeight: "700" }}>Not now</Text></TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
           {empty ? (
             <View style={{ marginBottom: 8 }}>
               <View style={{ backgroundColor: "#fff", borderRadius: 20, padding: 16, ...shadow }}>
@@ -393,9 +412,18 @@ export default function SowetoAI() {
                 <TouchableOpacity onPress={() => deleteConversation(r.conversationId)} accessibilityLabel="Delete conversation" style={{ padding: 12 }}><Ionicons name="trash-outline" size={19} color="#B42318" /></TouchableOpacity>
               </View>
             ))}
+            {panel.visible ? (
+              <View style={{ backgroundColor: "#fff", borderRadius: 14, padding: 12, marginTop: 12, ...shadow }}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Text style={{ flex: 1, color: INK, fontWeight: "700", fontSize: 14 }}>{LUNA_NOTICE_TITLE}</Text>
+                  <Switch value={panel.on} onValueChange={(v) => chooseLuna(v ? "accept" : "withdraw")} accessibilityLabel="Allow AI wording, as described in the AI Service Notice" />
+                </View>
+                <Text style={{ color: MUTED, fontSize: 12, lineHeight: 17, marginTop: 6 }}>{LUNA_NOTICE_TEXT} Turning this off keeps your saved conversations.</Text>
+              </View>
+            ) : null}
             <Text style={{ color: MUTED, fontSize: 12, lineHeight: 17, marginTop: 12 }}>{retention} Your exact location is never saved with a chat.</Text>
             <TouchableOpacity onPress={deleteAll} style={{ marginTop: 14, borderWidth: 1, borderColor: "#B42318", borderRadius: 12, paddingVertical: 11, alignItems: "center" }}>
-              <Text style={{ color: "#B42318", fontWeight: "800" }}>Delete all my assistant data</Text>
+              <Text style={{ color: "#B42318", fontWeight: "800" }}>{LUNA_DELETE_ALL_LABEL}</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
