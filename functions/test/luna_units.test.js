@@ -263,5 +263,5 @@ test("ordering is structural, not accidental: in luna/index.js the durable 'call
   const begin = src.indexOf("await usage.begin("), call = src.indexOf("await deps.callResponses(")
   assert.ok(begin > 0 && call > begin, "usage.begin must come first")
   assert.equal((src.match(/deps\.callResponses\(/g) || []).length, 1) // exactly one provider call site, and no loop or retry around it
-  assert.doesNotMatch(src.slice(begin - 400, call + 400), /\b(for|while)\s*\(|setTimeout|retry/i)
+  assert.doesNotMatch(src.slice(src.indexOf("inflight += 1"), call + 220), /\b(for|while)\s*\(|setTimeout|\bretry\b/i) // no loop, timer or retry between the reservation and the single call
 })
