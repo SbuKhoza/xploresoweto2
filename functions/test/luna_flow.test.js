@@ -233,7 +233,7 @@ test("logs never carry message text, the key, wording, or user ids", async () =>
 
 // ================================================================== ROUND 2
 const settle = () => new Promise((r) => setImmediate(r))
-const until = async (fn) => { for (let i = 0; i < 200 && !fn(); i++) await settle(); assert.ok(fn(), "condition never became true") }
+const until = async (fn) => { for (let i = 0; i < 2000 && !fn(); i++) await settle(); assert.ok(fn(), "condition never became true") }
 const gate = () => { let release; const p = new Promise((r) => { release = r }); return { p, release } }
 const requestRecords = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_r_"))
 const storedText = async (uid, r) => JSON.stringify((await conv.getConversation(uid, r.conversationId)).messages)
@@ -336,7 +336,7 @@ const txFailsForBreaker = (when) => {
   const real = env.db.runTransaction.bind(env.db)
   env.db.runTransaction = async (fn) => {
     if (!when()) return real(fn)
-    let touches = false; const probe = { get: async (r) => { if (r.path === "ai-usage/luna-breaker") touches = true; return { exists: false, data: () => ({}) } }, set() {}, delete() {} }
+    let touches = false; const probe = { get: async () => ({ exists: false, data: () => ({}) }), set(r) { if (r.path === "ai-usage/luna-breaker") touches = true }, delete() {} } // fails only transactions that WRITE the breaker (begin() merely reads it)
     try { await fn(probe) } catch (e) { /* only inspecting which documents the callback reads */ }
     if (touches) throw Object.assign(new Error("UNAVAILABLE: simulated"), { code: 14 })
     return real(fn)
@@ -435,4 +435,65 @@ test("RECORDS: luna_r_* has no expireAt in any state, and the same uid+requestId
   }
   assert.equal(calls.length, before) // never a second paid call for either requestId
   assert.equal(env.list("ai-usage").filter((d) => d.id.startsWith("luna_r_")).length, 2) // and nothing deleted them
+})
+
+// ================================================================== ROUND 5: stale admission is closed at the commit point; late outcomes end to end
+const openBreaker = async () => { for (let i = 0; i < 3; i++) await breakerMod.report({ owner: `f${i}`, mode: "normal", ok: false, kind: "timeout", cfg: mkCfg() }) }
+const interleave = (after) => { // runs `after` once, right after the NEXT admit() decided, i.e. between admission and begin()
+  const real = breakerMod.admit; let done = false
+  breakerMod.admit = async (a) => { const g = await real(a); if (!done) { done = true; await after(g) } return g }
+  return () => { breakerMod.admit = real }
+}
+test("STALE ADMISSION e2e: the breaker is BLOCKED by another instance between admit() and begin(): no `called` record, no budget, no provider call", async () => {
+  await accept("u1"); const restore = interleave(async () => { await breakerMod.report({ owner: "other", mode: "normal", ok: false, kind: "billing", cfg: mkCfg() }) })
+  try {
+    const r = await rewrite("u1", "req-s1-0001"); assert.equal(r.applied, false); assert.equal(r.skipped, "usage:breaker-blocked")
+    assert.equal(calls.length, 0); assert.equal(recsF().length, 0); assert.equal(env.list("ai-usage").filter((d) => d.id.startsWith("luna_u_") || d.id.startsWith("luna_g_")).length, 0)
+    install(async () => goodOut()); breakerMod.resetLocalForTests(); assert.equal((await rewrite("u1", "req-s1-0001")).applied, false); assert.equal(calls.length, 0) // blocked stays blocked; and the requestId was not burnt
+  } finally { restore() }
+})
+test("STALE ADMISSION e2e: the breaker OPENED between admit() and begin(): no provider call", async () => {
+  await accept("u1"); const restore = interleave(async () => { await openBreaker() })
+  try { const r = await rewrite("u1", "req-s2-0001"); assert.equal(r.skipped, "usage:breaker-changed"); assert.equal(calls.length, 0); assert.equal(recsF().length, 0) } finally { restore() }
+})
+test("STALE ADMISSION e2e: a PROBE whose lease was replaced between admit() and begin() makes no call; the replacement probe does", async () => {
+  await accept("pa"); await accept("pb"); await openBreaker(); env.time.now += 61000
+  const restore = interleave(async () => { env.time.now += 31000; assert.equal((await breakerMod.admit({ owner: breakerMod.ownerKey("pb", "req-s3-0002"), cfg: mkCfg() })).mode, "probe") }) // B takes the replacement lease
+  try {
+    const a = await rewrite("pa", "req-s3-0001"); assert.equal(a.applied, false); assert.equal(a.skipped, "usage:breaker-changed"); assert.equal(calls.length, 0)
+  } finally { restore() }
+  assert.equal(env.get("ai-usage/luna-breaker").lease.owner, breakerMod.ownerKey("pb", "req-s3-0002")); assert.equal(recsF().length, 0) // B's lease is intact; A left nothing behind
+})
+test("STALE ADMISSION e2e: a RECOVERY slot that expired between admit() and begin() makes no call", async () => {
+  await accept("ra"); env.seed("ai-usage/luna-breaker", { ...breakerMod.closed(0), state: "recovery", recoveryUntil: env.time.now + 600000, inflight: {} })
+  const restore = interleave(async () => { env.time.now += 31000 })
+  try { const r = await rewrite("ra", "req-s4-0001"); assert.equal(r.applied, false); assert.equal(r.skipped, "usage:breaker-changed"); assert.equal(calls.length, 0); assert.equal(recsF().length, 0) } finally { restore() }
+})
+test("LATE OUTCOMES e2e: a probe whose lease was replaced finishes late: its answer is delivered, the breaker is untouched, and B's probe still decides", async () => {
+  await accept("pa"); await accept("pb"); await openBreaker(); env.time.now += 61000
+  const gA = gate(), gB = gate(); let n = 0; install(async () => { const mine = n++ === 0 ? gA : gB; await mine.p; return goodOut() })
+  const pa = rewrite("pa", "req-l1-0001"); await until(() => calls.length === 1) // A: probe in flight
+  env.time.now += 31000; const pb = rewrite("pb", "req-l1-0002"); await until(() => calls.length === 2) // A's lease expired; B took over
+  const lease = JSON.stringify(env.get("ai-usage/luna-breaker").lease); assert.equal(env.get("ai-usage/luna-breaker").state, "half_open")
+  gA.release(); const ra = await pa; assert.equal(ra.applied, true) // A's valid answer is still used
+  assert.equal(env.get("ai-usage/luna-breaker").state, "half_open"); assert.equal(JSON.stringify(env.get("ai-usage/luna-breaker").lease), lease) // ...but it did not touch B's probe
+  assert.equal((await breakerMod.admit({ owner: "x", cfg: mkCfg() })).reason, "probe-in-progress")
+  gB.release(); await pb; assert.equal(env.get("ai-usage/luna-breaker").state, "recovery")
+})
+test("LATE OUTCOMES e2e: a delayed recovery failure whose slot expired does not re-open the breaker; the expired slot is purged and live slots stay <= 2", async () => {
+  await accept("r1"); await accept("r2"); env.seed("ai-usage/luna-breaker", { ...breakerMod.closed(0), state: "recovery", recoveryUntil: env.time.now + 600000, inflight: {} })
+  const gs = [gate(), gate()]; let k = 0; install(async () => { const i = k++; await gs[i].p; return i === 0 ? { ok: false, kind: "timeout", ms: 1 } : goodOut() })
+  const p1 = rewrite("r1", "req-l2-0001"); await until(() => calls.length === 1); assert.equal(Object.keys(env.get("ai-usage/luna-breaker").inflight).length, 1)
+  env.time.now += 31000 // r1's slot expires while its call is still running
+  const p2 = rewrite("r2", "req-l2-0002"); await until(() => calls.length === 2)
+  const live = Object.keys(env.get("ai-usage/luna-breaker").inflight); assert.equal(live.length, 1); assert.equal(live[0], breakerMod.ownerKey("r2", "req-l2-0002")) // the expired slot was purged
+  gs[0].release(); const a = await p1; assert.equal(a.applied, false); assert.equal(env.get("ai-usage/luna-breaker").state, "recovery"); assert.equal(Object.keys(env.get("ai-usage/luna-breaker").inflight).length, 1) // r1's late failure is ignored
+  gs[1].release(); assert.equal((await p2).applied, true); assert.equal(env.get("ai-usage/luna-breaker").state, "recovery"); assert.equal(Object.keys(env.get("ai-usage/luna-breaker").inflight).length, 0)
+})
+test("HARD BLOCK e2e: a provider answer arriving after the breaker was blocked cannot clear the block (and its text is still delivered)", async () => {
+  await accept("u1"); const g = gate(); install(async () => { await g.p; return goodOut() })
+  const p = rewrite("u1", "req-hb-0001"); await until(() => calls.length === 1)
+  await breakerMod.report({ owner: "other", mode: "normal", ok: false, kind: "auth", cfg: mkCfg() }); assert.equal(env.get("ai-usage/luna-breaker").state, "blocked")
+  g.release(); assert.equal((await p).applied, true); assert.equal(env.get("ai-usage/luna-breaker").state, "blocked"); assert.equal(env.get("ai-usage/luna-breaker").blockedKind, "auth")
+  const cfg1 = mkCfg({ resetEpoch: 1 }); assert.equal((await breakerMod.admit({ owner: "op", cfg: cfg1 })).allowed, true) // only the operator reset clears it
 })

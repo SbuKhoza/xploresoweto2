@@ -51,7 +51,7 @@ async function tryRewrite({ uid, requestId, cfg, intent, blocks, language, notic
       const gate = await breaker.admit({ owner, cfg })
       if (!gate.allowed) return skip(`breaker:${gate.reason}`)
       const reserve = cal.inputTokens + L.limits.maxOutputTokens // the most this call can possibly cost
-      const ticket = await usage.begin({ uid, requestId, cfg, reserveTokens: reserve }) // durable "called" commit BEFORE the network request
+      const ticket = await usage.begin({ uid, requestId, cfg, reserveTokens: reserve, guard: (tx) => breaker.guardInTx(tx, { owner, mode: gate.mode, cfg }) }) // durable "called" commit BEFORE the network request
       if (!ticket.ok) { await breaker.release({ owner, mode: gate.mode }); return skip(`usage:${ticket.reason}`) }
       const res = await deps.callResponses({ payload, maxOutputTokens: L.limits.maxOutputTokens, reasoningEffort: cal.reasoningEffort, timeoutMs: L.limits.timeoutMs })
       if (!res.ok) {

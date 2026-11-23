@@ -26,7 +26,7 @@ const firstShard = (uid, requestId) => parseInt(sha256hex(`shard:${uid}:${reques
 
 // -> { ok:true, day, shard, reserved } | { ok:false, reason }
 // reserveTokens = calibrated input tokens for this payload + the maximum output tokens (the most this call can possibly cost).
-async function begin({ uid, requestId, cfg, reserveTokens }) {
+async function begin({ uid, requestId, cfg, reserveTokens, guard = null }) {
   const L = cfg.luna.limits, day = clock.todaySAST()
   const perShard = Math.floor(L.dailyGlobalTokens / GLOBAL_SHARDS)
   if (!Number.isInteger(reserveTokens) || reserveTokens <= 0 || reserveTokens > perShard) return { ok: false, reason: "budget-too-small" }
@@ -34,6 +34,7 @@ async function begin({ uid, requestId, cfg, reserveTokens }) {
   for (let k = 0; k < GLOBAL_SHARDS; k++) { // normally exactly one transaction; others only when a shard is nearly full
     const shard = (start + k) % GLOBAL_SHARDS
     const r = await fb.db().runTransaction(async (tx) => {
+      if (guard) { const gr = await guard(tx); if (!gr.ok) return { ok: false, reason: gr.reason, guard: true } } // the breaker, re-checked in THIS transaction before `called` is committed
       const rs = await tx.get(requestRef(uid, requestId))
       const us = await tx.get(userRef(uid, day))
       const gs = await tx.get(shardRef(day, shard))

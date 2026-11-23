@@ -376,11 +376,11 @@ test("retention: request records carry NO expireAt (never expire); the day-scope
 })
 
 // ================================================================== ROUND 3: cooldown ladder, fail-closed breaker, record retention
-const breakerTxFails = (when) => { // make every transaction that touches the breaker document throw while `when()` is true; returns a restore function
+const breakerTxFails = (when, readsToo = false) => { // fails transactions that WRITE the breaker (readsToo: also those that merely read it, i.e. the reconcile transaction) // make every transaction that touches the breaker document throw while `when()` is true; returns a restore function
   const real = env.db.runTransaction.bind(env.db)
   env.db.runTransaction = async (fn) => {
     if (!when()) return real(fn)
-    let touches = false; const probe = { get: async (r) => { if (r.path === "ai-usage/luna-breaker") touches = true; return { exists: false, data: () => ({}) } }, set() {}, delete() {} }
+    let touches = false; const probe = { get: async (r) => { if (readsToo && r.path === "ai-usage/luna-breaker") touches = true; return { exists: false, data: () => ({}) } }, set(r) { if (r.path === "ai-usage/luna-breaker") touches = true }, delete() {} } // fails only transactions that WRITE the breaker (begin() merely reads it)
     try { await fn(probe) } catch (e) { /* ignore: only used to see which documents the callback touches */ }
     if (touches) throw Object.assign(new Error("UNAVAILABLE: simulated breaker transaction failure"), { code: 14 })
     return real(fn)
@@ -505,7 +505,7 @@ test("UNRESOLVED: a FULL page of in-flight records cannot prove there is nothing
 })
 test("UNRESOLVED failure injection: a failing chunk denies; earlier chunks stay resolved (atomic per chunk); the next attempt finishes", async () => {
   for (let i = 0; i < 45; i++) await makeEvent({ ok: true }); const real = env.db.runTransaction.bind(env.db); let n = 0
-  env.db.runTransaction = async (fn) => { let touches = false; const probe = { get: async (r) => { if (r.path === "ai-usage/luna-breaker") touches = true; return { exists: false, data: () => ({}) } }, set() {}, delete() {} }; try { await fn(probe) } catch (e) { } if (touches && ++n === 2) throw new Error("UNAVAILABLE"); return real(fn) }
+  env.db.runTransaction = async (fn) => { const readsToo = true; let touches = false; const probe = { get: async (r) => { if (readsToo && r.path === "ai-usage/luna-breaker") touches = true; return { exists: false, data: () => ({}) } }, set(r) { if (r.path === "ai-usage/luna-breaker") touches = true }, delete() {} }; try { await fn(probe) } catch (e) { } if (touches && ++n === 2) throw new Error("UNAVAILABLE"); return real(fn) }
   try { const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "unresolved-calls:reconcile-failed"]) } finally { env.db.runTransaction = real }
   assert.equal(unresolvedNow().length, 25) // first chunk of 20 committed, nothing half-applied
   assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).allowed, true); assert.equal(unresolvedNow().length, 0)
@@ -514,7 +514,7 @@ test("UNRESOLVED failure injection: unreadable query, unreadable breaker, or a f
   await makeEvent({ ok: true }); const realCol = env.db.collection.bind(env.db)
   env.db.collection = (n) => { const c = realCol(n); c.where = () => ({ limit: () => ({ get: async () => { throw new Error("query failed") } }) }); return c }
   try { assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).reason, "breaker-unreadable") } finally { env.db.collection = realCol }
-  const restore = breakerTxFails(() => true); try { const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "unresolved-calls:reconcile-failed"]) } finally { restore() }
+  const restore = breakerTxFails(() => true, true); try { const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "unresolved-calls:reconcile-failed"]) } finally { restore() }
   const realGet = Object.getPrototypeOf(env.db.collection("ai-usage").doc("luna-breaker")).get; const P = Object.getPrototypeOf(env.db.collection("ai-usage").doc("luna-breaker"))
   P.get = async function () { if (this.path === "ai-usage/luna-breaker") throw new Error("breaker read failed"); return realGet.call(this) }
   try { assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).reason, "breaker-unreadable") } finally { P.get = realGet }
@@ -543,4 +543,115 @@ test("UNRESOLVED: the unresolved query needs only the automatic single-field ind
   assert.deepEqual(idx.fieldOverrides, []) // no exemption disables the automatic index on `unresolved`
   const src = fs.readFileSync(path.join(__dirname, "..", "src", "ai", "luna", "breaker.js"), "utf8"); const q = src.match(/where\("unresolved", "==", true\)([^\n]*)/)[1]
   assert.match(q, /^\.limit\(UNRESOLVED\.page\)\.get\(\)/); assert.ok(!/orderBy|where\(.*where\(/.test(q)) // one equality filter, no order, no range: single-field index only
+})
+
+// ================================================================== ROUND 5: lease / slot ownership, hard-block + reset-epoch protection, begin() guard
+const outc = (owner, mode, ok, kind = "timeout", more = {}) => breaker.report({ owner, mode, ok, kind: ok ? undefined : kind, cfg: more.cfg || ucfg(), ...more })
+const probeReplaced = async () => { await failN(3); tick(61); assert.equal((await breaker.admit({ owner: "A", cfg: ucfg() })).mode, "probe"); tick(31); assert.equal((await breaker.admit({ owner: "B", cfg: ucfg() })).mode, "probe"); assert.equal(state().lease.owner, "B") }
+const inRecovery = async () => { await failN(3); tick(61); await breaker.admit({ owner: "p", cfg: ucfg() }); await outc("p", "probe", true); assert.equal(state().state, "recovery") }
+
+test("PROBE OWNERSHIP: A's lease expired and B holds the new lease; A's late SUCCESS changes nothing and B stays the one probe", async () => {
+  await probeReplaced(); const lease = JSON.stringify(state().lease); await outc("A", "probe", true); assert.equal(state().state, "half_open"); assert.equal(JSON.stringify(state().lease), lease)
+  assert.deepEqual(await breaker.admit({ owner: "C", cfg: ucfg() }), { allowed: false, reason: "probe-in-progress" })
+})
+test("PROBE OWNERSHIP: A's late counted FAILURE does not wipe B's lease, re-open, or climb the ladder", async () => {
+  await probeReplaced(); const step = state().cooldownStep; await outc("A", "probe", false, "timeout"); await outc("A", "probe", false, "server"); await outc("A", "probe", false, "rate_limit", { retryAfterSeconds: 500 })
+  assert.deepEqual([state().state, state().lease.owner, state().cooldownStep], ["half_open", "B", step])
+})
+test("PROBE OWNERSHIP: B (the lease holder) still decides: success -> recovery, failure -> next ladder step", async () => {
+  await probeReplaced(); await outc("A", "probe", true); await outc("B", "probe", true); assert.equal(state().state, "recovery")
+  env = F.setupWorld(); await probeReplaced(); const s0 = state().cooldownStep; await outc("A", "probe", true); await outc("B", "probe", false, "timeout"); assert.deepEqual([state().state, state().cooldownStep], ["open", s0 + 1])
+})
+test("PROBE OWNERSHIP: an EXPIRED lease nobody replaced no longer authorises a state change (strict); the next admit simply takes a new lease", async () => {
+  await failN(3); tick(61); await breaker.admit({ owner: "A", cfg: ucfg() }); tick(31); await outc("A", "probe", true); assert.equal(state().state, "half_open")
+  assert.equal((await breaker.admit({ owner: "B", cfg: ucfg() })).mode, "probe")
+})
+test("PROBE OWNERSHIP: a late hard failure (auth/billing/bad_request) from a non-owner still BLOCKS (safe direction); a late probe success never un-blocks or moves open/closed", async () => {
+  await probeReplaced(); await outc("A", "probe", false, "auth"); assert.deepEqual([state().state, state().blockedKind], ["blocked", "auth"])
+  env = F.setupWorld(); await failN(3); await outc("A", "probe", true); assert.equal(state().state, "open") // open breaker: a late success does not skip the cooldown
+  env = F.setupWorld(); await outc("A", "probe", true); await outc("A", "probe", false, "timeout"); assert.equal(state().state === undefined || state().state === "closed", true) // closed: success is bookkeeping, failure counts as ONE ordinary failure
+  assert.equal(state().consecutive, 1)
+})
+
+test("RECOVERY OWNERSHIP: the reporting owner must hold an UNEXPIRED recovery slot to change state", async () => {
+  await inRecovery(); await breaker.admit({ owner: "x", cfg: ucfg() }); assert.ok(state().inflight.x > env.time.now)
+  await outc("x", "recovery", false, "timeout"); assert.equal(state().state, "open") // holder: failure re-opens
+  env = F.setupWorld(); await inRecovery(); await breaker.admit({ owner: "x", cfg: ucfg() }); tick(31) // expired slot (entry still stored, but no longer live)
+  await outc("x", "recovery", false, "timeout"); assert.equal(state().state, "recovery"); assert.ok(state().inflight.x, "a non-owner outcome must not even remove the entry") // ignored
+  await outc("x", "recovery", true); assert.equal(state().state, "recovery")
+})
+test("RECOVERY OWNERSHIP: a replaced slot (expired, purged by later admissions) cannot change state; the new holder can", async () => {
+  await inRecovery(); const c = ucfg(); await breaker.admit({ owner: "x", cfg: c }); await breaker.admit({ owner: "y", cfg: c }); tick(31)
+  assert.equal((await breaker.admit({ owner: "z", cfg: c })).mode, "recovery"); assert.deepEqual(Object.keys(state().inflight), ["z"]) // x and y purged, z holds the only live slot
+  await outc("x", "recovery", false, "server"); await outc("y", "recovery", false, "timeout"); assert.equal(state().state, "recovery")
+  await outc("z", "recovery", false, "timeout"); assert.equal(state().state, "open")
+})
+test("RECOVERY OWNERSHIP: a delayed failure after the breaker moved on is ignored (open), counts once (closed), and blocks only for hard kinds", async () => {
+  await inRecovery(); const c = ucfg(); await breaker.admit({ owner: "x", cfg: c }); await breaker.admit({ owner: "y", cfg: c }); await outc("y", "recovery", false, "timeout"); const secs = state().cooldownSeconds; assert.equal(state().state, "open")
+  await outc("x", "recovery", false, "timeout"); assert.deepEqual([state().state, state().cooldownSeconds], ["open", secs]) // not a second ladder step
+  env = F.setupWorld(); await inRecovery(); await breaker.admit({ owner: "x", cfg: c }); tick(61); assert.deepEqual(await breaker.admit({ owner: "n", cfg: c }), { allowed: true, mode: "normal" }); assert.equal(state().state, "closed")
+  await outc("x", "recovery", false, "timeout"); assert.deepEqual([state().state, state().consecutive], ["closed", 1])
+  await outc("x", "recovery", false, "billing"); assert.equal(state().state, "blocked")
+})
+test("RECOVERY OWNERSHIP: concurrent recovery calls never exceed the global cap of 2, and concurrent outcomes resolve consistently", async () => {
+  await inRecovery(); const c = ucfg(); const got = await Promise.all(["w", "x", "y", "z"].map((o) => breaker.admit({ owner: o, cfg: c }))); const held = ["w", "x", "y", "z"].filter((_, i) => got[i].allowed)
+  assert.equal(held.length, 2); assert.equal(Object.keys(state().inflight).length, 2); const other = ["w", "x", "y", "z"].filter((o) => !held.includes(o))[0]
+  assert.equal((await breaker.admit({ owner: other, cfg: c })).allowed, false)
+  await Promise.all([outc(held[0], "recovery", true), outc(held[1], "recovery", false, "timeout")]); assert.equal(state().state, "open"); assert.deepEqual(state().inflight, {}) // either order ends open
+  await outc(held[0], "recovery", true); assert.equal(state().state, "open") // and the straggler cannot move it
+})
+test("RECOVERY OWNERSHIP: a holder's success frees only its own slot", async () => {
+  await inRecovery(); const c = ucfg(); await breaker.admit({ owner: "x", cfg: c }); await breaker.admit({ owner: "y", cfg: c }); await outc("x", "recovery", true)
+  assert.deepEqual(Object.keys(state().inflight), ["y"]); assert.equal((await breaker.admit({ owner: "w", cfg: c })).mode, "recovery"); assert.equal(Object.keys(state().inflight).length, 2)
+})
+
+const snapshotOf = () => JSON.stringify(state())
+test("HARD BLOCK: no late event of ANY kind, mode or age can clear a blocked breaker; only an operator reset can", async () => {
+  await outc("x", "normal", false, "billing"); assert.equal(state().state, "blocked"); const before = snapshotOf()
+  for (const mode of ["normal", "probe", "recovery"]) for (const [ok, kind, more] of [[true], [true, "", { rejected: true }], [true, "", { overrun: true }], [false, "timeout"], [false, "server"], [false, "rate_limit"], [false, "unreported"], [false, "billing"], [false, "auth"], [false, "bad_request"]]) {
+    await outc("late", mode, ok, kind, more || {}); assert.equal(snapshotOf(), before, `${mode} ${ok} ${kind}`)
+  }
+  tick(10000000); assert.deepEqual(await breaker.admit({ owner: "q", cfg: ucfg() }), { allowed: false, reason: "blocked" })
+  assert.deepEqual(await breaker.admit({ owner: "q", cfg: bcfg({ resetEpoch: 1 }) }), { allowed: true, mode: "normal" }); assert.equal(state().state, "closed")
+})
+test("RESET EPOCH: an event from before the operator reset can never re-block, re-open or count after it; a post-reset event still does", async () => {
+  await outc("x", "normal", false, "auth"); const reset = bcfg({ resetEpoch: 1 }); await breaker.admit({ owner: "op", cfg: reset }); assert.deepEqual([state().state, state().resetEpoch], ["closed", 1])
+  await outc("late", "normal", false, "auth"); assert.equal(state().state, "closed") // reporter still on epoch 0 (stale config cache)
+  await outc("late", "probe", false, "billing"); await outc("late", "recovery", false, "bad_request"); for (let i = 0; i < 5; i++) await outc(`l${i}`, "normal", false, "timeout")
+  assert.deepEqual([state().state, state().consecutive], ["closed", 0])
+  await outc("fresh", "normal", false, "auth", { cfg: reset }); assert.equal(state().state, "blocked") // a genuinely new failure still blocks
+})
+test("RESET EPOCH: the breaker document's epoch is a floor too, even if the reporting instance has not seen the new config", async () => {
+  await outc("x", "normal", false, "auth"); await breaker.admit({ owner: "op", cfg: bcfg({ resetEpoch: 2 }) }); assert.equal(state().resetEpoch, 2)
+  await outc("late", "normal", false, "auth", { cfg: bcfg({ resetEpoch: 1 }) }); assert.equal(state().state, "closed") // 1 < document epoch 2
+  const next = breaker.reduce(state(), { owner: "o", mode: "normal", ok: false, kind: "auth", epoch: 0 }, bcfg({ resetEpoch: 2 }), env.time.now); assert.equal(next, null)
+})
+test("RECONCILE + RESET EPOCH: replayed events from an earlier epoch are resolved but never applied; current-epoch events are", async () => {
+  await outc("x", "normal", false, "auth"); await breaker.admit({ owner: "op", cfg: bcfg({ resetEpoch: 1 }) }); assert.equal(state().state, "closed")
+  await makeEvent({ ok: false, kind: "auth", epoch: 0 }); await makeCalled(200) // a stale epoch-0 call too (begin recorded epoch 0)
+  const g = await breaker.admit({ owner: "a", cfg: bcfg({ resetEpoch: 1 }) }); assert.deepEqual(g, { allowed: true, mode: "normal" }); assert.equal(state().state, "closed"); assert.equal(unresolvedNow().length, 0); assert.equal(recs().length, 2) // resolved, kept
+  const c1 = bcfg({ resetEpoch: 1 }); const keep = env.time.now; const t = await usage.begin({ uid: "e1", requestId: "req-e1-0001", cfg: c1, reserveTokens: 600 }); assert.equal(t.ok, true); assert.equal(recs().find((r) => r.uid === "e1").epoch, 1)
+  await makeEvent({ ok: false, kind: "auth", epoch: 1 }); assert.deepEqual((await breaker.admit({ owner: "b", cfg: c1 })).reason, "blocked"); assert.ok(keep)
+})
+test("RECONCILE: a stored event can never clear a block, and a stored probe/recovery event follows the same ownership rules", async () => {
+  await outc("x", "normal", false, "auth"); await makeEvent({ ok: true, mode: "probe" }); await makeEvent({ ok: false, kind: "timeout", mode: "recovery" })
+  assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).reason, "blocked"); assert.equal(state().blockedKind, "auth"); assert.equal(unresolvedNow().length, 0)
+  env = F.setupWorld(); await probeReplaced() // B holds the lease; A's stored probe failure is replayed
+  await makeEvent({ ok: false, kind: "timeout", mode: "probe", owner: "A" }); const g = await breaker.admit({ owner: "c", cfg: ucfg() }); assert.equal(g.reason, "probe-in-progress"); assert.deepEqual([state().state, state().lease.owner], ["half_open", "B"]); assert.equal(unresolvedNow().length, 0)
+  env = F.setupWorld(); await failN(3); tick(61); await breaker.admit({ owner: "A", cfg: ucfg() }) // A still holds the live lease: its stored failure applies
+  await makeEvent({ ok: false, kind: "timeout", mode: "probe", owner: "A" }); assert.equal((await breaker.admit({ owner: "c", cfg: ucfg() })).reason, "open"); assert.equal(unresolvedNow().length, 0)
+})
+
+test("GUARD: guardInTx allows only a closed breaker (normal), the live lease owner (probe), or a live slot holder (recovery); blocked always denies", async () => {
+  const g = (owner, mode) => env.db.runTransaction((tx) => breaker.guardInTx(tx, { owner, mode, cfg: ucfg() }))
+  assert.deepEqual(await g("a", "normal"), { ok: true }); assert.equal((await g("a", "probe")).ok, false); assert.equal((await g("a", "recovery")).ok, false)
+  await failN(3); assert.equal((await g("a", "normal")).ok, false); tick(61); await breaker.admit({ owner: "A", cfg: ucfg() })
+  assert.equal((await g("A", "probe")).ok, true); assert.equal((await g("B", "probe")).ok, false); tick(31); assert.equal((await g("A", "probe")).ok, false) // expired
+  env = F.setupWorld(); await inRecovery(); await breaker.admit({ owner: "x", cfg: ucfg() }); assert.equal((await g("x", "recovery")).ok, true); assert.equal((await g("y", "recovery")).ok, false); assert.equal((await g("x", "normal")).ok, false); tick(31); assert.equal((await g("x", "recovery")).ok, false)
+  env = F.setupWorld(); await outc("x", "normal", false, "auth"); for (const m of ["normal", "probe", "recovery"]) assert.deepEqual(await g("x", m), { ok: false, reason: "breaker-blocked" })
+})
+test("GUARD: a denying guard makes begin() commit NOTHING (no record, no attempt, no reservation) and does not try other shards", async () => {
+  const r = await usage.begin({ uid: "g1", requestId: "req-g1-0001", cfg: ucfg(), reserveTokens: 600, guard: async () => ({ ok: false, reason: "breaker-changed" }) })
+  assert.deepEqual([r.ok, r.reason], [false, "breaker-changed"]); assert.equal(env.list("ai-usage").length, 0)
+  const ok = await usage.begin({ uid: "g1", requestId: "req-g1-0001", cfg: ucfg(), reserveTokens: 600, guard: async () => ({ ok: true }) }); assert.equal(ok.ok, true); assert.equal(recs().length, 1) // the same requestId is still usable: nothing was burnt
 })

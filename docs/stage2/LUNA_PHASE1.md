@@ -137,3 +137,22 @@ No rules or indexes change. `ai-consent` and the new `ai-usage` documents are cl
 - The notice wording is yours to approve. It now says exactly what Phase 1 sends (only short Malloya-written template text and a language code), says the user's messages, account details and location are not sent, and makes no security, retention or deletion promise (no "securely", no zero-data-retention claim). Tests tie that statement to the real payload. It no longer refers to a privacy policy (round 2); a reference can be added back once an accessible policy exists. The notice version stays 1 because nobody can have consented yet (Luna has never been active). If a later phase sends anything more, the wording and `NOTICE_VERSION` must change together.
 - Retention/deletion of the consent record on account deletion (policy decision, above).
 - `deleteConversation` / `deleteAll` are not atomic (existing behaviour): a chat racing a delete can leave orphan messages that the 90-day TTL removes.
+
+## Round 5: late outcomes and stale admission
+
+**Rule 1 – only the owner changes state.** A report changes the breaker's state only while its owner still holds the live probe lease (`half_open`, same owner, lease not expired) or the live recovery slot (`recovery`, slot not expired). Expiry is strict: an expired but not yet replaced lease or slot no longer authorises a state change. Any other report is a *late* outcome:
+
+| Late outcome | Effect |
+|---|---|
+| hard-block kind (auth, billing, bad_request, input overrun limit) | still blocks (the safe direction) |
+| counted failure | counts as one ordinary failure only when the breaker is `closed`; ignored in `open`, `half_open`, `recovery`, `blocked` |
+| success | bookkeeping only (invalid-output ring, overruns); never closes, never moves a lease/slot |
+| anything while `blocked` | ignored: a late event can never clear a hard block |
+
+**Rule 2 – reset epochs.** `luna.resetEpoch` is stamped on every event and on every `luna_r_*` record. An event from an epoch older than the breaker's current epoch is dropped, both on direct reports and in reconciliation, so a pre-reset call cannot re-block after an operator reset. Only an operator raising `resetEpoch` clears `blocked`.
+
+**Rule 3 – commit-point check.** `begin()` runs `breaker.guardInTx` inside its transaction, so a call cannot start after the breaker opened or blocked, or after its lease/slot expired or was replaced. Cost: one extra breaker-document read per `begin()` transaction. Skip reasons: `usage:breaker-blocked`, `usage:breaker-changed`; no `luna_r_*` record, attempt or reservation is written.
+
+**Residual races (bounded).** (a) A call already past the guard may still be in flight when the breaker changes: at most 2 per instance, 20 globally. (b) The gap between the `called` commit and the HTTP send is not closable. (c) A late counted failure ignored because its owner no longer holds the probe delays re-opening by at most one probe cycle (lease >= 30 s). (d) Grace stays 90 s.
+
+Tests: 24 new (units 93, flow 49 after Round 5); suite total 377. Mutation results: `mutation-check-r5.txt`.

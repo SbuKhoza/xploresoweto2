@@ -94,6 +94,11 @@ async function admit({ owner, cfg }) {
 function reduce(b, ev, cfg, now) {
   const B = cfg.luna.breaker, epoch = cfg.luna.resetEpoch || 0
   const { owner, mode, ok, kind, retryAfterSeconds, rejected = false, overrun = false } = ev
+  // (1) An event from before an operator reset (earlier epoch than this instance's config OR than the breaker document) never changes anything:
+  //     it can neither re-block nor re-open a system the operator just cleared.
+  if ((Number.isInteger(ev.epoch) ? ev.epoch : epoch) < Math.max(epoch, b.resetEpoch || 0)) return null
+  // (2) A blocked breaker is cleared ONLY by an operator reset (admit() sees a higher luna.resetEpoch). No event of any kind or age touches it.
+  if (b.state === "blocked") return null
   const rule = ok ? null : (KINDS[kind] || KINDS.server).breaker
   const openStep = (idx, retry = 0) => {
     const i = Math.min(Math.max(idx, 0), COOLDOWN_STEPS.length - 1), secs = Math.min(MAX_COOLDOWN_SECONDS, Math.max(COOLDOWN_STEPS[i], retry || 0))
@@ -101,25 +106,30 @@ function reduce(b, ev, cfg, now) {
   }
   const block = (why) => ({ ...closed(b.resetEpoch || epoch), state: "blocked", blockedKind: why, resetEpoch: Math.max(b.resetEpoch || 0, epoch) })
   const nextStep = (b.cooldownStep || 0) + 1
+  // (3) OWNERSHIP. A probe / recovery outcome may change the state only while its owner still holds the live (unexpired) probe lease / recovery slot.
+  //     A delayed outcome whose lease or slot has expired or been replaced is a "late" outcome: it is handled like an ordinary call (below).
+  const holdsProbe = mode === "probe" && b.state === "half_open" && !!b.lease && b.lease.owner === owner && b.lease.expiresAt > now
+  const holdsSlot = mode === "recovery" && b.state === "recovery" && ((b.inflight || {})[owner] || 0) > now
   let next = null
-  if (mode === "probe") {
+  if (holdsProbe) {
     if (ok) next = { ...closed(b.resetEpoch || 0), state: "recovery", cooldownStep: b.cooldownStep || 0, recoveryUntil: now + B.recoverySeconds * 1000 }
     else if (rule === "blocked") next = block(kind)
     else next = openStep(nextStep, retryAfterSeconds)
-  } else if (mode === "recovery") {
+  } else if (holdsSlot) {
     const inflight = { ...(b.inflight || {}) }; delete inflight[owner]
-    if (ok) next = b.state === "recovery" ? { ...b, inflight } : null
+    if (ok) next = { ...b, inflight }
     else if (rule === "blocked") next = block(kind)
     else next = openStep(nextStep, retryAfterSeconds)
-  } else if (b.state === "closed") { // normal-mode failure
-    if (rule === "blocked") next = block(kind)
-    else if (rule === "open") next = openStep(0, retryAfterSeconds)
-    else if (!ok) {
-      const failures = [...(b.failures || []).filter((t) => now - t < B.windowSeconds * 1000), now], consecutive = (b.consecutive || 0) + 1
-      next = consecutive >= CONSECUTIVE_FAILURES || failures.length >= B.failureThreshold ? openStep(0) : { ...b, failures, consecutive }
+  } else { // an ordinary call, or a late probe/recovery outcome
+    if (!ok && rule === "blocked") next = block(kind) // a hard failure is true whenever it arrives (the safe direction); only an operator reset undoes it
+    else if (!ok && b.state === "closed") { // everything else acts on a CLOSED breaker only: it counts as one ordinary failure
+      if (rule === "open") next = openStep(0, retryAfterSeconds)
+      else {
+        const failures = [...(b.failures || []).filter((t) => now - t < B.windowSeconds * 1000), now], consecutive = (b.consecutive || 0) + 1
+        next = consecutive >= CONSECUTIVE_FAILURES || failures.length >= B.failureThreshold ? openStep(0) : { ...b, failures, consecutive }
+      }
     }
   }
-  if (b.state === "blocked" && !next) return null // an operator-only state: late reports change nothing
   if (!ok) return next
   // ---- a provider response arrived: cross-call bookkeeping ----
   const W = INVALID_OUTPUT.window
@@ -134,7 +144,7 @@ function reduce(b, ev, cfg, now) {
   return cur
 }
 
-const evOf = ({ owner, mode, ok, kind, retryAfterSeconds, rejected = false, overrun = false }) => ({ owner, mode, ok: !!ok, kind: kind || null, retryAfterSeconds: retryAfterSeconds || 0, rejected: !!rejected, overrun: !!overrun })
+const evOf = ({ owner, mode, ok, kind, retryAfterSeconds, rejected = false, overrun = false, cfg }) => ({ epoch: (cfg && cfg.luna && cfg.luna.resetEpoch) || 0, owner, mode, ok: !!ok, kind: kind || null, retryAfterSeconds: retryAfterSeconds || 0, rejected: !!rejected, overrun: !!overrun })
 
 async function commitEvent(ev, cfg) { // one transaction; throws on failure
   await fb.db().runTransaction(async (tx) => {
@@ -156,7 +166,7 @@ async function report(args) {
   }
   for (let attempt = 0; attempt < 2; attempt++) { try { await commitEvent(ev, cfg); return { reported: true } } catch (e) { /* retry once, then fail closed */ } }
   localHoldUntil = clock.now().getTime() + LOCAL_HOLD_MS
-  return { reported: false, event: { ...ev, epoch: cfg.luna.resetEpoch || 0 } }
+  return { reported: false, event: ev }
 }
 
 // ---- unresolved paid calls -------------------------------------------------------------------------------------------------------------------------
@@ -180,12 +190,12 @@ async function reconcileChunk(ids, cfg) {
       const s = await tx.get(ref()); let b = s.exists ? { ...closed(), ...s.data() } : closed(), changed = false
       const found = []
       for (const id of ids) { const r = await tx.get(recRef(id)); if (r.exists) found.push({ id, d: r.data() }) }
-      const now = clock.now().getTime(), epoch = cfg.luna.resetEpoch || 0
+      const now = clock.now().getTime()
       const todo = found.filter((x) => { const c = classify(x.d, now); return c === "event" || c === "stale" })
       todo.sort((x, y) => (tsMs(x.d.calledAt) || 0) - (tsMs(y.d.calledAt) || 0))
       for (const { id, d } of todo) {
-        const isEvent = classify(d, now) === "event", ev = isEvent ? d.pendingEvent : STALE_EVENT(id)
-        if ((isEvent ? ev.epoch || 0 : d.epoch || 0) >= epoch) { const next = reduce(b, ev, cfg, now); if (next) { b = next; changed = true } } // an operator reset supersedes older events
+        const isEvent = classify(d, now) === "event", ev = isEvent ? d.pendingEvent : { ...STALE_EVENT(id), epoch: d.epoch || 0 }
+        const next = reduce(b, ev, cfg, now); if (next) { b = next; changed = true } // reduce() drops an event from before an operator reset, and applies the same ownership rules as a live report; the record is resolved either way
         const { unresolved, pendingEvent, ...rest } = d
         tx.set(recRef(id), { ...rest, ...(isEvent ? {} : { state: "unreported" }), resolvedBy: "reconcile", resolvedAt: fb.FieldValue().serverTimestamp() }) // permanent record kept
       }
@@ -212,6 +222,18 @@ async function clearUnresolved(firstPage, cfg) {
   return { ok: false, reason: "backlog" }
 }
 
+// Called as the FIRST read of begin()'s transaction, i.e. in the same serialisable transaction that commits `called`. admit() decided on a snapshot that may be a
+// round trip old; this re-checks the breaker at the commit point, so a call cannot start after the breaker opened or blocked, or after its probe lease /
+// recovery slot expired or was replaced. -> { ok:true } | { ok:false, reason }
+async function guardInTx(tx, { owner, mode, cfg }) {
+  const s = await tx.get(ref()), b = s.exists ? { ...closed(), ...s.data() } : closed(), now = clock.now().getTime()
+  if (b.state === "blocked") return { ok: false, reason: "breaker-blocked" }
+  if (mode === "normal") return b.state === "closed" ? { ok: true } : { ok: false, reason: "breaker-changed" }
+  if (mode === "probe") return b.state === "half_open" && b.lease && b.lease.owner === owner && b.lease.expiresAt > now ? { ok: true } : { ok: false, reason: "breaker-changed" }
+  if (mode === "recovery") return b.state === "recovery" && ((b.inflight || {})[owner] || 0) > now ? { ok: true } : { ok: false, reason: "breaker-changed" }
+  return { ok: false, reason: "breaker-changed" }
+}
+
 // An admitted call that never reached the provider (e.g. the user's allowance ran out first): give the probe lease / recovery slot back.
 async function release({ owner, mode }) {
   if (mode === "normal") return
@@ -225,4 +247,4 @@ async function release({ owner, mode }) {
     })
   } catch (e) { /* the lease expires by itself */ }
 }
-module.exports = { admit, report, release, peek, closed, ownerKey, reduce, resetLocalForTests, classify }
+module.exports = { admit, report, release, peek, closed, ownerKey, reduce, guardInTx, resetLocalForTests, classify }
