@@ -19,7 +19,9 @@ function classifyHttpError(status, body, headers) {
     return { kind: "rate_limit", retryAfterSeconds: Number.isFinite(ra) && ra > 0 ? Math.min(Math.ceil(ra), 900) : null }
   }
   if (status >= 500) return { kind: "server" }
-  return { kind: "bad_request" } // other 4xx (including 400/404/422): our request is wrong, retrying cannot help
+  if ([408, 409, 425].includes(status)) return { kind: "server" } // transient client-side conditions: counted by the breaker, not a configuration error
+  if ([400, 404, 405, 413, 415, 422].includes(status)) return { kind: "bad_request" } // our request, model name or endpoint is wrong: the breaker hard-blocks
+  return { kind: "server" } // any other 4xx is unexpected: counted, never a silent hard block
 }
 
 function usageOf(u) {

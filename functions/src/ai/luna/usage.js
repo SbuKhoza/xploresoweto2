@@ -11,6 +11,7 @@ const fb = require("../../lib/firebase")
 const clock = require("../../lib/clock")
 const { sha256hex } = require("../../lib/crypto")
 const { AI_COL } = require("../constants")
+const consent = require("../consent")
 const { GLOBAL_SHARDS, REQUEST_RECORD_TTL_DAYS, KINDS } = require("./constants")
 
 const col = () => fb.db().collection(AI_COL.usage)
@@ -57,11 +58,17 @@ const addUsage = (u, usage) => ({ ...u, inputTokens: u.inputTokens + (usage ? us
 
 // Settlement for a SUCCESSFUL, validated rewrite. Returned as a pair of hooks so persistTurn can run it inside ITS transaction:
 // the conversation turn and the Luna usage then commit together or not at all. read(tx) before any write; write(tx) after.
-function prepareSuccess({ uid, requestId, ticket, usage }) {
+// read(tx) also reads the user's CURRENT consent in the same transaction. If consent was withdrawn while the provider call was in flight,
+// persistTurn stores `originalBlocks` (Malloya's deterministic wording) instead of the Luna text, and the paid call is settled as
+// "consent-withdrawn": its real token cost is charged, but it does NOT count as a success and nothing reworded is ever stored or shown.
+function prepareSuccess({ uid, requestId, ticket, usage, originalBlocks }) {
   let snaps = null
-  return {
+  const hooks = {
+    originalBlocks,
+    consentActive: null, // set by read(tx); persistTurn checks it
     async read(tx) {
-      snaps = { r: await tx.get(requestRef(uid, requestId)), u: await tx.get(userRef(uid, ticket.day)), g: await tx.get(shardRef(ticket.day, ticket.shard)) }
+      snaps = { r: await tx.get(requestRef(uid, requestId)), u: await tx.get(userRef(uid, ticket.day)), g: await tx.get(shardRef(ticket.day, ticket.shard)), c: await tx.get(consent.ref(uid)) }
+      hooks.consentActive = consent.isActive(snaps.c.exists ? snaps.c.data() : null)
     },
     write(tx) {
       if (!snaps || !snaps.r.exists || snaps.r.data().state !== "called") return false // already settled elsewhere: never double count
@@ -69,12 +76,14 @@ function prepareSuccess({ uid, requestId, ticket, usage }) {
       const g = snaps.g.exists ? { ...newShard(ticket.day, ticket.shard), ...snaps.g.data() } : newShard(ticket.day, ticket.shard)
       const actual = actualOf(usage)
       const charged = actual === null ? ticket.reserved : actual // usage missing: charge the reservation (conservative)
-      tx.set(requestRef(uid, requestId), { ...snaps.r.data(), state: "settled", outcome: "ok", actual: charged, settledAt: stamp() })
-      tx.set(userRef(uid, ticket.day), { ...addUsage(u, usage), successes: u.successes + 1, updatedAt: stamp(), expireAt: ttl(3) })
+      const kept = hooks.consentActive === true
+      tx.set(requestRef(uid, requestId), { ...snaps.r.data(), state: "settled", outcome: kept ? "ok" : "consent-withdrawn", actual: charged, settledAt: stamp() })
+      tx.set(userRef(uid, ticket.day), { ...addUsage(u, usage), successes: u.successes + (kept ? 1 : 0), updatedAt: stamp(), expireAt: ttl(3) })
       tx.set(shardRef(ticket.day, ticket.shard), { ...g, tokens: Math.max(0, g.tokens - ticket.reserved + charged), updatedAt: stamp(), expireAt: ttl(3) })
       return true
     },
   }
+  return hooks
 }
 
 // Settlement for a call that did NOT produce an accepted rewrite (provider failure, or output rejected by the validator).

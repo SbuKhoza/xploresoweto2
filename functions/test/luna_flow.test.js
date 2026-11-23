@@ -88,7 +88,7 @@ test("the committed (uncalibrated) manifest keeps Luna OFF in a real runtime: no
   try { await accept(); const r = await chat("u1", "thanks"); assert.equal(textOf(r), THANKS); assert.equal(touched, 0) } finally { globalThis.fetch = realFetch; if (prev === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = prev }
 })
 test("provider failures of every kind: the user still gets Malloya's answer; no success is counted; tokens and the breaker follow the failure kind", async () => {
-  const expect = { rate_limit: [0, "open"], billing: [0, "blocked"], auth: [0, "blocked"], bad_request: [0, "closed"], server: [900, "closed"], timeout: [900, "closed"], network: [900, "closed"] }
+  const expect = { rate_limit: [0, "open"], billing: [0, "blocked"], auth: [0, "blocked"], bad_request: [0, "blocked"], server: [900, "closed"], timeout: [900, "closed"], network: [900, "closed"] }
   for (const [kind, [charged, breakerState]] of Object.entries(expect)) {
     env.seed("ai-usage/luna-breaker", { state: "closed", failures: [], resetEpoch: 0 }); const uid = `f_${kind}`; await accept(uid); const before = shardTotal()
     install(async () => ({ ok: false, kind, ms: 3 })); const r = await chat(uid, "thanks"); assert.equal(textOf(r), THANKS, kind)
@@ -100,7 +100,7 @@ test("an invalid / risky rewrite is refused: original wording, tokens charged as
   await accept(); for (const bad of ["Thanks! Visit Maponya Mall, R80 entry.", "You're welcome! I will book it for you.", "x"]) {
     install(async () => goodOut(bad)); const r = await chat("u1", "thanks"); assert.equal(textOf(r), THANKS, bad)
   }
-  const u = lunaUser(); assert.deepEqual([u.attempts, u.successes, u.inputTokens, u.outputTokens], [3, 0, 1200, 90]); assert.equal(env.get("ai-usage/luna-breaker"), undefined)
+  const u = lunaUser(); assert.deepEqual([u.attempts, u.successes, u.inputTokens, u.outputTokens], [3, 0, 1200, 90]); assert.equal(env.get("ai-usage/luna-breaker").state, "closed"); assert.deepEqual(env.get("ai-usage/luna-breaker").invalid, [1, 1, 1]) // provider healthy; rejections are only counted
   install(async () => ({ ok: true, text: "not json", usage: U, ms: 1 })); assert.equal(textOf(await chat("u1", "thanks")), THANKS)
 })
 test("a provider that throws, or a response without usage, can never break the chat", async () => {
@@ -213,8 +213,8 @@ test("aiGetUsage tells the app what it needs for the notice, and never fails bec
 test("config: Luna is OFF by default; stored values can never exceed the hard ceilings; unknown settings (model, provider, key, price) are refused", async () => {
   assert.equal(cfgMod.DEFAULTS.luna.enabled, false)
   const sa = makeSuperAdmin(env, "root")
-  const bad = [{ limits: { dailySuccessPerUser: 21 } }, { limits: { maxOutputTokens: 501 } }, { limits: { maxInputTokens: 3001 } }, { limits: { dailyGlobalTokens: 3000001 } }, { limits: { dailySuccessPerUser: 10, dailyAttemptsPerUser: 5 } },
-    { limits: { maxConcurrentPerInstance: 5 } }, { model: "gpt-x" }, { limits: { model: "x" } }, { provider: "x" }, { apiKey: "x" }, { breaker: { failureThreshold: 0 } }, { enabled: "yes" }]
+  const bad = [{ limits: { dailySuccessPerUser: 11 } }, { limits: { dailyAttemptsPerUser: 26 } }, { limits: { maxOutputTokens: 501 } }, { limits: { maxInputTokens: 3001 } }, { limits: { dailyGlobalTokens: 1500001 } }, { limits: { dailySuccessPerUser: 10, dailyAttemptsPerUser: 5 } },
+    { limits: { maxConcurrentPerInstance: 3 } }, { limits: { recoveryConcurrent: 3 } }, { limits: { timeoutMs: 8001 } }, { breaker: { leaseSeconds: 9 } }, { model: "gpt-x" }, { limits: { model: "x" } }, { provider: "x" }, { apiKey: "x" }, { breaker: { failureThreshold: 0 } }, { enabled: "yes" }]
   for (const luna of bad) await rejects(H.aiAdminUpdateConfig(sa({ patch: { luna } })), "invalid-argument", "invalid-config")
   assert.deepEqual((await H.aiAdminUpdateConfig(sa({ patch: { luna: { enabled: true, limits: { dailySuccessPerUser: 5 } } } }))).updated, ["luna"])
   assert.equal((await cfgMod.getAiConfig()).luna.limits.dailySuccessPerUser, 5)
@@ -229,4 +229,103 @@ test("logs never carry message text, the key, wording, or user ids", async () =>
   const prev = process.env.OPENAI_API_KEY; process.env.OPENAI_API_KEY = "test-key-not-real"
   try { await accept("uid-xyz"); install(async () => ({ ok: false, kind: "server", ms: 2 })); await chat("uid-xyz", "thanks, jane@example.com"); install(async () => goodOut("Visit Maponya Mall")); await chat("uid-xyz", "thanks") } finally { if (prev === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = prev }
   const logs = JSON.stringify(env.logs); assert.ok(env.logs.some((l) => /ai\.luna/.test(l.event))); for (const leak of ["jane", "uid-xyz", "test-key-not-real", "Maponya", "Anytime", "welcome"]) assert.ok(!logs.includes(leak), leak)
+})
+
+// ================================================================== ROUND 2
+const settle = () => new Promise((r) => setImmediate(r))
+const until = async (fn) => { for (let i = 0; i < 200 && !fn(); i++) await settle(); assert.ok(fn(), "condition never became true") }
+const gate = () => { let release; const p = new Promise((r) => { release = r }); return { p, release } }
+const requestRecords = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_r_"))
+const storedText = async (uid, r) => JSON.stringify((await conv.getConversation(uid, r.conversationId)).messages)
+
+test("CONSENT RACE: withdrawn while the provider call is waiting -> Malloya's own wording is saved, no success counted, the paid tokens are still accounted", async () => {
+  await accept(); const g = gate(); install(async () => { await g.p; return goodOut() })
+  const pending = chat("u1", "thanks"); await until(() => calls.length === 1) // the provider request is now "in flight"
+  await H.aiSetLunaConsent(req("u1", { action: "withdraw" })); assert.equal((await H.aiGetUsage(req("u1", {}))).luna.consent.active, false)
+  g.release(); const r = await pending
+  assert.equal(textOf(r), THANKS); const stored = await storedText("u1", r); assert.ok(stored.includes(THANKS) && !stored.includes("Anytime!"), "the Luna wording must not be stored")
+  const u = lunaUser(); assert.deepEqual([u.attempts, u.successes, u.inputTokens, u.outputTokens], [1, 0, 400, 30]) // it was paid for, so the real usage is recorded; it is not a success
+  assert.equal(shardTotal(), 430); const rec = requestRecords()[0]; assert.deepEqual([rec.state, rec.outcome, rec.actual], ["settled", "consent-withdrawn", 430])
+  assert.equal((await H.aiGetUsage(req("u1", {}))).luna.remainingToday, 10) // the user's allowance was not consumed
+  const again = await chat("u1", "thanks"); assert.equal(textOf(again), THANKS); assert.equal(calls.length, 1) // withdrawn: Luna is not used again
+})
+test("CONSENT RACE: consent still active at the end -> the Luna wording is stored (control for the test above)", async () => {
+  await accept(); const g = gate(); install(async () => { await g.p; return goodOut() })
+  const pending = chat("u1", "thanks"); await until(() => calls.length === 1); g.release(); const r = await pending
+  assert.equal(textOf(r), REWRITE); assert.ok((await storedText("u1", r)).includes("Anytime!")); assert.equal(lunaUser().successes, 1)
+})
+test("CONSENT RACE: withdrawn and re-accepted during the call is fine; a withdraw that lands before the commit but after the provider answers is also honoured", async () => {
+  await accept(); const g = gate(); install(async () => { await g.p; return goodOut() })
+  const pending = chat("u1", "thanks"); await until(() => calls.length === 1)
+  await H.aiSetLunaConsent(req("u1", { action: "withdraw" })); await H.aiSetLunaConsent(req("u1", { action: "accept", noticeVersion: 1 }))
+  g.release(); assert.equal(textOf(await pending), REWRITE) // the CURRENT state at commit time decides
+  await accept("u2"); const g2 = gate(); install(async () => { await g2.p; return goodOut() })
+  const p2 = chat("u2", "thanks"); await until(() => calls.length === 2); g2.release()
+  await H.aiSetLunaConsent(req("u2", { action: "withdraw" })); const r2 = await p2 // may land before or after the commit; both orders are valid, never a stored rewrite after withdrawal
+  const stored = await storedText("u2", r2); const committedBefore = lunaUser("u2").successes === 1
+  assert.equal(stored.includes("Anytime!"), committedBefore); assert.equal(textOf(r2) === REWRITE, committedBefore)
+})
+test("CONSENT RACE: a consent record for an older notice version is also treated as withdrawn at commit time", async () => {
+  await accept(); const g = gate(); install(async () => { await g.p; return goodOut() })
+  const pending = chat("u1", "thanks"); await until(() => calls.length === 1)
+  env.seed("ai-consent/u1", { uid: "u1", noticeVersion: 0, active: true }); g.release(); assert.equal(textOf(await pending), THANKS); assert.equal(lunaUser().successes, 0)
+})
+
+test("OWNER KEY: two users with the SAME requestId cannot bypass the global recovery cap of 2", async () => {
+  const cfg = cfgMod.merge(cfgMod.DEFAULTS, { luna: { enabled: true } }), breaker = require("../src/ai/luna/breaker")
+  env.seed("ai-usage/luna-breaker", { state: "recovery", failures: [], invalid: [], overruns: 0, inflight: {}, recoveryUntil: env.time.now + 60000, cooldownSeconds: 60, cooldownUntil: 0, lease: null, blockedKind: null, resetEpoch: 0 })
+  const users = ["a1", "a2", "a3", "a4"]; for (const u of users) await accept(u)
+  const id = "req-shared-0001", gates = users.map(() => gate()); let k = 0
+  install(async () => { const mine = gates[k++]; await mine.p; return goodOut() })
+  const pend = users.map((u) => chat(u, "thanks", { requestId: id })); await until(() => calls.length >= 2); await settle(); await settle()
+  assert.equal(calls.length, 2, "only two provider calls may be in flight during recovery, even though all four share one requestId")
+  assert.equal(Object.keys(env.get("ai-usage/luna-breaker").inflight).length, 2)
+  gates.forEach((x) => x.release()); const out = await Promise.all(pend); assert.equal(out.filter((r) => textOf(r) === REWRITE).length, 2); assert.equal(out.filter((r) => textOf(r) === THANKS).length, 2)
+  assert.equal(calls.length, 2)
+})
+
+test("BREAKER e2e: HTTP 400/404 style failures block Luna, the user still gets Malloya's answer, and no later request calls the provider", async () => {
+  await accept(); install(async () => ({ ok: false, kind: "bad_request", ms: 2 })); assert.equal(textOf(await chatT("u1", "thanks")), THANKS)
+  assert.deepEqual([env.get("ai-usage/luna-breaker").state, env.get("ai-usage/luna-breaker").blockedKind], ["blocked", "bad_request"])
+  install(async () => goodOut()); for (let i = 0; i < 3; i++) assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(calls.length, 1)
+  env.time.now += 30 * 86400000; assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(calls.length, 1) // no automatic recovery, ever
+  enable({ resetEpoch: 1 }); cfgMod.invalidateConfigCache(); assert.equal(textOf(await chatT("u1", "thanks")), REWRITE) // an operator reset works
+})
+test("BREAKER e2e: 8 rejected outputs among the last 10 open the breaker for 15 minutes; a probe then recovers", async () => {
+  await accept(); install(async () => goodOut("x"))
+  for (let i = 0; i < 7; i++) { assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(env.get("ai-usage/luna-breaker").state, "closed") }
+  await chatT("u1", "thanks"); const b = env.get("ai-usage/luna-breaker"); assert.deepEqual([b.state, b.cooldownSeconds], ["open", 900]); assert.ok(b.cooldownUntil - env.time.now > 800000)
+  const n = calls.length; install(async () => goodOut()); await chatT("u1", "thanks"); assert.equal(calls.length, n) // open: provider not called
+  env.time.now += 901000; assert.equal(textOf(await chat("u1", "thanks")), REWRITE) // half-open probe succeeds
+  assert.equal(env.get("ai-usage/luna-breaker").state, "recovery")
+})
+test("BREAKER e2e: 3 actual input-token reports above the limit hard-block Luna until an operator acts", async () => {
+  await accept(); const over = () => ({ ok: true, text: JSON.stringify({ segments: { all: REWRITE } }), usage: { input: 3001, output: 20, cached: 0, reasoning: 0 }, ms: 3 })
+  install(async () => over()); for (let i = 0; i < 2; i++) { await chatT("u1", "thanks"); assert.equal(env.get("ai-usage/luna-breaker").state, "closed") }
+  assert.equal(textOf(await chatT("u1", "thanks")), REWRITE) // the third answer itself is valid and delivered...
+  const b = env.get("ai-usage/luna-breaker"); assert.deepEqual([b.state, b.blockedKind], ["blocked", "input_overrun"]) // ...but Luna is now hard-blocked
+  const n = calls.length; install(async () => goodOut()); assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(calls.length, n)
+  assert.ok(env.logs.some((l) => /calibration_drift/.test(JSON.stringify(l))))
+  enable({ resetEpoch: 1 }); cfgMod.invalidateConfigCache(); assert.equal(textOf(await chatT("u1", "thanks")), REWRITE)
+})
+test("CEILINGS e2e: a crafted over-ceiling config reaching tryRewrite is clamped (concurrency 2, outputs 500, timeout 8 s, daily 10/25)", async () => {
+  const crafted = cfgMod.merge(cfgMod.DEFAULTS, { luna: { enabled: true, limits: { dailySuccessPerUser: 999, dailyAttemptsPerUser: 999, maxOutputTokens: 99999, maxConcurrentPerInstance: 50, timeoutMs: 600000, recoveryConcurrent: 50, dailyGlobalTokens: 99999999, maxInputTokens: 99999 } } })
+  const users = ["c1", "c2", "c3", "c4"]; for (const u of users) await accept(u)
+  const gates = users.map(() => gate()); let k = 0; install(async () => { await gates[k++].p; return goodOut() })
+  const blocks = [{ type: "verified", text: THANKS }]
+  const runs = users.map((u, i) => luna.tryRewrite({ uid: u, requestId: `req-clamp-000${i}`, cfg: crafted, intent: "thanks", blocks, language: "en", noticeVersion: 1 }))
+  await until(() => calls.length >= 2); await settle(); await settle()
+  assert.equal(calls.length, 2); assert.equal(luna.inflightNow(), 2) // 50 was clamped to 2
+  assert.deepEqual([calls[0].maxOutputTokens, calls[0].timeoutMs], [500, 8000])
+  gates.forEach((x) => x.release()); const res = await Promise.all(runs); assert.equal(res.filter((x) => x.applied).length, 2)
+  assert.deepEqual(res.filter((x) => !x.applied).map((x) => x.skipped), ["busy", "busy"])
+  // daily caps stay 10 successes / 25 attempts even though the crafted config says 999
+  install(async () => goodOut()); const day = require("../src/lib/clock").todaySAST(), n0 = calls.length
+  const seedUser = (uid, successes, attempts) => env.seed(`ai-usage/luna_u_${uid}_${day}`, { uid, day, attempts, successes, inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0 })
+  const tryFor = (uid, i) => luna.tryRewrite({ uid, requestId: `req-cap-${uid}-${i}`, cfg: crafted, intent: "thanks", blocks, language: "en", noticeVersion: 1 })
+  await accept("s10"); seedUser("s10", 10, 10); assert.equal((await tryFor("s10", 1)).skipped, "daily-allowance")
+  await accept("s9"); seedUser("s9", 9, 9); assert.equal((await tryFor("s9", 1)).applied, true) // one below the ceiling still works
+  await accept("a25"); seedUser("a25", 0, 25); assert.equal((await tryFor("a25", 1)).skipped, "usage:daily-attempts")
+  await accept("a24"); seedUser("a24", 0, 24); assert.equal((await tryFor("a24", 1)).applied, true)
+  assert.equal(calls.length - n0, 2) // only the two allowed requests reached the (mock) provider
 })

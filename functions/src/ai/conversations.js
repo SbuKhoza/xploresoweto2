@@ -48,6 +48,8 @@ async function persistTurn({ uid, cid, requestId, userText, assistant, context, 
     if (cSnap.exists && cSnap.data().ownerUid !== uid) throw notFound()
     if (aSnap.exists) return { id: aSnap.id, ...aSnap.data(), duplicate: true }
     if (luna) await luna.read(tx)
+    // Consent is re-read INSIDE this transaction (luna.read). Withdrawn while the provider call was running -> store Malloya's own wording.
+    if (luna && luna.consentActive !== true && luna.originalBlocks) assistant = { ...assistant, blocks: luna.originalBlocks }
     const exp = expiry(cfg.retention.days)
     const at = fb.Timestamp().fromMillis(clock.now().getTime())
     const at2 = fb.Timestamp().fromMillis(clock.now().getTime() + 1) // keeps the user message strictly before its reply

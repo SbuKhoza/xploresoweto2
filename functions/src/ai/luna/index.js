@@ -11,7 +11,7 @@ const prompt = require("./prompt")
 const { validateRewrite } = require("./validate")
 const usage = require("./usage")
 const breaker = require("./breaker")
-const { NOTICE_VERSION } = require("./constants")
+const { NOTICE_VERSION, effectiveCfg } = require("./constants")
 const manifest = require("./calibration.json")
 
 let deps = { callResponses: provider.callResponses, hasKey: provider.hasKey, manifest }
@@ -29,6 +29,7 @@ function calibrated(payload, cfg) {
 
 async function tryRewrite({ uid, requestId, cfg, intent, blocks, language, noticeVersion }) {
   const original = { blocks, commit: null, applied: false }
+  cfg = effectiveCfg(cfg) // every limit clamped to its hard ceiling, whatever is stored
   const skip = (reason) => ({ ...original, skipped: reason })
   try {
     const L = cfg.luna
@@ -45,29 +46,32 @@ async function tryRewrite({ uid, requestId, cfg, intent, blocks, language, notic
     if (status.remainingToday <= 0) return skip("daily-allowance")
     if (inflight >= L.limits.maxConcurrentPerInstance) return skip("busy")
     inflight += 1
+    const owner = breaker.ownerKey(uid, requestId)
     try {
-      const gate = await breaker.admit({ owner: requestId, cfg })
+      const gate = await breaker.admit({ owner, cfg })
       if (!gate.allowed) return skip(`breaker:${gate.reason}`)
       const reserve = cal.inputTokens + L.limits.maxOutputTokens // the most this call can possibly cost
       const ticket = await usage.begin({ uid, requestId, cfg, reserveTokens: reserve }) // durable "called" commit BEFORE the network request
-      if (!ticket.ok) { await breaker.release({ owner: requestId, mode: gate.mode }); return skip(`usage:${ticket.reason}`) }
+      if (!ticket.ok) { await breaker.release({ owner, mode: gate.mode }); return skip(`usage:${ticket.reason}`) }
       const res = await deps.callResponses({ payload, maxOutputTokens: L.limits.maxOutputTokens, reasoningEffort: cal.reasoningEffort, timeoutMs: L.limits.timeoutMs })
       if (!res.ok) {
-        await breaker.report({ owner: requestId, mode: gate.mode, ok: false, kind: res.kind, retryAfterSeconds: res.retryAfterSeconds, cfg })
+        await breaker.report({ owner, mode: gate.mode, ok: false, kind: res.kind, retryAfterSeconds: res.retryAfterSeconds, cfg })
         await usage.settleFailure({ uid, requestId, ticket, kind: res.kind, usage: res.usage || null }).catch(() => {})
         log.warn("ai.luna.failed", { uidHash: log.uidHash(uid), kind: res.kind, latencyMs: res.ms })
         return skip(`provider:${res.kind}`)
       }
-      await breaker.report({ owner: requestId, mode: gate.mode, ok: true, cfg }) // the provider behaved, whatever the validator thinks of the text
       const v = validateRewrite(tpl, res.text)
+      const overrun = !!(res.usage && res.usage.input > L.limits.maxInputTokens)
+      // The provider behaved (it answered), so this is a success report; rejected/overrun feed the breaker's own bookkeeping.
+      await breaker.report({ owner, mode: gate.mode, ok: true, rejected: !v.ok, overrun, cfg })
+      if (overrun) log.error("ai.luna.calibration_drift", { uidHash: log.uidHash(uid), kind: "input-over-limit" })
       if (!v.ok) {
         await usage.settleFailure({ uid, requestId, ticket, kind: "rejected", usage: res.usage }).catch(() => {})
         log.warn("ai.luna.rejected", { uidHash: log.uidHash(uid), kind: v.reason })
         return skip(`rejected:${v.reason}`)
       }
-      if (res.usage && res.usage.input > L.limits.maxInputTokens) log.error("ai.luna.calibration_drift", { uidHash: log.uidHash(uid), kind: "input-over-limit" })
       const text = prompt.joinSegments(tpl, v.segments)
-      return { blocks: [{ ...blocks[0], text }], commit: usage.prepareSuccess({ uid, requestId, ticket, usage: res.usage }), applied: true }
+      return { blocks: [{ ...blocks[0], text }], commit: usage.prepareSuccess({ uid, requestId, ticket, usage: res.usage, originalBlocks: blocks }), applied: true }
     } finally { inflight -= 1 }
   } catch (e) {
     log.error("ai.luna.error", { uidHash: log.uidHash(uid), kind: "internal", code: e && e.code })

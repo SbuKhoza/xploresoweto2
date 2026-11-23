@@ -170,7 +170,7 @@ test("AI Service Notice: pure helpers, the panel follows the backend, accept/wit
   assert.doesNotMatch(T, /your (message|messages|conversation|conversations|request|questions?) (may be|is|are|will be) (processed|sent|shared)/i) // never claims the user's message is sent
   assert.doesNotMatch(T, /securely|secure\b|zero[- ]data|retention|not (be )?(stored|kept|retained|used for training)|never (stored|kept|retained)|deleted|confidential|encrypt|anonym/i) // no security, retention or deletion promise we cannot verify
   assert.match(T, /Your messages, account details and location are not sent/) // true by design: asserted against the real payload in luna_units.test.js
-  assert.match(T, /do not enter passwords, payment details or other sensitive personal information/i); assert.match(T, /privacy policy/)
+  assert.match(T, /do not enter passwords, payment details or other sensitive personal information/i); assert.doesNotMatch(T, /privacy|policy|terms/i) // no reference to a policy until an accessible one exists
   assert.doesNotMatch(fs.readFileSync(path.join(root, "utils", "ai", "notice.js"), "utf8"), /api[_-]?key|api\.openai|https?:|sk-|fetch\(/i)
   assert.equal(N.LUNA_DELETE_ALL_LABEL, "Delete all my conversations"); assert.match(N.LUNA_DELETE_ALL_NOTE, /counters and your choice.*kept/)
   const screen = fs.readFileSync(path.join(root, "screens", "SowetoAI.js"), "utf8")

@@ -9,12 +9,16 @@
 const fb = require("../../lib/firebase")
 const clock = require("../../lib/clock")
 const { AI_COL } = require("../constants")
-const { KINDS } = require("./constants")
+const { sha256hex } = require("../../lib/crypto")
+const { KINDS, INVALID_OUTPUT, INPUT_OVERRUN_LIMIT, MAX_COOLDOWN_SECONDS } = require("./constants")
 
 const ref = () => fb.db().collection(AI_COL.usage).doc("luna-breaker")
-const closed = (epoch = 0) => ({ state: "closed", failures: [], cooldownSeconds: 0, cooldownUntil: 0, lease: null, recoveryUntil: 0, inflight: {}, blockedKind: null, resetEpoch: epoch })
+const closed = (epoch = 0) => ({ state: "closed", failures: [], invalid: [], overruns: 0, cooldownSeconds: 0, cooldownUntil: 0, lease: null, recoveryUntil: 0, inflight: {}, blockedKind: null, resetEpoch: epoch })
 const stamp = () => ({ updatedAt: fb.FieldValue().serverTimestamp() })
-const MAX_COOLDOWN = 600
+const MAX_COOLDOWN = MAX_COOLDOWN_SECONDS
+// The breaker owner (probe lease / recovery slot holder) is derived from BOTH the uid and the requestId. requestId alone is client-chosen:
+// two users sending the same requestId would otherwise share one slot and walk past the global recovery cap.
+const ownerKey = (uid, requestId) => sha256hex(JSON.stringify(["owner", String(uid), String(requestId)])).slice(0, 32)
 
 async function peek() { // -> breaker data | null when unreadable
   try { const s = await ref().get(); return s.exists ? { ...closed(), ...s.data() } : closed() } catch (e) { return null }
@@ -59,35 +63,58 @@ async function admit({ owner, cfg }) {
   } catch (e) { return { allowed: false, reason: "breaker-unreadable" } }
 }
 
-// Record the outcome of an admitted call. `ok` means the PROVIDER behaved (an output our validator rejects is still a healthy provider).
-async function report({ owner, mode, ok, kind, retryAfterSeconds, cfg }) {
-  if (mode === "normal" && ok) return
+// Record the outcome of an admitted call.
+//   ok:true   the PROVIDER behaved. `rejected` = our strict validator refused the text; `overrun` = the provider reported more input tokens than the limit.
+//   ok:false  provider failure, classified by `kind` (see KINDS).
+// Bookkeeping that spans calls (kept across state changes, cleared only by a reset to closed):
+//   invalid  last N validated responses, 1 = rejected. INVALID_OUTPUT.threshold of the last INVALID_OUTPUT.window opens the breaker for 15 minutes.
+//   overruns number of input-overrun reports. INPUT_OVERRUN_LIMIT of them hard-block Luna until an operator bumps luna.resetEpoch.
+async function report({ owner, mode, ok, kind, retryAfterSeconds, rejected = false, overrun = false, cfg }) {
   const B = cfg.luna.breaker, epoch = cfg.luna.resetEpoch || 0
   try {
+    if (mode === "normal" && ok && !rejected && !overrun) { // hot path: write only when there is bookkeeping to update
+      const cur = await peek()
+      if (!cur || (cur.state === "closed" && !(cur.invalid || []).length)) return
+    }
     await fb.db().runTransaction(async (tx) => {
       const s = await tx.get(ref())
       const b = s.exists ? { ...closed(), ...s.data() } : closed()
       const now = clock.now().getTime()
       const rule = ok ? null : (KINDS[kind] || KINDS.server).breaker
       const open = (secs) => ({ ...b, state: "open", failures: [], lease: null, inflight: {}, cooldownSeconds: secs, cooldownUntil: now + secs * 1000 })
-      const block = () => ({ ...closed(b.resetEpoch || epoch), state: "blocked", blockedKind: kind, resetEpoch: Math.max(b.resetEpoch || 0, epoch) })
+      const block = (why) => ({ ...closed(b.resetEpoch || epoch), state: "blocked", blockedKind: why, resetEpoch: Math.max(b.resetEpoch || 0, epoch) })
       let next = null
       if (mode === "probe") {
         if (ok) next = { ...closed(b.resetEpoch || 0), state: "recovery", recoveryUntil: now + B.recoverySeconds * 1000 }
-        else if (rule === "blocked") next = block()
+        else if (rule === "blocked") next = block(kind)
         else next = open(Math.min(MAX_COOLDOWN, Math.max(B.cooldownSeconds, (b.cooldownSeconds || B.cooldownSeconds) * 2, retryAfterSeconds || 0)))
       } else if (mode === "recovery") {
         const inflight = { ...(b.inflight || {}) }; delete inflight[owner]
         if (ok) next = b.state === "recovery" ? { ...b, inflight } : null
-        else if (rule === "blocked") next = block()
-        else next = open(Math.max(B.cooldownSeconds, retryAfterSeconds || 0))
+        else if (rule === "blocked") next = block(kind)
+        else next = open(Math.min(MAX_COOLDOWN, Math.max(B.cooldownSeconds, retryAfterSeconds || 0)))
       } else if (b.state === "closed") { // normal-mode failure
-        if (rule === "blocked") next = block()
+        if (rule === "blocked") next = block(kind)
         else if (rule === "open") next = open(Math.min(MAX_COOLDOWN, Math.max(B.cooldownSeconds, retryAfterSeconds || 0)))
-        else { // counted failure inside a sliding window
+        else if (!ok) { // counted failure inside a sliding window
           const failures = [...(b.failures || []).filter((t) => now - t < B.windowSeconds * 1000), now]
           next = failures.length >= B.failureThreshold ? open(B.cooldownSeconds) : { ...b, failures }
         }
+      }
+      if (b.state === "blocked" && !next) return // an operator-only state: late reports change nothing
+      // ---- cross-call bookkeeping (only for calls that produced a provider response) ----
+      let cur = next || b
+      if (ok) {
+        const W = INVALID_OUTPUT.window
+        let invalid = [...(b.invalid || []), rejected ? 1 : 0].slice(-W)
+        const overruns = (b.overruns || 0) + (overrun ? 1 : 0)
+        if (!invalid.includes(1)) invalid = [] // nothing rejected in the window: keep the document small
+        cur = { ...cur, invalid, overruns }
+        if (overruns >= INPUT_OVERRUN_LIMIT) cur = block("input_overrun")
+        else if (cur.state !== "open" && cur.state !== "blocked" && invalid.reduce((a, x) => a + x, 0) >= INVALID_OUTPUT.threshold) {
+          cur = { ...cur, state: "open", failures: [], invalid: [], lease: null, inflight: {}, cooldownSeconds: INVALID_OUTPUT.cooldownSeconds, cooldownUntil: now + INVALID_OUTPUT.cooldownSeconds * 1000, blockedKind: null }
+        }
+        next = cur
       }
       if (next) tx.set(ref(), { ...next, ...stamp() })
     })
@@ -106,4 +133,4 @@ async function release({ owner, mode }) {
     })
   } catch (e) { /* the lease expires by itself */ }
 }
-module.exports = { admit, report, release, peek, closed }
+module.exports = { admit, report, release, peek, closed, ownerKey }

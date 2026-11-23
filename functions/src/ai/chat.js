@@ -85,6 +85,7 @@ async function runChat({ uid, data, cfg }) {
     const lr = await luna.tryRewrite({ uid, requestId: input.requestId, cfg, intent: out.intent, blocks: out.blocks, language: out.language, noticeVersion: input.noticeVersion })
     assistant.blocks = lr.blocks
     const saved = await conv.persistTurn({ uid, cid, requestId: input.requestId, userText: sanitizeText(input.message, cfg.limits.maxInputChars), assistant, context: out.context, cfg, luna: lr.commit })
+    if (Array.isArray(saved.blocks)) assistant.blocks = saved.blocks // what was actually stored (consent may have been withdrawn mid-call; a duplicate returns the first answer)
     result = { conversationId: cid, messageId: saved.id, ...responseShape(assistant, cards, offers, cfg), duplicate: saved.duplicate === true }
     outcome = "ok"
     log.info("ai.chat.ok", { uidHash: log.uidHash(uid), intent: out.intent, language: out.language, cards: cards.length })

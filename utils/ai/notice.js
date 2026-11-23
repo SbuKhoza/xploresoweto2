@@ -8,7 +8,7 @@ export const LUNA_NOTICE_TITLE = "AI Service Notice"
 export const LUNA_NOTICE_TEXT =
   "Malloya may use OpenAI's GPT-6 Luna to improve the wording of some of its own conversational replies, such as greetings and thanks. " +
   "When this is used, only a short piece of template text written by Malloya, and a language code, is sent to OpenAI. Your messages, account details and location are not sent. " +
-  "Please do not enter passwords, payment details or other sensitive personal information in the chat. Your conversations are handled in accordance with XploreSoweto's privacy policy."
+  "Please do not enter passwords, payment details or other sensitive personal information in the chat."
 export const LUNA_DELETE_ALL_LABEL = "Delete all my conversations"
 export const LUNA_DELETE_ALL_NOTE = "This permanently deletes every conversation you've had with Malloya. It can't be undone. Your daily usage counters and your choice about the AI Service Notice are kept."
 

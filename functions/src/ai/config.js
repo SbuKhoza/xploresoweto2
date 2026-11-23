@@ -8,7 +8,7 @@ const fb = require("../lib/firebase")
 const clock = require("../lib/clock")
 const { AI_COL } = require("./constants")
 
-const { CEILINGS } = require("./luna/constants")
+const { CEILINGS, LEASE_MARGIN_MS } = require("./luna/constants")
 
 const DEFAULTS = Object.freeze({
   enabled: true, // kill switch (Super Admin)
@@ -55,8 +55,9 @@ function validateConfig(c) {
   need(int(NL.dailyGlobalTokens, 10000, CEILINGS.dailyGlobalTokens), "luna.limits.dailyGlobalTokens"); need(int(NL.maxConcurrentPerInstance, 1, CEILINGS.maxConcurrentPerInstance), "luna.limits.maxConcurrentPerInstance")
   need(int(NL.recoveryConcurrent, 1, CEILINGS.recoveryConcurrent), "luna.limits.recoveryConcurrent"); need(int(NL.timeoutMs, 1000, CEILINGS.timeoutMs), "luna.limits.timeoutMs")
   need(Number.isInteger(NL.dailyAttemptsPerUser) && Number.isInteger(NL.dailySuccessPerUser) && NL.dailyAttemptsPerUser >= NL.dailySuccessPerUser, "luna.limits.attempts>=successes")
-  need(int(NB.failureThreshold, 1, 50), "luna.breaker.failureThreshold"); need(int(NB.windowSeconds, 5, 600), "luna.breaker.windowSeconds"); need(int(NB.cooldownSeconds, 5, 600), "luna.breaker.cooldownSeconds")
-  need(int(NB.recoverySeconds, 5, 600), "luna.breaker.recoverySeconds"); need(int(NB.leaseSeconds, 5, 120), "luna.breaker.leaseSeconds")
+  need(int(NB.failureThreshold, 1, 50), "luna.breaker.failureThreshold"); need(int(NB.windowSeconds, 5, 600), "luna.breaker.windowSeconds"); need(int(NB.cooldownSeconds, 5, 900), "luna.breaker.cooldownSeconds")
+  need(int(NB.recoverySeconds, 5, 600), "luna.breaker.recoverySeconds"); need(int(NB.leaseSeconds, 10, 120), "luna.breaker.leaseSeconds")
+  need(Number.isInteger(NL.timeoutMs) && Number.isInteger(NB.leaseSeconds) && NL.timeoutMs + LEASE_MARGIN_MS <= NB.leaseSeconds * 1000, "luna.breaker.lease>timeout")
   return p
 }
 

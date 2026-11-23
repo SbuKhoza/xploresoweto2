@@ -265,3 +265,97 @@ test("ordering is structural, not accidental: in luna/index.js the durable 'call
   assert.equal((src.match(/deps\.callResponses\(/g) || []).length, 1) // exactly one provider call site, and no loop or retry around it
   assert.doesNotMatch(src.slice(src.indexOf("inflight += 1"), call + 220), /\b(for|while)\s*\(|setTimeout|\bretry\b/i) // no loop, timer or retry between the reservation and the single call
 })
+
+// ================================================================== ROUND 2: ceilings, owner key, breaker completeness, retention
+const CEIL = { dailySuccessPerUser: 10, dailyAttemptsPerUser: 25, maxInputTokens: 3000, maxOutputTokens: 500, dailyGlobalTokens: 1500000, maxConcurrentPerInstance: 2, recoveryConcurrent: 2, timeoutMs: 8000 }
+test("ceilings: the hard ceilings are exactly the agreed limits, and the defaults equal them", () => {
+  assert.deepEqual({ ...K.CEILINGS }, CEIL); assert.deepEqual({ ...cfgMod.DEFAULTS.luna.limits }, CEIL)
+  assert.deepEqual([K.INVALID_OUTPUT.window, K.INVALID_OUTPUT.threshold, K.INVALID_OUTPUT.cooldownSeconds, K.INPUT_OVERRUN_LIMIT, K.MAX_COOLDOWN_SECONDS], [10, 8, 900, 3, 900])
+})
+test("ceilings: config validation rejects every limit one above its ceiling and accepts the ceiling itself", () => {
+  for (const [k, v] of Object.entries(CEIL)) {
+    const over = cfgMod.merge(cfgMod.DEFAULTS, { luna: { limits: { [k]: v + 1 } } }); assert.ok(cfgMod.validateConfig(over).length > 0, `${k} above ceiling must be refused`)
+    assert.deepEqual(cfgMod.validateConfig(cfgMod.merge(cfgMod.DEFAULTS, { luna: { limits: { [k]: v } } })), [], `${k} at ceiling is allowed`)
+  }
+})
+test("ceilings: effectiveCfg clamps a crafted over-ceiling config that bypassed the validator, and never raises a lower value", () => {
+  const crafted = cfgMod.merge(cfgMod.DEFAULTS, { luna: { limits: { dailySuccessPerUser: 999, dailyAttemptsPerUser: 999, maxInputTokens: 99999, maxOutputTokens: 99999, dailyGlobalTokens: 99999999, maxConcurrentPerInstance: 50, recoveryConcurrent: 50, timeoutMs: 600000 } } })
+  assert.deepEqual({ ...K.effectiveCfg(crafted).luna.limits }, CEIL)
+  assert.equal(K.effectiveCfg(cfgWith({ limits: { dailySuccessPerUser: 3 } })).luna.limits.dailySuccessPerUser, 3)
+  const garbage = cfgMod.merge(cfgMod.DEFAULTS, { luna: { limits: { timeoutMs: "x", maxOutputTokens: null } } }); assert.equal(K.effectiveCfg(garbage).luna.limits.timeoutMs, 8000); assert.equal(K.effectiveCfg(garbage).luna.limits.maxOutputTokens, 500)
+})
+test("lease vs timeout: validation requires lease >= 10 s and the effective lease always outlives the provider timeout by 2 s", () => {
+  assert.ok(cfgMod.validateConfig(cfgMod.merge(cfgMod.DEFAULTS, { luna: { breaker: { leaseSeconds: 9 } } })).length > 0)
+  assert.deepEqual(cfgMod.validateConfig(cfgMod.merge(cfgMod.DEFAULTS, { luna: { breaker: { leaseSeconds: 10 } } })), [])
+  const e = K.effectiveCfg(cfgMod.merge(cfgMod.DEFAULTS, { luna: { limits: { timeoutMs: 8000 }, breaker: { leaseSeconds: 1 } } })); assert.ok(e.luna.breaker.leaseSeconds * 1000 >= e.luna.limits.timeoutMs + K.LEASE_MARGIN_MS)
+})
+test("provider classification: 400/404/405/413/415/422 are configuration errors (bad_request); 408/409/425 and unknown 4xx are counted, not blocked", async () => {
+  for (const st of [400, 404, 405, 413, 415, 422]) assert.equal(provider.classifyHttpError(st, {}, null).kind, "bad_request", String(st))
+  for (const st of [408, 409, 425, 418, 451]) assert.equal(provider.classifyHttpError(st, {}, null).kind, "server", String(st))
+  assert.equal(K.KINDS.bad_request.breaker, "blocked"); assert.equal(K.KINDS.bad_request.charge, false)
+})
+test("breaker: HTTP 400/404 style errors hard-block Luna in every mode, with no automatic retry, until an operator raises resetEpoch", async () => {
+  for (const mode of ["normal", "probe", "recovery"]) {
+    env = F.setupWorld(); const cfg = bcfg()
+    if (mode !== "normal") { await failN(5); tick(61); await breaker.admit({ owner: "p", cfg }); if (mode === "recovery") { await breaker.report({ owner: "p", mode: "probe", ok: true, cfg }); await breaker.admit({ owner: "r", cfg }) } }
+    await breaker.report({ owner: "r", mode, ok: false, kind: "bad_request", cfg })
+    assert.equal(state().state, "blocked", mode); assert.equal(state().blockedKind, "bad_request", mode)
+    tick(1000000); assert.deepEqual(await breaker.admit({ owner: "z", cfg }), { allowed: false, reason: "blocked" }, mode)
+    assert.deepEqual(await breaker.admit({ owner: "z", cfg: bcfg({ resetEpoch: 1 }) }), { allowed: true, mode: "normal" }, mode); assert.equal(state().state, "closed")
+  }
+})
+test("breaker owner: ownerKey depends on BOTH uid and requestId, is stable, and leaks neither", () => {
+  const a = breaker.ownerKey("alice", "req-same0001"), b = breaker.ownerKey("bob", "req-same0001")
+  assert.notEqual(a, b); assert.equal(a, breaker.ownerKey("alice", "req-same0001")); assert.notEqual(a, breaker.ownerKey("alice", "req-same0002"))
+  assert.match(a, /^[0-9a-f]{32}$/); assert.ok(!a.includes("alice") && !a.includes("same"))
+  assert.notEqual(breaker.ownerKey("a:b", "c"), breaker.ownerKey("a", "b:c")) // no ambiguity from the separator
+})
+test("breaker recovery: two users with the SAME requestId occupy two slots and cannot exceed the global cap of 2", async () => {
+  const cfg = bcfg(); await failN(5); tick(61); await breaker.admit({ owner: "p", cfg }); await breaker.report({ owner: "p", mode: "probe", ok: true, cfg })
+  const rid = "req-same0001", o = (u) => breaker.ownerKey(u, rid)
+  const got = []; for (const u of ["alice", "bob", "carol", "dave"]) got.push((await breaker.admit({ owner: o(u), cfg })).allowed)
+  assert.deepEqual(got, [true, true, false, false]); assert.equal(Object.keys(state().inflight).length, 2)
+  const par = await Promise.all(["e", "f", "g"].map((u) => breaker.admit({ owner: o(u), cfg }))); assert.equal(par.filter((x) => x.allowed).length, 0) // still full
+  await breaker.report({ owner: o("alice"), mode: "recovery", ok: true, cfg }); assert.equal(Object.keys(state().inflight).length, 1) // alice's report frees alice's slot only
+  assert.equal((await breaker.admit({ owner: o("carol"), cfg })).allowed, true)
+})
+const okReport = (cfg, extra = {}) => breaker.report({ owner: "o", mode: "normal", ok: true, cfg, ...extra })
+test("breaker invalid-output: 8 rejected among the last 10 open it for 900 s; 7 do not; accepted outputs age rejections out", async () => {
+  const cfg = bcfg()
+  for (let i = 0; i < 7; i++) await okReport(cfg, { rejected: true }); assert.equal(state().state, "closed"); assert.equal(state().invalid.length, 7)
+  await okReport(cfg, { rejected: true }); assert.equal(state().state, "open"); assert.equal(state().cooldownSeconds, 900); assert.deepEqual(state().invalid, []) // 8 of 8 -> open
+  assert.equal(state().cooldownUntil, env.time.now + 900000)
+  tick(899); assert.equal((await breaker.admit({ owner: "x", cfg })).allowed, false); tick(2); assert.equal((await breaker.admit({ owner: "x", cfg })).mode, "probe")
+})
+test("breaker invalid-output: the window is the last 10, so 7 rejections + accepts never reach 8; a rejection streak after accepts still does", async () => {
+  const cfg = bcfg()
+  for (let i = 0; i < 7; i++) await okReport(cfg, { rejected: true }); for (let i = 0; i < 3; i++) await okReport(cfg) // 7 bad then 3 good: window = 7 of 10
+  assert.equal(state().state, "closed"); await okReport(cfg, { rejected: true }) // window slides: 6 bad + 3 good + 1 bad = 7 of 10
+  assert.equal(state().state, "closed"); assert.equal(state().invalid.length, 10); assert.equal(state().invalid.reduce((a, b) => a + b, 0), 7)
+  let n = 0; while (state().state === "closed" && n < 12) { assert.ok((state().invalid || []).reduce((x, y) => x + y, 0) <= 7); await okReport(cfg, { rejected: true }); n++ }
+  assert.equal(state().state, "open"); assert.ok(n <= 10) // the old accepts rotate out of the window of 10, then the 8th rejection opens it
+  assert.equal(state().cooldownSeconds, 900)
+})
+test("breaker invalid-output: a clean provider history keeps the document untouched (no write on the hot path)", async () => {
+  const cfg = bcfg(); for (let i = 0; i < 20; i++) await okReport(cfg); assert.equal(state(), undefined)
+  await okReport(cfg, { rejected: true }); await okReport(cfg); assert.deepEqual(state().invalid, [1, 0])
+})
+test("breaker input-overrun: 3 reports above the input limit hard-block (needs an operator); 2 do not; the count survives other state changes", async () => {
+  const cfg = bcfg(); await okReport(cfg, { overrun: true }); await okReport(cfg, { overrun: true }); assert.equal(state().state, "closed"); assert.equal(state().overruns, 2)
+  await failN(5); assert.equal(state().state, "open"); assert.equal(state().overruns, 2) // counter kept across an open/close cycle
+  tick(61); await breaker.admit({ owner: "p", cfg }); await breaker.report({ owner: "p", mode: "probe", ok: true, overrun: true, cfg })
+  assert.equal(state().state, "blocked"); assert.equal(state().blockedKind, "input_overrun")
+  tick(10000000); assert.deepEqual(await breaker.admit({ owner: "q", cfg }), { allowed: false, reason: "blocked" })
+  assert.deepEqual(await breaker.admit({ owner: "q", cfg: bcfg({ resetEpoch: 1 }) }), { allowed: true, mode: "normal" }); assert.equal(state().state, "closed"); assert.equal(state().overruns, 0)
+})
+test("breaker: a late success report cannot un-block a blocked breaker or change anything", async () => {
+  const cfg = bcfg(); await breaker.report({ owner: "a", mode: "normal", ok: false, kind: "auth", cfg }); const before = JSON.stringify(state())
+  await okReport(cfg, { rejected: true }); await okReport(cfg, { overrun: true }); assert.equal(JSON.stringify(state()), before)
+})
+test("retention: request records live 400 days (longer than the longest replay window), user/shard counters stay short-lived", async () => {
+  assert.equal(K.REQUEST_RECORD_TTL_DAYS, 400)
+  const t = await ticketOf("ttl-user", "req-ttl00001", cfgWith(), 900); assert.equal(t.ok, true)
+  const rec = env.list("ai-usage").find((d) => d.id.startsWith("luna_r_")); const days = (ts) => Math.round((ts.toMillis() - env.time.now) / 86400000)
+  assert.equal(days(rec.expireAt), 400); assert.equal(days(env.list("ai-usage").find((d) => d.id.startsWith("luna_u_")).expireAt), 3)
+  assert.ok(400 > cfgMod.DEFAULTS.retention.days && 400 > 365) // outlives stored replies (max 365 days) and the 90-day default
+})

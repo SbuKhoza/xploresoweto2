@@ -28,4 +28,4 @@ async function setConsent(uid, action) {
     return { active: action === "accept", noticeVersion: NOTICE_VERSION }
   })
 }
-module.exports = { getConsent, setConsent, isActive, NOTICE_VERSION }
+module.exports = { getConsent, setConsent, isActive, ref, NOTICE_VERSION }
