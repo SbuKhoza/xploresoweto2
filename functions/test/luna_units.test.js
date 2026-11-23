@@ -257,3 +257,11 @@ test("calibration script: measures every payload once, prefers reasoning 'none',
   r = await run(async () => { throw new Error("must not be called") }, { hashesOnly: true }); assert.deepEqual([r.ok, r.calls, written.status, written.reasoningEffort], [true, 0, "uncalibrated", null])
   assert.ok(!lines.join("\n").match(/Bearer|sk-|api[_-]?key/i))
 })
+
+test("ordering is structural, not accidental: in luna/index.js the durable 'called' commit (usage.begin) is awaited BEFORE the provider call, and nothing network-related precedes it", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "ai", "luna", "index.js"), "utf8")
+  const begin = src.indexOf("await usage.begin("), call = src.indexOf("await deps.callResponses(")
+  assert.ok(begin > 0 && call > begin, "usage.begin must come first")
+  assert.equal((src.match(/deps\.callResponses\(/g) || []).length, 1) // exactly one provider call site, and no loop or retry around it
+  assert.doesNotMatch(src.slice(begin - 400, call + 400), /\b(for|while)\s*\(|setTimeout|retry/i)
+})
