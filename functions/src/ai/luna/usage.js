@@ -43,7 +43,7 @@ async function begin({ uid, requestId, cfg, reserveTokens }) {
       if (u.attempts >= L.dailyAttemptsPerUser) return { ok: false, reason: "daily-attempts" }
       const g = gs.exists ? { ...newShard(day, shard), ...gs.data() } : newShard(day, shard)
       if (g.tokens + reserveTokens > perShard) return { ok: false, reason: "global-budget", full: true }
-      tx.set(requestRef(uid, requestId), { uid, day, shard, state: "called", reserved: reserveTokens, calledAt: stamp() }) // deliberately NO expireAt (see constants.js)
+      tx.set(requestRef(uid, requestId), { uid, day, shard, state: "called", reserved: reserveTokens, calledAt: stamp(), unresolved: true, epoch: cfg.luna.resetEpoch || 0 }) // deliberately NO expireAt (see constants.js). unresolved:true until the outcome is safely recorded
       tx.set(userRef(uid, day), { ...u, attempts: u.attempts + 1, updatedAt: stamp(), expireAt: ttl(3) })
       tx.set(shardRef(day, shard), { ...g, tokens: g.tokens + reserveTokens, calls: g.calls + 1, updatedAt: stamp(), expireAt: ttl(3) })
       return { ok: true, day, shard, reserved: reserveTokens }
@@ -56,12 +56,19 @@ async function begin({ uid, requestId, cfg, reserveTokens }) {
 const actualOf = (usage) => (usage ? usage.input + usage.output : null)
 const addUsage = (u, usage) => ({ ...u, inputTokens: u.inputTokens + (usage ? usage.input : 0), outputTokens: u.outputTokens + (usage ? usage.output : 0), cachedTokens: u.cachedTokens + (usage ? usage.cached : 0), reasoningTokens: u.reasoningTokens + (usage ? usage.reasoning : 0) })
 
+// The record after settlement. `unresolved` is cleared when the breaker already has the outcome (pending == null). When the breaker update was lost, the
+// exact event rides on the record (`pendingEvent`) and `unresolved` stays true, so every instance's admit() replays it. The record itself is permanent.
+const settled = (data, fields, pending) => {
+  const { unresolved, pendingEvent, ...rest } = data
+  return { ...rest, ...fields, ...(pending ? { unresolved: true, pendingEvent: pending } : {}) }
+}
+
 // Settlement for a SUCCESSFUL, validated rewrite. Returned as a pair of hooks so persistTurn can run it inside ITS transaction:
 // the conversation turn and the Luna usage then commit together or not at all. read(tx) before any write; write(tx) after.
 // read(tx) also reads the user's CURRENT consent in the same transaction. If consent was withdrawn while the provider call was in flight,
 // persistTurn stores `originalBlocks` (Malloya's deterministic wording) instead of the Luna text, and the paid call is settled as
 // "consent-withdrawn": its real token cost is charged, but it does NOT count as a success and nothing reworded is ever stored or shown.
-function prepareSuccess({ uid, requestId, ticket, usage, originalBlocks }) {
+function prepareSuccess({ uid, requestId, ticket, usage, originalBlocks, pending = null }) {
   let snaps = null
   const hooks = {
     originalBlocks,
@@ -77,7 +84,7 @@ function prepareSuccess({ uid, requestId, ticket, usage, originalBlocks }) {
       const actual = actualOf(usage)
       const charged = actual === null ? ticket.reserved : actual // usage missing: charge the reservation (conservative)
       const kept = hooks.consentActive === true
-      tx.set(requestRef(uid, requestId), { ...snaps.r.data(), state: "settled", outcome: kept ? "ok" : "consent-withdrawn", actual: charged, settledAt: stamp() })
+      tx.set(requestRef(uid, requestId), settled(snaps.r.data(), { state: "settled", outcome: kept ? "ok" : "consent-withdrawn", actual: charged, settledAt: stamp() }, pending))
       tx.set(userRef(uid, ticket.day), { ...addUsage(u, usage), successes: u.successes + (kept ? 1 : 0), updatedAt: stamp(), expireAt: ttl(3) })
       tx.set(shardRef(ticket.day, ticket.shard), { ...g, tokens: Math.max(0, g.tokens - ticket.reserved + charged), updatedAt: stamp(), expireAt: ttl(3) })
       return true
@@ -88,7 +95,7 @@ function prepareSuccess({ uid, requestId, ticket, usage, originalBlocks }) {
 
 // Settlement for a call that did NOT produce an accepted rewrite (provider failure, or output rejected by the validator).
 // kind: a provider failure kind, or "rejected" for a valid-but-refused output. Actual usage is always accounted when the provider reported it.
-async function settleFailure({ uid, requestId, ticket, kind, usage }) {
+async function settleFailure({ uid, requestId, ticket, kind, usage, pending = null }) {
   const rule = KINDS[kind]
   return fb.db().runTransaction(async (tx) => {
     const rs = await tx.get(requestRef(uid, requestId))
@@ -100,7 +107,7 @@ async function settleFailure({ uid, requestId, ticket, kind, usage }) {
     const actual = actualOf(usage)
     // usage known -> charge exactly that. Unknown + provider rejected before any work (429/401/400) -> release. Unknown + may have run -> keep charged.
     const charged = actual !== null ? actual : rule && rule.charge === false ? 0 : ticket.reserved
-    tx.set(requestRef(uid, requestId), { ...rs.data(), state: "settled", outcome: kind, actual: charged, settledAt: stamp() })
+    tx.set(requestRef(uid, requestId), settled(rs.data(), { state: "settled", outcome: kind, actual: charged, settledAt: stamp() }, pending))
     tx.set(userRef(uid, ticket.day), { ...addUsage(u, usage), updatedAt: stamp(), expireAt: ttl(3) })
     tx.set(shardRef(ticket.day, ticket.shard), { ...g, tokens: Math.max(0, g.tokens - ticket.reserved + charged), updatedAt: stamp(), expireAt: ttl(3) })
     return true

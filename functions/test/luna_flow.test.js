@@ -28,7 +28,7 @@ const chatT = (u, m, e) => { env.time.now += 13000; return chat(u, m, e) } // 13
 const textOf = (r) => r.blocks.map((b) => b.text).join("")
 const lunaUser = (uid = "u1") => env.list("ai-usage").find((d) => d.id.startsWith(`luna_u_${uid}_`))
 const shardTotal = () => snapshotAtCall().shardTokens
-beforeEach(() => { env = F.setupWorld(); calls = []; install(async () => goodOut()); enable() })
+beforeEach(() => { env = F.setupWorld(); require("../src/ai/luna/breaker").resetLocalForTests(); calls = []; install(async () => goodOut()); enable() })
 afterEach(() => luna.setDepsForTests({}))
 
 // ------------------------------------------------------------------ the happy path
@@ -343,31 +343,83 @@ const txFailsForBreaker = (when) => {
   }
   return () => { env.db.runTransaction = real }
 }
-const holdDocs = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_h_"))
-test("FAIL CLOSED e2e: a lost AUTH failure update cannot let any instance keep spending; the user still gets Malloya's answer; repair replays the block", async () => {
+const recsF = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_r_"))
+const unresolvedF = () => recsF().filter((d) => d.unresolved === true)
+const mkCfg = (o = {}) => cfgMod.merge(cfgMod.DEFAULTS, { luna: { enabled: true, ...o } })
+const blocksT = () => [{ type: "verified", text: THANKS }]
+const rewrite = (uid, requestId, cfg = mkCfg()) => luna.tryRewrite({ uid, requestId, cfg, intent: "thanks", blocks: blocksT(), language: "en", noticeVersion: 1 })
+// "Instances" share ONE store (env). An instance is an in-memory flag set (local hold) + a write-access switch; the one that is "current" while a call runs is the one whose writes may fail.
+let currentInstance = "A"; const writesLost = new Set()
+const installInstanceFaults = () => {
+  const real = env.db.runTransaction.bind(env.db)
+  env.db.runTransaction = async (fn) => { if (writesLost.has(currentInstance)) throw Object.assign(new Error("UNAVAILABLE: this instance lost write access"), { code: 14 }); return real(fn) }
+  return () => { env.db.runTransaction = real; writesLost.clear(); currentInstance = "A" }
+}
+const asInstance = async (name, fn) => { currentInstance = name; breakerMod.resetLocalForTests(); return fn() }
+
+test("TWO INSTANCES: A commits `called`, then loses write access; B stays healthy. A makes no new paid call; B's exposure is bounded by the grace period; afterwards B is held off and the lost outcome is recovered", async () => {
+  await accept("ua"); await accept("ub"); const restore = installInstanceFaults()
+  try {
+    install(async () => { writesLost.add("A"); return { ok: false, kind: "auth", ms: 3 } }) // the outage hits A right after its durable `called` commit
+    const a1 = await asInstance("A", () => rewrite("ua", "req-two-a-0001")); assert.equal(a1.applied, false); assert.equal(calls.length, 1)
+    const rec = recsF().find((r) => r.uid === "ua"); assert.deepEqual([rec.state, rec.unresolved], ["called", true]) // A could not record anything: the obligation is still on the record
+    assert.equal(env.get("ai-usage/luna-breaker"), undefined)
+    // A: its begin() cannot commit, so it makes no further paid call at all
+    install(async () => goodOut()); const a2 = await asInstance("A", () => rewrite("ua", "req-two-a-0002")); assert.equal(a2.applied, false); assert.equal(calls.length, 1)
+    // B (healthy, shared storage) inside the grace period: the record is genuinely "in flight" as far as B can tell. DOCUMENTED EXPOSURE.
+    env.time.now += 80000; const b1 = await asInstance("B", () => rewrite("ub", "req-two-b-0001")); assert.equal(b1.applied, true); assert.equal(calls.length, 2)
+    // B after the grace period: the record is stale, gets replayed conservatively, the breaker opens, B is held off
+    env.time.now += 20000; const n = calls.length; const b2 = await asInstance("B", () => rewrite("ub", "req-two-b-0002")); assert.equal(b2.applied, false); assert.match(b2.skipped, /^breaker:open$/); assert.equal(calls.length, n)
+    assert.equal(env.get("ai-usage/luna-breaker").state, "open"); assert.equal(recsF().find((r) => r.uid === "ua").state, "unreported"); assert.equal(unresolvedF().length, 0 + recsF().filter((r) => r.uid === "ub" && r.state === "called").length)
+    // the probe after the cooldown finds the real problem (auth) and hard-blocks it
+    env.time.now += 61000; install(async () => ({ ok: false, kind: "auth", ms: 3 })); await asInstance("B", () => rewrite("ub", "req-two-b-0003")); assert.equal(env.get("ai-usage/luna-breaker").state, "blocked")
+    // permanent record: A can never cause a second paid call for the same uid+requestId, even after recovery
+    writesLost.clear(); const before = calls.length; install(async () => goodOut()); await asInstance("A", () => rewrite("ua", "req-two-a-0001")); assert.equal(calls.length, before)
+  } finally { restore() }
+})
+test("TWO INSTANCES: the lost outcome of a SUCCESSFUL-looking call is not forgotten either (record stays called -> conservative open), and reserved tokens stay charged", async () => {
+  await accept("ua"); const restore = installInstanceFaults()
+  try {
+    install(async () => { writesLost.add("A"); return goodOut() }); await asInstance("A", () => rewrite("ua", "req-two-a-0101")) // call returned fine, but nothing can be committed afterwards
+    const used = env.list("ai-usage").filter((d) => d.id.startsWith("luna_g_")).reduce((x, d) => x + d.tokens, 0); assert.ok(used > 0)
+    env.time.now += 91000; writesLost.clear(); await accept("ub"); const r = await asInstance("B", () => rewrite("ub", "req-two-b-0101")); assert.equal(r.applied, false)
+    assert.equal(env.list("ai-usage").filter((d) => d.id.startsWith("luna_g_")).reduce((x, d) => x + d.tokens, 0), used) // nothing released by the reconcile
+  } finally { restore() }
+})
+test("TWO INSTANCES: concurrent reconcilers on different instances replay one lost outcome once", async () => {
+  await accept("ua"); const restore = installInstanceFaults()
+  try {
+    install(async () => { writesLost.add("A"); return { ok: false, kind: "timeout", ms: 3 } }); await asInstance("A", () => rewrite("ua", "req-two-a-0201")); writesLost.clear()
+    env.time.now += 91000; for (const u of ["b1", "b2", "b3", "b4"]) await accept(u); install(async () => goodOut())
+    const out = await Promise.all(["b1", "b2", "b3", "b4"].map((u) => asInstance("B", () => rewrite(u, `req-two-${u}-0001`))))
+    assert.equal(recsF().filter((r) => r.resolvedBy === "reconcile").length, 1); assert.equal(env.get("ai-usage/luna-breaker").state, "open"); assert.ok(out.every((x) => x.applied === false)); assert.equal(calls.length, 1) // only A's original call ever reached the provider
+  } finally { restore() }
+})
+test("PENDING EVENT e2e: a lost AUTH update rides on the request record; no instance keeps spending; repair replays it into a real block", async () => {
   await accept("u1"); await accept("u2"); await accept("u3"); let broken = true; const restore = txFailsForBreaker(() => broken)
-  install(async () => ({ ok: false, kind: "auth", ms: 2 })); assert.equal(textOf(await chatT("u1", "thanks")), THANKS) // instance A: provider fails, breaker update lost
-  assert.equal(calls.length, 1); assert.equal(holdDocs().length, 1); assert.equal(env.get("ai-usage/luna-breaker"), undefined)
-  install(async () => goodOut()); breakerMod.resetLocalForTests() // instance B has no in-memory state at all
-  for (const u of ["u2", "u3", "u2"]) assert.equal(textOf(await chatT(u, "thanks")), THANKS) // deterministic fallback, and NO further paid call
+  install(async () => ({ ok: false, kind: "auth", ms: 2 })); assert.equal(textOf(await chatT("u1", "thanks")), THANKS)
+  assert.equal(calls.length, 1); const rec = unresolvedF()[0]; assert.equal(rec.state, "settled"); assert.equal(rec.pendingEvent.kind, "auth"); assert.equal(env.get("ai-usage/luna-breaker"), undefined)
+  install(async () => goodOut()); for (const u of ["u2", "u3", "u2"]) { breakerMod.resetLocalForTests(); assert.equal(textOf(await chatT(u, "thanks")), THANKS) } // deterministic fallback; reconcile keeps failing -> keeps denying
   assert.equal(calls.length, 1)
-  broken = false; breakerMod.resetLocalForTests(); assert.equal(textOf(await chatT("u2", "thanks")), THANKS); assert.equal(calls.length, 1) // replayed: now a real block
-  assert.deepEqual([env.get("ai-usage/luna-breaker").state, env.get("ai-usage/luna-breaker").blockedKind], ["blocked", "auth"]); assert.equal(holdDocs().length, 0)
-  restore()
+  broken = false; breakerMod.resetLocalForTests(); assert.equal(textOf(await chatT("u2", "thanks")), THANKS); assert.equal(calls.length, 1)
+  assert.deepEqual([env.get("ai-usage/luna-breaker").state, env.get("ai-usage/luna-breaker").blockedKind], ["blocked", "auth"]); assert.equal(unresolvedF().length, 0); assert.equal(recsF()[0].outcome, "auth"); restore()
 })
-test("FAIL CLOSED e2e: with the breaker failing, a Luna SUCCESS is still delivered, and the lost update is replayed later without extra calls", async () => {
+test("PENDING EVENT e2e: a Luna answer is still delivered and counted when only the breaker update is lost; the lost 8th rejection is replayed into a 900 s open", async () => {
   await accept("u1"); let broken = true; const restore = txFailsForBreaker(() => broken)
-  env.seed("ai-usage/luna-breaker", { ...breakerMod.closed(0), invalid: [1, 1, 1, 1, 1, 1, 1] }) // 7 rejected in the window; the 8th will be lost
-  install(async () => goodOut("bad words 123")); assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(calls.length, 1); assert.equal(holdDocs().length, 1)
+  env.seed("ai-usage/luna-breaker", { ...breakerMod.closed(0), invalid: [1, 1, 1, 1, 1, 1, 1] })
+  install(async () => goodOut("bad words 123")); assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(calls.length, 1); assert.equal(unresolvedF().length, 1)
   install(async () => goodOut()); assert.equal(textOf(await chatT("u1", "thanks")), THANKS); assert.equal(calls.length, 1) // held: no new call
-  broken = false; breakerMod.resetLocalForTests(); await chatT("u1", "thanks"); assert.equal(env.get("ai-usage/luna-breaker").state, "open"); assert.equal(env.get("ai-usage/luna-breaker").cooldownSeconds, 900); assert.equal(calls.length, 1)
-  restore()
+  broken = false; breakerMod.resetLocalForTests(); await chatT("u1", "thanks"); assert.equal(env.get("ai-usage/luna-breaker").state, "open"); assert.equal(env.get("ai-usage/luna-breaker").cooldownSeconds, 900); assert.equal(calls.length, 1); restore()
 })
-test("FAIL CLOSED e2e: many instances at once while the breaker is failing: no paid call is made after the first lost update", async () => {
+test("PENDING EVENT e2e: many instances while the breaker keeps failing: no paid call after the first lost update", async () => {
   const users = ["m1", "m2", "m3", "m4", "m5", "m6"]; for (const u of users) await accept(u); const restore = txFailsForBreaker(() => true)
   install(async () => ({ ok: false, kind: "bad_request", ms: 2 })); await chatT("m1", "thanks"); assert.equal(calls.length, 1)
   install(async () => goodOut()); const out = []; for (const u of users.slice(1)) { breakerMod.resetLocalForTests(); out.push(textOf(await chatT(u, "thanks"))) }
   assert.ok(out.every((t) => t === THANKS)); assert.equal(calls.length, 1); restore()
+})
+test("UNRESOLVED e2e: a normal Luna call leaves NO unresolved record (cleared in the same settlement) and the query stays empty", async () => {
+  await accept("u1"); assert.equal(textOf(await chat("u1", "thanks")), REWRITE); const r = recsF()[0]; assert.equal("unresolved" in r, false); assert.equal(r.state, "settled"); assert.equal(unresolvedF().length, 0)
+  install(async () => ({ ok: false, kind: "timeout", ms: 2 })); env.time.now += 13000; await chatT("u1", "thanks"); assert.equal(unresolvedF().length, 0)
 })
 test("RECORDS: luna_r_* has no expireAt in any state, and the same uid+requestId never reaches the provider again, even years later", async () => {
   await accept("u1"); install(async () => goodOut()); const idOk = "req-keep-ok-0001", idFail = "req-keep-fail-0002"

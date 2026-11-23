@@ -15,7 +15,7 @@ const cfgMod = require("../src/ai/config")
 const luna = require("../src/ai/luna")
 
 let env
-beforeEach(() => { env = F.setupWorld() })
+beforeEach(() => { env = F.setupWorld(); breaker.resetLocalForTests() })
 const cfgWith = (over = {}) => cfgMod.merge(cfgMod.DEFAULTS, { luna: { enabled: true, ...over } })
 
 // ------------------------------------------------------------------ payloads: a closed, calibrated universe
@@ -387,7 +387,6 @@ const breakerTxFails = (when) => { // make every transaction that touches the br
   }
   return () => { env.db.runTransaction = real }
 }
-const holds = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_h_"))
 test("cooldown ladder: 60, 120, 300, 600, 900 s after repeated failed probes, then it stays at 900", async () => {
   assert.deepEqual([...K.COOLDOWN_STEPS], [60, 120, 300, 600, 900])
   const cfg = bcfg(); await failN(3); const seen = [state().cooldownSeconds]
@@ -415,56 +414,133 @@ test("cooldown ladder: the breaker config no longer has a cooldownSeconds knob (
   assert.ok(cfgMod.validateConfig(cfgMod.merge(cfgMod.DEFAULTS, { luna: { breaker: { cooldownSeconds: 10 } } })).length > 0)
 })
 
-test("FAIL CLOSED: a lost breaker update leaves a durable hold; every instance is refused until it has been replayed; the replay applies the lost event", async () => {
-  const cfg = bcfg(); await failN(2); const restore = breakerTxFails(() => true)
-  await breaker.report({ owner: "lost", mode: "normal", ok: false, kind: "timeout", cfg }) // the 3rd consecutive failure, whose update is lost
-  restore(); assert.equal(holds().length, 1); assert.equal(state().state, "closed") // the breaker document itself never got the event
-  breaker.resetLocalForTests() // "another instance": no in-memory flag at all
-  const g = await breaker.admit({ owner: "other", cfg })
-  assert.equal(g.allowed, false); assert.equal(g.reason, "open") // replay opened it (3 consecutive), so the lost failure was not lost
-  assert.equal(holds().length, 0); assert.equal(state().state, "open")
-})
-test("FAIL CLOSED: while the breaker is still failing, admit() keeps refusing on EVERY instance (hold present, replay fails)", async () => {
-  const cfg = bcfg(); let broken = true; const restore = breakerTxFails(() => broken)
-  await breaker.report({ owner: "lost", mode: "normal", ok: false, kind: "auth", cfg }); assert.equal(holds().length, 1)
-  for (let i = 0; i < 5; i++) { breaker.resetLocalForTests(); assert.deepEqual(await breaker.admit({ owner: `i${i}`, cfg }), { allowed: false, reason: "breaker-update-pending" }) }
-  broken = false; breaker.resetLocalForTests()
-  assert.deepEqual(await breaker.admit({ owner: "later", cfg }), { allowed: false, reason: "blocked" }) // the lost HARD block is now in force
-  assert.equal(state().blockedKind, "auth"); assert.equal(holds().length, 0); restore()
-})
-test("FAIL CLOSED: a lost hard-block or billing event can never be forgotten; a lost SUCCESS in probe mode does not wedge anything", async () => {
-  const cfg = bcfg(); await failN(3); tick(61); await breaker.admit({ owner: "pr", cfg }); let broken = true; const restore = breakerTxFails(() => broken)
-  await breaker.report({ owner: "pr", mode: "probe", ok: true, cfg }); assert.equal(holds().length, 1); assert.equal(state().state, "half_open")
-  broken = false; breaker.resetLocalForTests(); assert.equal((await breaker.admit({ owner: "n", cfg })).allowed, true) // replay moved it to recovery; calls admitted in recovery mode
-  assert.equal(state().state, "recovery"); restore()
-})
-test("FAIL CLOSED: the local hold protects this instance even when the hold document cannot be written either", async () => {
-  const cfg = bcfg()
-  const restoreTx = breakerTxFails(() => true)
-  const dp = Object.getPrototypeOf(env.db.collection("ai-usage").doc("x")); const orig = dp.set; dp.set = async function (d) { if (this.path.includes("luna_h_")) throw new Error("hold write failed"); return orig.call(this, d) }
-  try {
-    await breaker.report({ owner: "lost", mode: "normal", ok: false, kind: "billing", cfg }); assert.equal(holds().length, 0)
-    restoreTx(); assert.deepEqual(await breaker.admit({ owner: "same", cfg }), { allowed: false, reason: "breaker-update-pending" }) // in-memory layer only
-    tick(61); assert.equal((await breaker.admit({ owner: "same", cfg })).allowed, true) // expires: documented residual case
-  } finally { dp.set = orig }
-})
-test("FAIL CLOSED: a hold from before an operator reset is dropped and deleted", async () => {
-  env.seed("ai-usage/luna_h_old", { lunaHold: true, ev: { owner: "o", mode: "normal", ok: false, kind: "auth" }, epoch: 0, at: env.time.now })
-  assert.deepEqual(await breaker.admit({ owner: "a", cfg: bcfg({ resetEpoch: 1 }) }), { allowed: true, mode: "normal" }); assert.equal(holds().length, 0)
-})
-test("FAIL CLOSED: a corrupt hold document is treated as a failure that opens the breaker (never ignored)", async () => {
-  env.seed("ai-usage/luna_h_bad", { lunaHold: true, garbage: true, epoch: 0, at: env.time.now })
-  const g = await breaker.admit({ owner: "a", cfg: bcfg() }); assert.deepEqual([g.allowed, g.reason], [false, "open"]); assert.equal(holds().length, 0)
-})
-test("FAIL CLOSED: an unreadable hold query denies (Luna off)", async () => {
-  const realCol = env.db.collection.bind(env.db); env.db.collection = (n) => { const c = realCol(n); c.where = () => ({ limit: () => ({ get: async () => { throw new Error("query failed") } }) }); return c }
-  try { assert.deepEqual(await breaker.admit({ owner: "b", cfg: bcfg() }), { allowed: false, reason: "breaker-unreadable" }) } finally { env.db.collection = realCol }
-})
 test("FAIL CLOSED: report() retries once before it gives up (one transient failure leaves no hold)", async () => {
   const cfg = bcfg(); let n = 0; const restore = breakerTxFails(() => n++ < 1)
-  await breaker.report({ owner: "t", mode: "normal", ok: false, kind: "timeout", cfg }); restore(); assert.equal(holds().length, 0); assert.equal(state().consecutive, 1)
+  const r = await breaker.report({ owner: "t", mode: "normal", ok: false, kind: "timeout", cfg }); restore(); assert.equal(r.reported, true); assert.equal(state().consecutive, 1)
 })
 test("FAIL CLOSED: report() never throws, whatever fails", async () => {
   const cfg = bcfg(); const real = env.db.runTransaction; env.db.runTransaction = async () => { throw new Error("boom") }; const rc = env.db.collection.bind(env.db); env.db.collection = () => { throw new Error("no db") }
-  await breaker.report({ owner: "t", mode: "normal", ok: false, kind: "timeout", cfg }); env.db.runTransaction = real; env.db.collection = rc
+  const r = await breaker.report({ owner: "t", mode: "normal", ok: false, kind: "timeout", cfg }); env.db.runTransaction = real; env.db.collection = rc; assert.equal(r.reported, false); assert.equal(r.event.kind, "timeout")
+})
+
+// ================================================================== ROUND 4: unresolved paid-call records, bounded fail-closed reconcile
+
+const recs = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_r_"))
+const unresolvedNow = () => recs().filter((d) => d.unresolved === true)
+const ucfg = () => bcfg()
+// A call that was committed `ageSeconds` ago and never settled (young = in flight, old = lost). Goes through the REAL begin().
+let seq = 0
+const makeCalled = async (ageSeconds, uid = `bu${++seq}`) => {
+  const keep = env.time.now; env.time.now = keep - ageSeconds * 1000
+  const t = await usage.begin({ uid, requestId: `req-bk-${seq}-${uid}`, cfg: ucfg(), reserveTokens: 600 }); env.time.now = keep; assert.equal(t.ok, true); return { uid, id: `req-bk-${seq}-${uid}` }
+}
+// A settled call whose breaker update was lost: the event rides on the record.
+const makeEvent = async (ev, uid = `be${++seq}`) => {
+  const c = await makeCalled(0, uid); const rec = recs().find((d) => d.uid === uid)
+  env.seed(`ai-usage/${rec.id}`, { ...rec, state: "settled", outcome: ev.ok ? "ok" : ev.kind, pendingEvent: { owner: `o-${uid}`, mode: "normal", ok: false, kind: null, retryAfterSeconds: 0, rejected: false, overrun: false, epoch: 0, ...ev }, unresolved: true }); return c
+}
+const shardTokens = () => env.list("ai-usage").filter((d) => d.id.startsWith("luna_g_")).reduce((a, d) => a + d.tokens, 0)
+
+test("UNRESOLVED: begin() commits unresolved:true, the committed timestamp and the epoch BEFORE any provider call; still no expireAt", async () => {
+  await makeCalled(0); const r = recs()[0]; assert.equal(r.unresolved, true); assert.equal(r.state, "called"); assert.ok(r.calledAt && typeof r.calledAt.toMillis === "function"); assert.equal(r.epoch, 0); assert.equal("expireAt" in r, false)
+})
+test("UNRESOLVED grace: measured from the server-committed calledAt; 90 s is the last second a call counts as in flight", async () => {
+  assert.equal(K.UNRESOLVED.graceMs, 90000)
+  await makeCalled(10); await makeCalled(89); await makeCalled(90)
+  assert.deepEqual(await breaker.admit({ owner: "a", cfg: ucfg() }), { allowed: true, mode: "normal" }); assert.equal(unresolvedNow().length, 3); assert.equal(state(), undefined) // nothing touched
+  await makeCalled(91); const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "open"]); assert.equal(unresolvedNow().length, 3) // only the stale one was resolved
+})
+test("UNRESOLVED grace: it exceeds the whole life of the invocation, not just the HTTP timeout (pinned to functions/index.js)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8")
+  const m = [...src.matchAll(/timeoutSeconds\s*:\s*(\d+)/g)].map((x) => Number(x[1])); const fnTimeout = m.length ? Math.max(...m) : 60 // 2nd-gen callable default is 60 s
+  assert.ok(fnTimeout <= K.FUNCTION_TIMEOUT_SECONDS, `index.js sets timeoutSeconds ${fnTimeout}: raise FUNCTION_TIMEOUT_SECONDS (and the grace) first`)
+  assert.ok(K.UNRESOLVED.graceMs >= (K.FUNCTION_TIMEOUT_SECONDS + 30) * 1000); assert.ok(K.UNRESOLVED.graceMs > K.CEILINGS.timeoutMs * 10)
+})
+test("UNRESOLVED: a stale unknown outcome opens the breaker CONSERVATIVELY (ladder step 0), never hard-blocks; the permanent record and its budget stay", async () => {
+  const c = await makeCalled(200); const tokensBefore = shardTokens()
+  const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "open"])
+  assert.deepEqual([state().state, state().cooldownSeconds], ["open", 60]); assert.notEqual(state().state, "blocked")
+  const r = recs()[0]; assert.equal("unresolved" in r, false); assert.equal(r.state, "unreported"); assert.equal(r.resolvedBy, "reconcile"); assert.equal(r.reserved, 600); assert.equal("expireAt" in r, false)
+  assert.equal(shardTokens(), tokensBefore) // the reservation stays charged: conservative budget accounting
+  assert.equal((await usage.begin({ uid: c.uid, requestId: c.id, cfg: ucfg(), reserveTokens: 600 })).reason, "request-seen") // the same uid+requestId can never be called again
+  const g2 = await breaker.admit({ owner: "b", cfg: ucfg() }); assert.equal(g2.reason, "open"); assert.equal(recs().length, 1) // idempotent: nothing more happens
+})
+test("UNRESOLVED: a stale record does not change an already open/blocked breaker; epoch from before an operator reset is dropped", async () => {
+  await breaker.report({ owner: "x", mode: "normal", ok: false, kind: "auth", cfg: ucfg() }); await makeCalled(200)
+  assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).reason, "blocked"); assert.equal(state().blockedKind, "auth"); assert.equal(unresolvedNow().length, 0)
+  await makeCalled(200); const reset = bcfg({ resetEpoch: 1 }); await breaker.admit({ owner: "r", cfg: reset }) // reset clears the block first? no: stale epoch-0 record is dropped, so the reset-cleared breaker stays closed
+  assert.equal(unresolvedNow().length, 0)
+})
+test("UNRESOLVED: a stored pendingEvent is replayed exactly (a lost 'auth' blocks; a lost 'ok' changes nothing) and the record is resolved but kept", async () => {
+  await makeEvent({ ok: false, kind: "auth" }); const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "blocked"]); assert.equal(state().blockedKind, "auth")
+  const r = recs()[0]; assert.equal("unresolved" in r, false); assert.equal("pendingEvent" in r, false); assert.equal(r.state, "settled"); assert.equal(r.outcome, "auth")
+  env = F.setupWorld(); await makeEvent({ ok: true }); assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).allowed, true); assert.equal(state().state, "closed"); assert.equal(state().consecutive, 0); assert.equal(unresolvedNow().length, 0)
+})
+for (const n of [50, 51, 101, 120]) {
+  test(`UNRESOLVED backlog of ${n}: all are replayed in bounded rounds; Luna is admitted only after NONE remain`, async () => {
+    for (let i = 0; i < n; i++) await makeEvent({ ok: true }) // benign events: after a complete replay the breaker stays closed, so admission is the proof of completeness
+    assert.equal(unresolvedNow().length, n); const g = await breaker.admit({ owner: "a", cfg: ucfg() })
+    assert.deepEqual(g, { allowed: true, mode: "normal" }); assert.equal(unresolvedNow().length, 0); assert.equal(recs().length, n)
+  })
+}
+test("UNRESOLVED backlog: beyond the bounded rounds (301 > 6 x 50) admit() DENIES and leaves the rest for the next attempt", async () => {
+  for (let i = 0; i < 301; i++) await makeEvent({ ok: true }); const g = await breaker.admit({ owner: "a", cfg: ucfg() })
+  assert.deepEqual([g.allowed, g.reason], [false, "unresolved-calls:backlog"]); assert.equal(unresolvedNow().length, 1)
+  assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).allowed, true); assert.equal(unresolvedNow().length, 0) // the next attempt finishes the job
+})
+for (const [young, stale] of [[30, 90], [25, 100], [10, 101], [20, 120]]) { // a realistic ceiling for in-flight calls is 2 x 10 instances = 20
+  test(`UNRESOLVED mixed backlog (${young} in flight + ${stale} stale): stale ones resolved, in-flight ones untouched, a young record is never swept`, async () => {
+    for (let i = 0; i < young; i++) await makeCalled(5 + (i % 80)); for (let i = 0; i < stale; i++) await makeEvent({ ok: true })
+    const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual(g, { allowed: true, mode: "normal" })
+    const left = unresolvedNow(); assert.equal(left.length, young); assert.ok(left.every((r) => r.state === "called" && !r.resolvedBy))
+  })
+}
+test("UNRESOLVED starvation: more in-flight records than a page can hold (impossible under the concurrency caps) fails CLOSED, never open", async () => {
+  for (let i = 0; i < 49; i++) await makeCalled(5 + i); for (let i = 0; i < 51; i++) await makeEvent({ ok: true })
+  const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.equal(g.allowed, false); assert.match(g.reason, /^unresolved-calls:(backlog|incomplete)$/); assert.ok(unresolvedNow().filter((r) => r.state === "called").length === 49)
+})
+test("UNRESOLVED: a FULL page of in-flight records cannot prove there is nothing behind it, so admit() denies (fails closed)", async () => {
+  for (let i = 0; i < 50; i++) await makeCalled(1); const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "unresolved-calls:incomplete"])
+  env = F.setupWorld(); for (let i = 0; i < 49; i++) await makeCalled(1); assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).allowed, true) // 49 < page: provably complete
+})
+test("UNRESOLVED failure injection: a failing chunk denies; earlier chunks stay resolved (atomic per chunk); the next attempt finishes", async () => {
+  for (let i = 0; i < 45; i++) await makeEvent({ ok: true }); const real = env.db.runTransaction.bind(env.db); let n = 0
+  env.db.runTransaction = async (fn) => { let touches = false; const probe = { get: async (r) => { if (r.path === "ai-usage/luna-breaker") touches = true; return { exists: false, data: () => ({}) } }, set() {}, delete() {} }; try { await fn(probe) } catch (e) { } if (touches && ++n === 2) throw new Error("UNAVAILABLE"); return real(fn) }
+  try { const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "unresolved-calls:reconcile-failed"]) } finally { env.db.runTransaction = real }
+  assert.equal(unresolvedNow().length, 25) // first chunk of 20 committed, nothing half-applied
+  assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).allowed, true); assert.equal(unresolvedNow().length, 0)
+})
+test("UNRESOLVED failure injection: unreadable query, unreadable breaker, or a failing replay each DENY; nothing is admitted on any read/transaction failure", async () => {
+  await makeEvent({ ok: true }); const realCol = env.db.collection.bind(env.db)
+  env.db.collection = (n) => { const c = realCol(n); c.where = () => ({ limit: () => ({ get: async () => { throw new Error("query failed") } }) }); return c }
+  try { assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).reason, "breaker-unreadable") } finally { env.db.collection = realCol }
+  const restore = breakerTxFails(() => true); try { const g = await breaker.admit({ owner: "a", cfg: ucfg() }); assert.deepEqual([g.allowed, g.reason], [false, "unresolved-calls:reconcile-failed"]) } finally { restore() }
+  const realGet = Object.getPrototypeOf(env.db.collection("ai-usage").doc("luna-breaker")).get; const P = Object.getPrototypeOf(env.db.collection("ai-usage").doc("luna-breaker"))
+  P.get = async function () { if (this.path === "ai-usage/luna-breaker") throw new Error("breaker read failed"); return realGet.call(this) }
+  try { assert.equal((await breaker.admit({ owner: "a", cfg: ucfg() })).reason, "breaker-unreadable") } finally { P.get = realGet }
+  assert.equal(unresolvedNow().length, 1) // nothing was resolved by the failed attempts
+})
+test("UNRESOLVED: the query and the breaker read are BOTH issued before either is awaited, and both must succeed", async () => {
+  await makeCalled(1); const order = []; const realCol = env.db.collection.bind(env.db); const P = Object.getPrototypeOf(env.db.collection("ai-usage").doc("x")); const realGet = P.get
+  env.db.collection = (n) => { const c = realCol(n); const w = c.where.bind(c); c.where = (...a) => { order.push("query-issued"); return w(...a) }; return c }
+  P.get = async function () { if (this.path === "ai-usage/luna-breaker") order.push("breaker-issued"); return realGet.call(this) }
+  try { await breaker.admit({ owner: "a", cfg: ucfg() }) } finally { env.db.collection = realCol; P.get = realGet }
+  assert.deepEqual(order.slice(0, 2).sort(), ["breaker-issued", "query-issued"])
+})
+test("UNRESOLVED: concurrent reconcilers apply every stored event exactly once (atomic + idempotent)", async () => {
+  await makeEvent({ ok: false, kind: "timeout", owner: "e1" }); await makeEvent({ ok: false, kind: "timeout", owner: "e2" })
+  const res = await Promise.all(Array.from({ length: 6 }, (_, i) => breaker.admit({ owner: `c${i}`, cfg: ucfg() })))
+  assert.ok(res.every((r) => r.allowed === true)); assert.equal(state().consecutive, 2, "applied twice would have been 4 and opened the breaker"); assert.equal(state().state, "closed"); assert.equal(unresolvedNow().length, 0)
+  const rs = recs(); assert.ok(rs.every((r) => r.resolvedBy === "reconcile") && rs.length === 2)
+})
+test("UNRESOLVED: a stale record and a concurrent late settle cannot double count (settle sees state != called and does nothing)", async () => {
+  const c = await makeCalled(200); const ticket = { day: recs()[0].day, shard: recs()[0].shard, reserved: 600 }
+  await breaker.admit({ owner: "a", cfg: ucfg() }); const t0 = shardTokens()
+  assert.equal(await usage.settleFailure({ uid: c.uid, requestId: c.id, ticket, kind: "timeout", usage: null }), false); assert.equal(shardTokens(), t0); assert.equal(recs()[0].state, "unreported")
+})
+test("UNRESOLVED: the unresolved query needs only the automatic single-field index (no composite index, no rules change)", () => {
+  const idx = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "security-rules", "firestore.indexes.json"), "utf8"))
+  assert.deepEqual(idx.fieldOverrides, []) // no exemption disables the automatic index on `unresolved`
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "ai", "luna", "breaker.js"), "utf8"); const q = src.match(/where\("unresolved", "==", true\)([^\n]*)/)[1]
+  assert.match(q, /^\.limit\(UNRESOLVED\.page\)\.get\(\)/); assert.ok(!/orderBy|where\(.*where\(/.test(q)) // one equality filter, no order, no range: single-field index only
 })

@@ -55,23 +55,24 @@ async function tryRewrite({ uid, requestId, cfg, intent, blocks, language, notic
       if (!ticket.ok) { await breaker.release({ owner, mode: gate.mode }); return skip(`usage:${ticket.reason}`) }
       const res = await deps.callResponses({ payload, maxOutputTokens: L.limits.maxOutputTokens, reasoningEffort: cal.reasoningEffort, timeoutMs: L.limits.timeoutMs })
       if (!res.ok) {
-        await breaker.report({ owner, mode: gate.mode, ok: false, kind: res.kind, retryAfterSeconds: res.retryAfterSeconds, cfg })
-        await usage.settleFailure({ uid, requestId, ticket, kind: res.kind, usage: res.usage || null }).catch(() => {})
+        const rep = await breaker.report({ owner, mode: gate.mode, ok: false, kind: res.kind, retryAfterSeconds: res.retryAfterSeconds, cfg })
+        await usage.settleFailure({ uid, requestId, ticket, kind: res.kind, usage: res.usage || null, pending: rep.reported ? null : rep.event }).catch(() => {})
         log.warn("ai.luna.failed", { uidHash: log.uidHash(uid), kind: res.kind, latencyMs: res.ms })
         return skip(`provider:${res.kind}`)
       }
       const v = validateRewrite(tpl, res.text)
       const overrun = !!(res.usage && res.usage.input > L.limits.maxInputTokens)
       // The provider behaved (it answered), so this is a success report; rejected/overrun feed the breaker's own bookkeeping.
-      await breaker.report({ owner, mode: gate.mode, ok: true, rejected: !v.ok, overrun, cfg })
+      const rep = await breaker.report({ owner, mode: gate.mode, ok: true, rejected: !v.ok, overrun, cfg })
+      const pending = rep.reported ? null : rep.event // breaker update lost: the outcome rides on the request record (replayed by every instance's admit())
       if (overrun) log.error("ai.luna.calibration_drift", { uidHash: log.uidHash(uid), kind: "input-over-limit" })
       if (!v.ok) {
-        await usage.settleFailure({ uid, requestId, ticket, kind: "rejected", usage: res.usage }).catch(() => {})
+        await usage.settleFailure({ uid, requestId, ticket, kind: "rejected", usage: res.usage, pending }).catch(() => {})
         log.warn("ai.luna.rejected", { uidHash: log.uidHash(uid), kind: v.reason })
         return skip(`rejected:${v.reason}`)
       }
       const text = prompt.joinSegments(tpl, v.segments)
-      return { blocks: [{ ...blocks[0], text }], commit: usage.prepareSuccess({ uid, requestId, ticket, usage: res.usage, originalBlocks: blocks }), applied: true }
+      return { blocks: [{ ...blocks[0], text }], commit: usage.prepareSuccess({ uid, requestId, ticket, usage: res.usage, originalBlocks: blocks, pending }), applied: true }
     } finally { inflight -= 1 }
   } catch (e) {
     log.error("ai.luna.error", { uidHash: log.uidHash(uid), kind: "internal", code: e && e.code })

@@ -17,6 +17,7 @@ const KINDS = Object.freeze({
   rate_limit: { breaker: "open", charge: false },
   billing: { breaker: "blocked", charge: false }, // insufficient_quota / spend limit: configuration problem, needs an operator
   auth: { breaker: "blocked", charge: false }, // 401/403: bad or missing key
+  unreported: { breaker: "open", charge: true }, // an outcome nobody recorded (crash, lost write): the breaker opens at the current ladder step; the next probe finds the truth
   bad_request: { breaker: "blocked", charge: false }, // 400/404/405/413/415/422: our request or the configured model/endpoint is wrong. Retrying cannot help.
   server: { breaker: "count", charge: true },
   timeout: { breaker: "count", charge: true },
@@ -41,6 +42,17 @@ const COOLDOWN_STEPS = Object.freeze([60, 120, 300, 600, 900])
 const CONSECUTIVE_FAILURES = 3
 // If a breaker update cannot be committed, Luna is held off on this instance for this long even when the durable hold could not be written either.
 const LOCAL_HOLD_MS = 60000
+// ---- unresolved paid calls (round 4) ----
+// begin() commits `unresolved: true` on the luna_r_* record BEFORE the provider request. It is cleared in the settle transaction only when the
+// breaker already has the outcome; otherwise the outcome rides on the record itself (`pendingEvent`). admit() refuses to admit while any record is
+// unresolved and OLDER than the grace period, after replaying it into the breaker.
+// GRACE: how long a `called` record may be treated as a genuinely in-flight call. It is measured from the record's server-committed `calledAt`
+// and must exceed the WHOLE life of the invocation that wrote it (provider call + breaker report + the rest of the chat handler + persistTurn), not
+// only the HTTP timeout. A Cloud Functions 2nd-gen callable that sets no timeoutSeconds runs at most 60 s (aiChat sets none), so the instance that
+// wrote `calledAt` cannot still be working after 60 s. Grace = that 60 s + 30 s for clock skew and scheduling = 90 s. A scan test pins FUNCTION_TIMEOUT_SECONDS
+// to functions/index.js so raising the function timeout without raising the grace fails the build.
+const FUNCTION_TIMEOUT_SECONDS = 60
+const UNRESOLVED = Object.freeze({ graceMs: (FUNCTION_TIMEOUT_SECONDS + 30) * 1000, page: 50, chunk: 20, maxRounds: 6 })
 const LEASE_MARGIN_MS = 2000 // a probe lease / recovery slot must outlive the provider timeout by at least this much
 
 // Returns cfg with every Luna limit clamped to its ceiling and the breaker lease lengthened so it always outlives the provider timeout.
@@ -51,4 +63,4 @@ function effectiveCfg(cfg) {
   return { ...cfg, luna: { ...L, limits: { ...lim, ...out }, breaker: { ...B, leaseSeconds: Math.max(Number.isFinite(B.leaseSeconds) ? B.leaseSeconds : 0, minLease) } } }
 }
 
-module.exports = { MODEL, ENDPOINT, NOTICE_VERSION, GLOBAL_SHARDS, BYTE_CEILING, KINDS, BILLING_CODES, CEILINGS, INVALID_OUTPUT, INPUT_OVERRUN_LIMIT, MAX_COOLDOWN_SECONDS, COOLDOWN_STEPS, CONSECUTIVE_FAILURES, LOCAL_HOLD_MS, LEASE_MARGIN_MS, effectiveCfg }
+module.exports = { MODEL, ENDPOINT, NOTICE_VERSION, GLOBAL_SHARDS, BYTE_CEILING, KINDS, BILLING_CODES, CEILINGS, INVALID_OUTPUT, INPUT_OVERRUN_LIMIT, MAX_COOLDOWN_SECONDS, COOLDOWN_STEPS, CONSECUTIVE_FAILURES, LOCAL_HOLD_MS, FUNCTION_TIMEOUT_SECONDS, UNRESOLVED, LEASE_MARGIN_MS, effectiveCfg }

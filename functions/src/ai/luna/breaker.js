@@ -7,20 +7,22 @@
 //   blocked   -> billing/quota or bad-key problem: no automatic retries; stays blocked until an operator bumps luna.resetEpoch
 // If this document cannot be read, Luna is treated as OFF and Malloya answers deterministically.
 //
-// FAIL-CLOSED on a lost update. A provider outcome that cannot be committed to the breaker must never silently allow more paid calls:
-//   1. report() retries the transaction once.
-//   2. If that fails too, the event is written as its own durable "hold" document (ai-usage/luna_h_{owner}; a plain set, no read-modify-write, so it
-//      does not share the failure mode of the hot breaker document) and this instance also stops calling Luna for LOCAL_HOLD_MS (in memory, an extra
-//      layer only).
-//   3. EVERY instance's admit() lists the hold documents first. While any exists, nobody is admitted. admit() replays the held events into the
-//      breaker in one transaction (the same pure reducer report() uses) and deletes them. If that replay fails, admit() denies again.
-//   Residual case: the transaction AND the hold write both fail (Firestore broadly unavailable). Then only the in-memory hold protects this instance,
-//   but the same outage makes every other instance's admit() unable to read the breaker, which denies as well. Documented in LUNA_PHASE1.md.
+// FAIL-CLOSED on a lost update (round 4; replaces the round-3 hold documents). The durable obligation is the permanent request record that begin()
+// commits BEFORE the provider call, marked `unresolved: true`:
+//   * normal case: the breaker is updated, then the settle transaction clears `unresolved`.
+//   * breaker update lost (report() retried once and still failed): the exact event rides on the record (`pendingEvent`) and `unresolved` stays true.
+//   * every write lost, or the instance died: the record stays `called` + unresolved.
+// EVERY instance's admit() queries the unresolved records IN PARALLEL with the breaker read and awaits both. Records that are still inside the grace
+// period (UNRESOLVED.graceMs, measured from the server-committed `calledAt`) are genuinely in flight and ignored. Older ones are replayed into the breaker
+// (a stored event exactly; an unknown outcome as the conservative `unreported` event that opens the breaker) and marked resolved IN THE SAME TRANSACTION,
+// so a replay is atomic and idempotent even with concurrent reconcilers. Reconciliation is bounded (pages of 50, chunks of 20, at most 6 rounds); if the
+// backlog is not proven empty, a page is incomplete, or any read/transaction fails, admit() DENIES. Residual: for up to the grace period after an outcome is
+// lost, other instances can still admit calls; spend in that window is bounded by the per-user, global and per-instance limits.
 const fb = require("../../lib/firebase")
 const clock = require("../../lib/clock")
 const { AI_COL } = require("../constants")
 const { sha256hex } = require("../../lib/crypto")
-const { KINDS, INVALID_OUTPUT, INPUT_OVERRUN_LIMIT, MAX_COOLDOWN_SECONDS, COOLDOWN_STEPS, CONSECUTIVE_FAILURES, LOCAL_HOLD_MS } = require("./constants")
+const { KINDS, INVALID_OUTPUT, INPUT_OVERRUN_LIMIT, MAX_COOLDOWN_SECONDS, COOLDOWN_STEPS, CONSECUTIVE_FAILURES, LOCAL_HOLD_MS, UNRESOLVED } = require("./constants")
 
 const ref = () => fb.db().collection(AI_COL.usage).doc("luna-breaker")
 const closed = (epoch = 0) => ({ state: "closed", failures: [], consecutive: 0, invalid: [], overruns: 0, cooldownStep: 0, cooldownSeconds: 0, cooldownUntil: 0, lease: null, recoveryUntil: 0, inflight: {}, blockedKind: null, resetEpoch: epoch })
@@ -30,8 +32,7 @@ const MAX_COOLDOWN = MAX_COOLDOWN_SECONDS
 // two users sending the same requestId would otherwise share one slot and walk past the global recovery cap.
 const ownerKey = (uid, requestId) => sha256hex(JSON.stringify(["owner", String(uid), String(requestId)])).slice(0, 32)
 
-const holdRef = (owner) => fb.db().collection(AI_COL.usage).doc(`luna_h_${owner}`)
-let localHoldUntil = 0 // in-memory extra layer only; the durable protection is the hold documents
+let localHoldUntil = 0 // in-memory extra layer only; the durable protection is the unresolved request record
 const resetLocalForTests = () => { localHoldUntil = 0 }
 
 async function peek() { // -> breaker data | null when unreadable
@@ -41,15 +42,13 @@ async function peek() { // -> breaker data | null when unreadable
 // -> { allowed, mode: "normal"|"probe"|"recovery", reason? }
 async function admit({ owner, cfg }) {
   const B = cfg.luna.breaker, epoch = cfg.luna.resetEpoch || 0
-  let holds
-  try { holds = (await fb.db().collection(AI_COL.usage).where("lunaHold", "==", true).limit(50).get()).docs } catch (e) { return { allowed: false, reason: "breaker-unreadable" } }
-  if (holds.length) { // a breaker update was lost earlier: replay it before anything else, or stay closed to Luna
-    if (!(await reconcile(holds.map((d) => d.id), cfg))) return { allowed: false, reason: "breaker-update-pending" }
-    localHoldUntil = 0
-  }
-  if (clock.now().getTime() < localHoldUntil) return { allowed: false, reason: "breaker-update-pending" } // the hold document itself could not be written
-  const first = await peek()
+  let page, first
+  try { [page, first] = await Promise.all([queryUnresolved(), peek()]) } catch (e) { return { allowed: false, reason: "breaker-unreadable" } } // BOTH are awaited before any decision
   if (!first) return { allowed: false, reason: "breaker-unreadable" }
+  const cleared = await clearUnresolved(page, cfg)
+  if (!cleared.ok) return { allowed: false, reason: `unresolved-calls:${cleared.reason}` }
+  if (cleared.reconciled) { localHoldUntil = 0; first = await peek(); if (!first) return { allowed: false, reason: "breaker-unreadable" } } // the replay may have changed the breaker
+  if (clock.now().getTime() < localHoldUntil) return { allowed: false, reason: "breaker-update-pending" } // this instance lost a write and could not tell anyone
   if (first.state === "closed") return { allowed: true, mode: "normal" }
   try {
     return await fb.db().runTransaction(async (tx) => {
@@ -146,41 +145,73 @@ async function commitEvent(ev, cfg) { // one transaction; throws on failure
   })
 }
 
-// Record the outcome of an admitted call. Never throws. A lost update fails CLOSED (see the header): hold document + local hold.
+// Record the outcome of an admitted call. Never throws. -> { reported: true } | { reported: false, event }.
+// When the update is lost the caller stores `event` on the request record (see usage.settled); this instance also stops calling Luna for LOCAL_HOLD_MS
+// (in memory: an extra layer only).
 async function report(args) {
   const cfg = args.cfg, ev = evOf(args)
   if (ev.mode === "normal" && ev.ok && !ev.rejected && !ev.overrun) { // hot path: write only when there is bookkeeping to update
     const cur = await peek()
-    if (cur && cur.state === "closed" && !(cur.invalid || []).length && !(cur.consecutive > 0)) return
+    if (cur && cur.state === "closed" && !(cur.invalid || []).length && !(cur.consecutive > 0)) return { reported: true }
   }
-  for (let attempt = 0; attempt < 2; attempt++) { try { await commitEvent(ev, cfg); return } catch (e) { /* retry once, then fail closed */ } }
+  for (let attempt = 0; attempt < 2; attempt++) { try { await commitEvent(ev, cfg); return { reported: true } } catch (e) { /* retry once, then fail closed */ } }
   localHoldUntil = clock.now().getTime() + LOCAL_HOLD_MS
-  try { await holdRef(ev.owner).set({ lunaHold: true, ev, epoch: cfg.luna.resetEpoch || 0, at: clock.now().getTime(), ...stamp() }) } catch (e) { /* only the local hold remains; see the residual case in the header */ }
+  return { reported: false, event: { ...ev, epoch: cfg.luna.resetEpoch || 0 } }
 }
 
-// Replay held events into the breaker and delete them, in ONE transaction. Events from before an operator reset (older epoch) are dropped.
-// A hold document that cannot be understood is replayed as the most conservative event (a counted failure that opens the breaker).
-async function reconcile(ids, cfg) {
+// ---- unresolved paid calls -------------------------------------------------------------------------------------------------------------------------
+const recRef = (id) => fb.db().collection(AI_COL.usage).doc(id)
+const queryUnresolved = () => fb.db().collection(AI_COL.usage).where("unresolved", "==", true).limit(UNRESOLVED.page).get() // single-field equality: automatic index, no composite
+const tsMs = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : typeof v === "number" ? v : null)
+// -> "young" (genuinely in flight: ignore) | "event" (a stored outcome to replay) | "stale" (unknown outcome) | "none"
+function classify(d, now) {
+  if (!d || d.unresolved !== true) return "none"
+  if (d.pendingEvent && typeof d.pendingEvent === "object") return "event"
+  if (d.state === "called") { const t = tsMs(d.calledAt); return t !== null && now - t <= UNRESOLVED.graceMs ? "young" : "stale" } // no usable committed timestamp -> stale
+  return "stale" // unresolved but neither called nor carrying an event: corrupt, treated conservatively
+}
+const STALE_EVENT = (id) => ({ owner: `unreported:${id}`, mode: "normal", ok: false, kind: "unreported", retryAfterSeconds: 0, rejected: false, overrun: false })
+
+// ONE transaction: re-read each record, apply its outcome to the breaker, mark it resolved. A record that is no longer unresolved (another
+// reconciler got there first) or is young again is skipped, so every event is applied exactly once.
+async function reconcileChunk(ids, cfg) {
   try {
     await fb.db().runTransaction(async (tx) => {
       const s = await tx.get(ref()); let b = s.exists ? { ...closed(), ...s.data() } : closed(), changed = false
-      const docs = []
-      for (const id of ids) { const h = await tx.get(fb.db().collection(AI_COL.usage).doc(id)); if (h.exists) docs.push({ id, d: h.data() }) }
-      docs.sort((x, y) => (x.d.at || 0) - (y.d.at || 0))
+      const found = []
+      for (const id of ids) { const r = await tx.get(recRef(id)); if (r.exists) found.push({ id, d: r.data() }) }
       const now = clock.now().getTime(), epoch = cfg.luna.resetEpoch || 0
-      for (const { d } of docs) {
-        if ((d.epoch || 0) < epoch) continue
-        const corrupt = !(d.ev && typeof d.ev === "object")
-        const ev = corrupt ? { owner: "unknown", mode: "normal", ok: false, kind: "server" } : d.ev
-        const base = corrupt && b.state === "closed" ? { ...b, consecutive: CONSECUTIVE_FAILURES - 1 } : b // unknown event: make it open the breaker
-        const next = reduce(base, ev, cfg, now); if (next) { b = next; changed = true }
+      const todo = found.filter((x) => { const c = classify(x.d, now); return c === "event" || c === "stale" })
+      todo.sort((x, y) => (tsMs(x.d.calledAt) || 0) - (tsMs(y.d.calledAt) || 0))
+      for (const { id, d } of todo) {
+        const isEvent = classify(d, now) === "event", ev = isEvent ? d.pendingEvent : STALE_EVENT(id)
+        if ((isEvent ? ev.epoch || 0 : d.epoch || 0) >= epoch) { const next = reduce(b, ev, cfg, now); if (next) { b = next; changed = true } } // an operator reset supersedes older events
+        const { unresolved, pendingEvent, ...rest } = d
+        tx.set(recRef(id), { ...rest, ...(isEvent ? {} : { state: "unreported" }), resolvedBy: "reconcile", resolvedAt: fb.FieldValue().serverTimestamp() }) // permanent record kept
       }
       if (changed) tx.set(ref(), { ...b, ...stamp() })
-      for (const { id } of docs) tx.delete(fb.db().collection(AI_COL.usage).doc(id))
     })
     return true
   } catch (e) { return false }
 }
+
+// Bounded, fail-closed reconciliation. -> { ok:true, reconciled } only when the backlog is PROVEN to contain nothing but in-flight calls.
+async function clearUnresolved(firstPage, cfg) {
+  let snap = firstPage, reconciled = false
+  for (let round = 0; round <= UNRESOLVED.maxRounds; round++) {
+    const now = clock.now().getTime(), rows = snap.docs.map((d) => ({ id: d.id, d: d.data() }))
+    const actionable = rows.filter((r) => { const c = classify(r.d, now); return c === "event" || c === "stale" })
+    if (!actionable.length) return rows.length >= UNRESOLVED.page ? { ok: false, reason: "incomplete" } : { ok: true, reconciled } // a full page of young rows cannot prove there is nothing behind it
+    if (round === UNRESOLVED.maxRounds) return { ok: false, reason: "backlog" }
+    for (let i = 0; i < actionable.length; i += UNRESOLVED.chunk) {
+      if (!(await reconcileChunk(actionable.slice(i, i + UNRESOLVED.chunk).map((r) => r.id), cfg))) return { ok: false, reason: "reconcile-failed" }
+      reconciled = true
+    }
+    try { snap = await queryUnresolved() } catch (e) { return { ok: false, reason: "unreadable" } }
+  }
+  return { ok: false, reason: "backlog" }
+}
+
 // An admitted call that never reached the provider (e.g. the user's allowance ran out first): give the probe lease / recovery slot back.
 async function release({ owner, mode }) {
   if (mode === "normal") return
@@ -194,4 +225,4 @@ async function release({ owner, mode }) {
     })
   } catch (e) { /* the lease expires by itself */ }
 }
-module.exports = { admit, report, release, peek, closed, ownerKey, reduce, resetLocalForTests }
+module.exports = { admit, report, release, peek, closed, ownerKey, reduce, resetLocalForTests, classify }
