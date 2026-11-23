@@ -1,11 +1,14 @@
 // The AI Service Notice and the user's choice about it. Pure (no React Native / Firebase), so it is unit-tested with `node --test`.
 // This is the ONLY app file that names the AI provider: the notice has to say so. No key, endpoint or model setting exists in the app.
+// The text states exactly what Phase 1 sends (fixed Malloya template text + a language code; see functions/src/ai/luna/prompt.js and the
+// payload tests). It makes no retention or security promise. If a later phase sends anything more, this wording and LUNA_NOTICE_VERSION MUST change.
 // Wording is the owner's to approve (privacy policy + POPIA review) before the feature is switched on for anyone.
 export const LUNA_NOTICE_VERSION = 1 // must match NOTICE_VERSION in functions/src/ai/luna/constants.js; bump together when the wording changes
 export const LUNA_NOTICE_TITLE = "AI Service Notice"
 export const LUNA_NOTICE_TEXT =
-  "Malloya uses OpenAI's GPT-6 Luna to help generate conversational responses. When this service is used, your message and relevant information needed to answer your request may be processed by OpenAI. " +
-  "Do not submit passwords, payment details or other sensitive personal information. Your conversations are handled in accordance with XploreSoweto's privacy policy."
+  "Malloya may use OpenAI's GPT-6 Luna to improve the wording of some of its own conversational replies, such as greetings and thanks. " +
+  "When this is used, only a short piece of template text written by Malloya, and a language code, is sent to OpenAI. Your messages, account details and location are not sent. " +
+  "Please do not enter passwords, payment details or other sensitive personal information in the chat. Your conversations are handled in accordance with XploreSoweto's privacy policy."
 export const LUNA_DELETE_ALL_LABEL = "Delete all my conversations"
 export const LUNA_DELETE_ALL_NOTE = "This permanently deletes every conversation you've had with Malloya. It can't be undone. Your daily usage counters and your choice about the AI Service Notice are kept."
 

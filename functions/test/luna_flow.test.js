@@ -136,6 +136,20 @@ test("crash after the 'called' commit: the retry gets the deterministic answer a
   const r = await chat("u1", "thanks", { requestId: id }); assert.equal(textOf(r), THANKS); assert.equal(calls.length, 0) // a record already exists for this requestId
   assert.equal(shardTotal(), 900) // the unsettled reservation stays counted (bounded, conservative): no leak, no double reservation
 })
+test("HARD CRASH: the process dies right after the 'called' commit (the settle also never happens); the retry gets Malloya's answer and the provider is not called again", async () => {
+  await accept(); const id = rid(); const realTx = env.db.runTransaction.bind(env.db); let begun = false
+  install(async () => { throw new Error("process killed while the provider call was in flight") })
+  env.db.runTransaction = async (fn) => { if (begun) throw Object.assign(new Error("process is gone"), { code: 14 }); const r = await realTx(fn); if (env.list("ai-usage").some((d) => d.id.startsWith("luna_r_"))) begun = true; return r }
+  const first = await chat("u1", "thanks", { requestId: id }).catch((e) => e) // whatever happens to the dying request is irrelevant; what matters is the durable state
+  env.db.runTransaction = realTx
+  assert.equal(calls.length, 1); const rec = env.list("ai-usage").find((d) => d.id.startsWith("luna_r_")); assert.equal(rec.state, "called"); assert.equal(rec.reserved, 900) // committed, never settled
+  install(async () => goodOut()); env.time.now += 13000
+  await rejects(chat("u1", "thanks", { requestId: id }), "aborted", "request-in-progress"); assert.equal(calls.length, 1) // Malloya's own in-flight marker (killed with the process) still protects the first 120 s
+  env.time.now += 130000 // the in-flight marker is now stale, so Malloya runs the request again... and Luna must NOT
+  const retry = await chat("u1", "thanks", { requestId: id }); assert.equal(textOf(retry), THANKS); assert.equal(calls.length, 1) // NO second provider call
+  env.time.now += 3600000; await chat("u1", "thanks", { requestId: id }); assert.equal(calls.length, 1) // nor any later retry of the same requestId
+  assert.equal(shardTotal(), 900) // the unsettled reservation remains counted: bounded and conservative
+})
 test("a failed first attempt is never retried for the same requestId either", async () => {
   await accept(); install(async () => ({ ok: false, kind: "timeout", ms: 1 })); const id = rid()
   await chat("u1", "thanks", { requestId: id }); install(async () => goodOut()); env.seed("ai-usage/luna-breaker", { state: "closed", failures: [] })

@@ -28,6 +28,17 @@ test("templates join back to Malloya's exact deterministic wording, and only rew
     for (const s of tpl.segments.filter((x) => !x.rw)) assert.ok(!p.input.includes(s.text.trim()), "pinned text must never be sent")
   }
 })
+test("the AI Service Notice matches reality: a payload is built only from fixed instructions, template text and a language code", () => {
+  const body = (p) => JSON.parse(p.input)
+  for (const p of prompt.allPayloads()) {
+    assert.deepEqual(Object.keys(body(p)).sort(), ["language", "segments"]); assert.equal(body(p).language, "en")
+    for (const text of Object.values(body(p).segments)) assert.ok(Object.values(prompt.TEMPLATES).some((t) => t.segments.some((s) => s.rw && s.text === text)), "only fixed template text may be sent")
+    assert.deepEqual(Object.keys(p).sort(), ["bytes", "id", "input", "instructions", "language", "original", "schema", "sha256", "templateId", "withinByteCeiling"]) // no field that could carry user data
+  }
+  const src = require("node:fs").readFileSync(path.join(__dirname, "..", "src", "ai", "luna", "index.js"), "utf8")
+  const args = src.match(/deps\.callResponses\(\{([^}]*)\}\)/)[1] // the ONLY arguments the provider call receives
+  assert.deepEqual(args.split(",").map((a) => a.split(":")[0].trim()).sort(), ["maxOutputTokens", "payload", "reasoningEffort", "timeoutMs"]) // never a message, uid, location or request id
+})
 test("the payload universe is closed: every payload has a calibration entry whose hash matches the CURRENT templates and instructions", () => {
   const m = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "ai", "luna", "calibration.json"), "utf8"))
   const all = prompt.allPayloads()
@@ -172,6 +183,13 @@ test("breaker: a 429 rate limit opens immediately and honours Retry-After; billi
   tick(100000); assert.deepEqual(await breaker.admit({ owner: "c", cfg }), { allowed: false, reason: "blocked" }) // no automatic retry, ever
   const fixed = bcfg({ resetEpoch: 1 }); assert.deepEqual(await breaker.admit({ owner: "c", cfg: fixed }), { allowed: true, mode: "normal" }); assert.equal(state().state, "closed")
 })
+test("breaker: recovery concurrency is a SHARED limit: ten instances asking at the same moment get at most 2 slots in total", async () => {
+  const cfg = bcfg(); await failN(5); tick(61); await breaker.admit({ owner: "p", cfg }); await breaker.report({ owner: "p", mode: "probe", ok: true, cfg })
+  const results = await Promise.all(Array.from({ length: 10 }, (_, i) => breaker.admit({ owner: `inst${i}`, cfg })))
+  assert.equal(results.filter((r) => r.allowed).length, 2); assert.ok(results.filter((r) => !r.allowed).every((r) => r.reason === "recovery-capacity"))
+  assert.equal(Object.keys(state().inflight).length, 2) // the shared document holds exactly the two live slots
+  tick(31); assert.equal((await breaker.admit({ owner: "late", cfg })).allowed, true) // slots of crashed holders expire (lease), they cannot leak
+})
 test("breaker: an unreadable breaker means Luna is off, never a failure", async () => {
   const orig = env.db.collection.bind(env.db)
   env.db.collection = (n) => { const c = orig(n); const od = c.doc.bind(c); c.doc = (id) => { const d = od(id); if (id === "luna-breaker") d.get = async () => { throw new Error("unavailable") }; return d }; return c }
@@ -193,6 +211,13 @@ test("begin(): commits the request record as 'called' with the maximum reservati
   assert.deepEqual(await ticketOf("u1", "req-aaaa1111", cfg), { ok: false, reason: "request-seen" }); assert.equal(shardTotal(), 900) // no second reservation
   await usage.settleFailure({ uid: "u1", requestId: "req-aaaa1111", ticket: t, kind: "timeout", usage: null })
   assert.deepEqual(await ticketOf("u1", "req-aaaa1111", cfg), { ok: false, reason: "request-seen" }) // still never again after settlement
+})
+test("budget: a request that begins before midnight (SAST) and settles after it is reconciled against the day it reserved on", async () => {
+  const cfg = cfgWith(); env.time.now = Date.UTC(2026, 10, 14, 21, 59, 50) // 23:59:50 SAST
+  const t = await ticketOf("u1", "req-midnight1", cfg); const day = t.day; env.time.now += 30000 // 00:00:20 next day
+  await usage.settleFailure({ uid: "u1", requestId: "req-midnight1", ticket: t, kind: "rate_limit", usage: null })
+  const old = env.list("ai-usage").filter((d) => d.id.startsWith(`luna_g_${day}_`)).reduce((a, d) => a + d.tokens, 0)
+  assert.equal(old, 0); assert.equal(env.list("ai-usage").filter((d) => d.id.startsWith("luna_g_") && !d.id.startsWith(`luna_g_${day}_`)).length, 0) // released from the ORIGINAL day, nothing created for the new day
 })
 test("settlement accounting: provider-rejected calls release the reservation; possibly-processed calls stay charged; reported usage is charged exactly", async () => {
   const cfg = cfgWith(), settle = async (rid, kind, u) => { const t = await ticketOf("u1", rid, cfg); await usage.settleFailure({ uid: "u1", requestId: rid, ticket: t, kind, usage: u }); return shardTotal() }

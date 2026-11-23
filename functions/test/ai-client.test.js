@@ -129,10 +129,11 @@ test("location is optional: only nearby phrasing asks, a decline is respected, n
 })
 
 test("app code stays provider-free and only uses the ai* callables; no direct Firestore access to AI data", () => {
+  const R = require("./scan_rules")
   const files = ["screens/SowetoAI.js", ...fs.readdirSync(path.join(root, "utils", "ai")).map((f) => "utils/ai/" + f)]
-  for (const f of files) {
-    const src = fs.readFileSync(path.join(root, f), "utf8")
-    if (f !== "utils/ai/notice.js") assert.doesNotMatch(src, /anthropic|openai|gemini|api[_-]?key/i, f) // the notice must name the provider; nothing else may
+  const entries = files.map((f) => ({ rel: f, text: fs.readFileSync(path.join(root, f), "utf8") }))
+  assert.deepEqual(R.appProviderProblems(entries), []) // only utils/ai/notice.js may NAME the provider, and it may carry nothing else
+  for (const { rel: f, text: src } of entries) {
     assert.doesNotMatch(src, /firebase\/firestore|ai-conversations/, f)
     for (const m of src.matchAll(/callFunction\(\s*"([A-Za-z]+)"|call\(\s*"([A-Za-z]+)"/g)) assert.match(m[1] || m[2], /^ai[A-Z]/, f)
   }
@@ -164,7 +165,12 @@ test("AI Service Notice: pure helpers, the panel follows the backend, accept/wit
   assert.throws(() => N.consentPayload("delete"), /invalid-action/)
   const sent = []; const api = createAiApi(async (name, data) => { sent.push([name, data]); return {} })
   await api.setLunaConsent("accept"); await api.setLunaConsent("withdraw"); assert.deepEqual(sent, [["aiSetLunaConsent", { action: "accept", noticeVersion: 1 }], ["aiSetLunaConsent", { action: "withdraw" }]])
-  assert.match(N.LUNA_NOTICE_TEXT, /OpenAI's GPT-6 Luna/); assert.doesNotMatch(N.LUNA_NOTICE_TEXT, /securely|zero[- ]data|not stored|never stored/i) // no security or retention promise we cannot verify
+  const T = N.LUNA_NOTICE_TEXT
+  assert.match(T, /OpenAI's GPT-6 Luna/); assert.match(T, /only a short piece of template text written by Malloya, and a language code, is sent/) // exactly what Phase 1 sends
+  assert.doesNotMatch(T, /your (message|messages|conversation|conversations|request|questions?) (may be|is|are|will be) (processed|sent|shared)/i) // never claims the user's message is sent
+  assert.doesNotMatch(T, /securely|secure\b|zero[- ]data|retention|not (be )?(stored|kept|retained|used for training)|never (stored|kept|retained)|deleted|confidential|encrypt|anonym/i) // no security, retention or deletion promise we cannot verify
+  assert.match(T, /Your messages, account details and location are not sent/) // true by design: asserted against the real payload in luna_units.test.js
+  assert.match(T, /do not enter passwords, payment details or other sensitive personal information/i); assert.match(T, /privacy policy/)
   assert.doesNotMatch(fs.readFileSync(path.join(root, "utils", "ai", "notice.js"), "utf8"), /api[_-]?key|api\.openai|https?:|sk-|fetch\(/i)
   assert.equal(N.LUNA_DELETE_ALL_LABEL, "Delete all my conversations"); assert.match(N.LUNA_DELETE_ALL_NOTE, /counters and your choice.*kept/)
   const screen = fs.readFileSync(path.join(root, "screens", "SowetoAI.js"), "utf8")

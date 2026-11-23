@@ -5,6 +5,7 @@ const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const path = require("node:path")
 
+const R = require("./scan_rules")
 const ROOT = path.resolve(__dirname, "..", "..")
 const SKIP = new Set(["node_modules", ".git", "android", "ios", ".expo", "dist", "build", ".firebase"])
 function walk(dir, out = []) {
@@ -23,23 +24,17 @@ const aiFiles = walk(AI).filter((p) => p.endsWith(".js"))
 
 // ---------------------------------------------------------------- no external AI provider, no key, no outbound network
 test("no Anthropic/OpenAI (or other LLM) dependency exists in any package.json or lock file", () => {
-  for (const p of files.filter((f) => /(^|\/)package(-lock)?\.json$/.test(rel(f)))) assert.doesNotMatch(read(p), /@anthropic-ai|"openai"|@google\/generative-ai|@google-cloud\/vertexai|"cohere-ai"|"@mistralai|langchain|"ollama"/i, rel(p))
+  for (const p of files.filter((f) => /(^|\/)package(-lock)?\.json$/.test(rel(f)))) assert.doesNotMatch(read(p), R.DEP, rel(p))
 })
-// The optional Luna wording layer is the ONLY place a provider may be named: functions/index.js (secret binding) and functions/src/ai/luna/*.
-// Everywhere else (app, rules, firebase.json, the rest of the backend, Malloya's engine) stays provider-free. utils/ai/notice.js is the one app file
-// allowed to NAME the provider, because the AI Service Notice must say so; it contains no key, endpoint or model setting (asserted in ai-client.test.js).
-const LUNA_ALLOWED = (r) => r === "functions/index.js" || r.startsWith("functions/src/ai/luna/") || r === "utils/ai/notice.js"
+// The optional Luna wording layer is the ONLY place the provider may be named (rules in scan_rules.js; scan_meta.test.js proves they still catch forbidden code):
+//   * other providers: nowhere.  * "openai"/OPENAI_API_KEY: only functions/index.js, functions/src/ai/luna/**, utils/ai/notice.js.
+//   * defineSecret / secrets: only functions/index.js.
+const entriesOf = (pred) => files.map((p) => ({ rel: rel(p), text: read(p) })).filter((e) => pred(e.rel))
 test("no runtime code or configuration mentions an LLM provider or an API-key secret, except the Luna files and the notice text", () => {
-  const runtime = files.filter((p) => /^(functions\/(src|index\.js)|firebase\.json|security-rules\/|app\/|components\/|screens\/|utils\/|App\.js)/.test(rel(p)))
-  const offenders = runtime.filter((p) => /anthropic|openai|ANTHROPIC_API_KEY|OPENAI_API_KEY|defineSecret|secrets:\s*\[/i.test(read(p))).map(rel).filter((r) => !LUNA_ALLOWED(r))
-  assert.deepEqual(offenders, [])
+  assert.deepEqual(R.providerProblems(entriesOf(() => true)), [])
 })
 test("the OpenAI secret is declared once, in functions/index.js, and bound to aiChat ONLY", () => {
-  const idx = read(path.join(ROOT, "functions", "index.js"))
-  assert.equal((idx.match(/defineSecret\(/g) || []).length, 1)
-  assert.equal((idx.match(/secrets:\s*\[/g) || []).length, 1)
-  assert.match(idx, /aiChat: withOpenAiKey\(ai\.aiChat\)/)
-  assert.equal((idx.match(/withOpenAiKey\(/g) || []).length, 1) // used exactly once: aiChat
+  assert.deepEqual(R.secretBindingProblems(read(path.join(ROOT, "functions", "index.js"))), [])
   const onlyLuna = files.filter((p) => /OPENAI_API_KEY/.test(read(p))).map(rel).filter((r) => !/^(functions\/(index\.js|src\/ai\/luna\/|scripts\/luna-calibrate\.js|test\/)|docs\/)/.test(r))
   assert.deepEqual(onlyLuna, [])
 })
@@ -48,11 +43,8 @@ test("no key shaped like a provider secret exists anywhere in the repository", (
   assert.deepEqual(offenders, [])
 })
 test("the AI code makes no outbound network calls (no fetch, http(s), axios, sockets), except the single Luna provider file", () => {
-  for (const p of aiFiles.filter((f) => rel(f) !== "functions/src/ai/luna/provider.js")) assert.doesNotMatch(read(p), /\bfetch\(|globalThis\.fetch|require\(["'](node:)?(https?|net|tls|dgram|http2)["']\)|axios|node-fetch|XMLHttpRequest|WebSocket/, rel(p))
-  const prov = read(path.join(AI, "luna", "provider.js"))
-  assert.doesNotMatch(prov, /require\(["'](node:)?(https?|net|tls|dgram|http2)["']\)|axios|node-fetch|XMLHttpRequest|WebSocket/)
-  assert.equal((prov.match(/https:\/\/[a-z.]+/g) || []).length, 0) // the endpoint lives in luna/constants.js
-  assert.match(read(path.join(AI, "luna", "constants.js")), /const ENDPOINT = "https:\/\/api\.openai\.com\/v1\/responses"/)
+  assert.deepEqual(R.networkProblems(aiFiles.map((p) => ({ rel: rel(p), text: read(p) }))), [])
+  assert.match(read(path.join(AI, "luna", "constants.js")), /const ENDPOINT = "https:\/\/api\.openai\.com\/v1\/responses"/) // the endpoint lives in constants.js, not in provider.js
 })
 test("secret files stay git-ignored (general protection)", () => {
   assert.match(read(path.join(ROOT, ".gitignore")), /functions\/\.secret\.local/)
@@ -68,6 +60,7 @@ test("every AI callable is exported with the plain wrapper (aiChat: the secret-b
   }
   assert.doesNotMatch(idx + h, /wrapChat/)
   assert.doesNotMatch(h, /secrets:|defineSecret|process\.env/) // handlers never touch the secret
+  assert.deepEqual(R.secretBindingProblems(idx), []) // original rule "no secrets: in index/handlers" is now: exactly one binding, on aiChat
   assert.match(idx, /const opts = \{ region: REGION,/); assert.doesNotMatch(idx, /region:\s*["'](?!africa-south1)/)
 })
 

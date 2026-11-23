@@ -82,6 +82,6 @@ No rules or indexes change. `ai-consent` and the new `ai-usage` documents are cl
 ## Things this branch could not verify (stated plainly)
 - Whether `gpt-6-luna` accepts `reasoning.effort: "none"` and returns the usage fields as assumed: calibration checks this (falls back to `low`).
 - Firestore behaviour under real load (see Contention).
-- The notice wording: it is yours to approve. This branch uses your wording **without "securely"** (a security claim we cannot verify). Phase 1 never sends the user's message, so the notice is conservative; the privacy review can decide whether to narrow it. No privacy-policy screen exists in the app yet.
+- The notice wording is yours to approve. It now says exactly what Phase 1 sends (only short Malloya-written template text and a language code), says the user's messages, account details and location are not sent, and makes no security, retention or deletion promise (no "securely", no zero-data-retention claim). Tests tie that statement to the real payload. It still says conversations are handled "in accordance with XploreSoweto's privacy policy", but no privacy-policy screen exists in the app yet. If a later phase sends anything more, the wording and `NOTICE_VERSION` must change together.
 - Retention/deletion of the consent record on account deletion (policy decision, above).
 - `deleteConversation` / `deleteAll` are not atomic (existing behaviour): a chat racing a delete can leave orphan messages that the 90-day TTL removes.
