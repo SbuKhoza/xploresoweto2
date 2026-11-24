@@ -82,8 +82,11 @@ test("fallbacks: disabled, old client, wrong notice version, no consent, withdra
   const find = await chatT("c1", "Where can I eat kota in Orlando West?"); assert.equal(calls.length, 0); assert.ok(find.cards.length > 0)
   const help = await chatT("c1", "help"); assert.equal(calls.length, 0) // capability text is never rewritable
 })
-test("the committed (uncalibrated) manifest keeps Luna OFF in a real runtime: nothing reaches the network", async () => {
-  luna.setDepsForTests({}); const realFetch = globalThis.fetch; let touched = 0; globalThis.fetch = () => { touched++; throw new Error("network must not be used") }
+test("an uncalibrated manifest keeps Luna OFF in the real runtime", async () => {
+  // Explicitly simulate an uncalibrated manifest without changing production calibration.
+  const real = require("../src/ai/luna/calibration.json")
+  const uncalibrated = { ...real, status: "uncalibrated", reasoningEffort: null, payloads: Object.fromEntries(Object.entries(real.payloads || {}).map(([id, p]) => [id, { ...p, inputTokens: null }])) }
+  luna.setDepsForTests({ manifest: uncalibrated }); const realFetch = globalThis.fetch; let touched = 0; globalThis.fetch = () => { touched++; throw new Error("network must not be used") }
   const prev = process.env.OPENAI_API_KEY; process.env.OPENAI_API_KEY = "test-key-not-real"
   try { await accept(); const r = await chat("u1", "thanks"); assert.equal(textOf(r), THANKS); assert.equal(touched, 0) } finally { globalThis.fetch = realFetch; if (prev === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = prev }
 })
