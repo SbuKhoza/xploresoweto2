@@ -84,8 +84,13 @@ test("both platforms and the functions use africa-south1 and the xploresoweto pr
   for (const f of ["Firebase/config.native.js", "Firebase/config.web.js"]) {
     const t = read(f)
     assert.match(t, /FUNCTIONS_REGION = "africa-south1"/); assert.match(t, /getFunctions\(app, FUNCTIONS_REGION\)/)
-    assert.match(t, /projectId: "xploresoweto"/); assert.match(t, /storageBucket: "xploresoweto\.firebasestorage\.app"/); assert.ok(!/steady/.test(t))
+    // Staging foundation: the project is no longer hard-coded here; it is chosen by the build and validated against config/environments.js
+    // (see env_validation.test.js). The production entry must still be exactly the project this test used to pin.
+    assert.match(t, /requireValidEnvironment\(\)/); assert.ok(!/steady/.test(t))
   }
+  const ENVS = require("../../config/environments").ENVIRONMENTS
+  assert.equal(ENVS.production.firebase.projectId, "xploresoweto"); assert.equal(ENVS.production.firebase.storageBucket, "xploresoweto.firebasestorage.app")
+  assert.equal(ENVS.production.region, "africa-south1"); assert.equal(ENVS.staging.region, "africa-south1")
   assert.equal(C.REGION, "africa-south1"); assert.equal(JSON.parse(read("functions/package.json")).engines.node, "22")
   assert.ok(!/region|REGION/.test(read("functions/index.js").replace(/REGION\b[^\n]*require[^\n]*|const opts = \{ region: REGION[^\n]*/g, "")) || true)
 })

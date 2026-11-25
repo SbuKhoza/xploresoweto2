@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { auth } from "../Firebase/config"
-import { onAuthStateChanged } from "firebase/auth"
+import { onAuthStateChanged, signOut } from "firebase/auth"
+import { checkTokenAudience } from "../Firebase/env/tokenAudience"
 import NetInfo from "@react-native-community/netinfo"
 import { applyStorageEpoch } from "./storageEpoch"
 
@@ -42,6 +43,17 @@ export const clearStoredUser = async () => {
   }
 }
 
+// SUPPLEMENTARY environment protection (the primary guard runs before Firebase starts): the session's ID token must have been issued by the
+// project this build is configured for. Only a definite mismatch signs the user out; an unreadable token (e.g. offline) does not.
+const sessionBelongsToThisProject = async (firebaseUser) => {
+  try {
+    const result = await firebaseUser.getIdTokenResult()
+    return checkTokenAudience(result.claims, auth.app.options.projectId).ok
+  } catch (error) {
+    return true
+  }
+}
+
 // Initialize auth listener and handle offline authentication
 export const initializeAuth = (setUser, setIsLoading) => {
   // One-time clean-up of state left by builds that used the previous Firebase project, then check for a stored user
@@ -55,7 +67,11 @@ export const initializeAuth = (setUser, setIsLoading) => {
       // Check network status
       const networkState = await NetInfo.fetch()
 
-      if (firebaseUser) {
+      if (firebaseUser && !(await sessionBelongsToThisProject(firebaseUser))) {
+        await signOut(auth).catch(() => {})
+        await clearStoredUser()
+        setUser(null)
+      } else if (firebaseUser) {
         // User is signed in, store credentials for offline access
         await storeUserCredentials(firebaseUser)
         setUser(firebaseUser)

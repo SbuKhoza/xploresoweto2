@@ -27,6 +27,7 @@ import Events from "./screens/Events"
 import BottomNav, { ScrollProvider, ScrollTrackingView } from "./components/BottomNav"
 import Header from "./components/Header"
 import OfflineIndicator from "./components/OfflineIndicator"
+import EnvironmentBanner from "./components/EnvironmentBanner"
 import Eskom from "./components/eskom/Eskom"
 import { FEATURES } from "./utils/features"
 // Person-Of-Interest is excluded from the launch: the module is not even loaded while the flag is off
@@ -307,6 +308,7 @@ const AppContent = () => {
         </EnrollmentProvider>
         {!isConnected && <OfflineIndicator />}
         <GlobalLoader visible={globalLoading} message={loadingMessage} />
+        <EnvironmentBanner />
       </ScrollProvider>
     </SafeAreaProvider>
   )
