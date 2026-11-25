@@ -5,6 +5,7 @@
 //   -> user's allowance -> per-instance concurrency -> breaker (global probe/recovery) -> durable "called" commit + budget reservation -> provider call
 //   -> strict validation -> (success) usage committed inside the conversation transaction (see conversations.persistTurn)
 const consent = require("../consent")
+const environment = require("../../lib/environment")
 const log = require("../log")
 const provider = require("./provider")
 const prompt = require("./prompt")
@@ -33,6 +34,7 @@ async function tryRewrite({ uid, requestId, cfg, intent, blocks, language, notic
   cfg = effectiveCfg(cfg) // every limit clamped to its hard ceiling, whatever is stored
   const skip = (reason) => ({ ...original, skipped: reason })
   try {
+    if (environment.lunaBlocked()) return skip("environment-blocked") // staging: before any other check, whatever the configuration says
     const L = cfg.luna
     if (!L || L.enabled !== true) return skip("disabled")
     if (noticeVersion !== NOTICE_VERSION) return skip("client-without-notice")

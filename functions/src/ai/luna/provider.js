@@ -4,8 +4,10 @@
 //  * No automatic retries: every call is paid, so a failure is reported once and the deterministic wording is used instead.
 //  * Errors are classified from the structured error type/code (not from the HTTP status alone): a billing/quota 429 is NOT a rate limit.
 const { MODEL, ENDPOINT, BILLING_CODES } = require("./constants")
+const environment = require("../../lib/environment")
 
-const readKey = () => (typeof process.env.OPENAI_API_KEY === "string" ? process.env.OPENAI_API_KEY.trim() : "")
+// In staging no key is ever readable, even if one is injected by mistake (see lib/environment.js).
+const readKey = () => (!environment.lunaBlocked() && typeof process.env.OPENAI_API_KEY === "string" ? process.env.OPENAI_API_KEY.trim() : "")
 const hasKey = () => readKey().length > 0
 
 // Pure: classify a failed HTTP response. body = parsed JSON or null.
@@ -37,6 +39,8 @@ function outputTextOf(body) {
 
 // -> { ok:true, text, usage, ms } | { ok:false, kind, retryAfterSeconds?, usage?, ms }
 async function callResponses({ payload, maxOutputTokens, reasoningEffort, timeoutMs, fetchImpl, apiKey }) {
+  // Backstop: staging never reaches the network, whatever key, fetch or configuration was supplied. Same shape as "no key".
+  if (environment.lunaBlocked()) return { ok: false, kind: "auth", noKey: true, blockedByEnvironment: true, ms: 0 }
   const key = apiKey !== undefined ? apiKey : readKey()
   if (!key) return { ok: false, kind: "auth", noKey: true, ms: 0 }
   const doFetch = fetchImpl || globalThis.fetch

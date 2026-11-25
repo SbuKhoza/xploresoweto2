@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "staging": "xploresoweto-staging",
+    "production": "xploresoweto"
+  }
+}

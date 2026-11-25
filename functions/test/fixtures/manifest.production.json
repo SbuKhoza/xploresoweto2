@@ -1,0 +1,528 @@
+{
+  "endpoints": {
+    "ensureUserProfile": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "ensureUserProfile"
+    },
+    "managePlatformRole": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "managePlatformRole"
+    },
+    "seedLoadshedding": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "seedLoadshedding"
+    },
+    "submitProviderApplication": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "submitProviderApplication"
+    },
+    "reviewProviderApplication": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "reviewProviderApplication"
+    },
+    "setOrganisationStatus": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "setOrganisationStatus"
+    },
+    "inviteOrganisationMember": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "inviteOrganisationMember"
+    },
+    "listOrganisationInvitations": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "listOrganisationInvitations"
+    },
+    "revokeOrganisationInvitation": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "revokeOrganisationInvitation"
+    },
+    "listMyInvitations": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "listMyInvitations"
+    },
+    "acceptOrganisationInvitation": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "acceptOrganisationInvitation"
+    },
+    "declineOrganisationInvitation": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "declineOrganisationInvitation"
+    },
+    "setMemberRole": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "setMemberRole"
+    },
+    "removeOrganisationMember": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "removeOrganisationMember"
+    },
+    "createBookingRequest": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "createBookingRequest"
+    },
+    "createServiceRequest": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "createServiceRequest"
+    },
+    "updateRequestStatus": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "updateRequestStatus"
+    },
+    "checkReviewEligibility": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "checkReviewEligibility"
+    },
+    "submitReview": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "submitReview"
+    },
+    "submitListing": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "submitListing"
+    },
+    "reviewListingSubmission": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "reviewListingSubmission"
+    },
+    "aiChat": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "secretEnvironmentVariables": [
+        {
+          "key": "OPENAI_API_KEY"
+        }
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiChat"
+    },
+    "aiSetLunaConsent": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiSetLunaConsent"
+    },
+    "aiGetUsage": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiGetUsage"
+    },
+    "aiListConversations": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiListConversations"
+    },
+    "aiGetConversation": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiGetConversation"
+    },
+    "aiDeleteConversation": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiDeleteConversation"
+    },
+    "aiDeleteAllMyAiData": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiDeleteAllMyAiData"
+    },
+    "aiAdminGetUsage": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiAdminGetUsage"
+    },
+    "aiAdminUpdateConfig": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 10,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "africa-south1"
+      ],
+      "labels": {},
+      "callableTrigger": {},
+      "entryPoint": "aiAdminUpdateConfig"
+    }
+  },
+  "specVersion": "v1alpha1",
+  "requiredAPIs": [],
+  "extensions": {},
+  "params": [
+    {
+      "type": "secret",
+      "name": "OPENAI_API_KEY"
+    }
+  ]
+}
