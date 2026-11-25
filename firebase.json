@@ -1,8 +1,18 @@
 {
-  "functions": [{ "source": "functions", "codebase": "default" }],
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "predeploy": [
+        "node \"$PROJECT_DIR/scripts/predeploy-guard.js\""
+      ]
+    }
+  ],
   "firestore": {
     "rules": "security-rules/firestore.rules",
     "indexes": "security-rules/firestore.indexes.json"
   },
-  "storage": { "rules": "security-rules/storage.rules" }
+  "storage": {
+    "rules": "security-rules/storage.rules"
+  }
 }

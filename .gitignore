@@ -57,3 +57,9 @@ ui-debug.log
 # --- Stage 2: local secrets for the Functions emulator (never commit) ---
 functions/.secret.local
 functions/.secret.*
+
+# --- Staging: tester lists and local keystores never belong in the repository
+testers*.json
+*.local.json
+*.keystore.local
+staging-*.keystore

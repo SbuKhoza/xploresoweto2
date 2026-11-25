@@ -92,3 +92,6 @@ test("checkProfile catches a profile pointed at the wrong flavor or carrying the
   const bad3 = JSON.parse(JSON.stringify(eas)); bad3.build.production.env = { ...varsFor("production"), EXPO_PUBLIC_EXTRA: "x" }
   assert.ok(checkProfile(bad3, "production").some((x) => /EXPO_PUBLIC_EXTRA/.test(x)))
 })
+test("sync-eas-env --check: eas.json env blocks equal what config/environments.js produces", () => {
+  assert.equal(spawnSync(process.execPath, [path.join(root, "scripts", "sync-eas-env.js"), "--check"], { encoding: "utf8" }).status, 0)
+})
