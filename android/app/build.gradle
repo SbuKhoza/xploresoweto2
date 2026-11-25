@@ -104,6 +104,37 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // STAGING release signing. Filled ONLY from a keystore the owner supplies (Gradle properties or environment variables, never files in
+        // this repository). There is NO fallback: if nothing is supplied this config stays empty and the guard at the bottom of this file
+        // stops every staging release build. (On EAS the profile's own credentials are injected instead; the same guard still applies.)
+        staging {
+            def xsStoreFile = findProperty('XS_STAGING_STORE_FILE') ?: System.getenv('XS_STAGING_STORE_FILE')
+            if (xsStoreFile) {
+                storeFile file(xsStoreFile)
+                storePassword findProperty('XS_STAGING_STORE_PASSWORD') ?: System.getenv('XS_STAGING_STORE_PASSWORD')
+                keyAlias findProperty('XS_STAGING_KEY_ALIAS') ?: System.getenv('XS_STAGING_KEY_ALIAS')
+                keyPassword findProperty('XS_STAGING_KEY_PASSWORD') ?: System.getenv('XS_STAGING_KEY_PASSWORD')
+            }
+        }
+    }
+    // Two installable variants of the same code: they have different application ids, so they install side by side, and each has its own
+    // Android sandbox (storage, sessions). The id is a literal on purpose: EAS reads `applicationId` and does not understand suffixes.
+    // Environment (Firebase project) is NOT chosen here; it comes from the build's EXPO_PUBLIC_* values and must agree with this id
+    // (see Firebase/env/validate.js, which refuses to start otherwise).
+    flavorDimensions "environment"
+    productFlavors {
+        production {
+            dimension "environment"
+            applicationId 'com.sbudamalloya.xploresoweto'
+            // Moved here from buildTypes.release so that staging can differ. For production this is IDENTICAL to the previous behaviour.
+            signingConfig signingConfigs.debug
+        }
+        staging {
+            dimension "environment"
+            applicationId 'com.sbudamalloya.xploresoweto.staging'
+            versionNameSuffix "-staging"
+            signingConfig signingConfigs.staging
+        }
     }
     buildTypes {
         debug {
@@ -112,7 +143,7 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // (The release signing config is chosen per flavor above: production unchanged, staging never debug.)
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -178,5 +209,23 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
+    }
+}
+
+// ---- Staging release guard -------------------------------------------------------------------------------------------------------------
+// A staging RELEASE may never be signed with the debug keystore, or with nothing. This runs for every invocation that would build or package
+// a staging release (assemble/bundle/package/sign..., including a bare `assembleRelease` that would include it) and stops it before any work.
+gradle.taskGraph.whenReady { graph ->
+    def building = graph.allTasks.any { t -> t.project == project && t.name.contains('StagingRelease') }
+    if (!building) return
+    def cfg = android.buildTypes.getByName('release').signingConfig ?: android.productFlavors.getByName('staging').signingConfig
+    def problem = null
+    if (cfg == null) problem = 'no signing configuration is set'
+    else if (cfg.name == 'debug') problem = 'it resolves to the debug signing configuration'
+    else if (cfg.storeFile == null) problem = 'no staging keystore was supplied (set XS_STAGING_STORE_FILE, XS_STAGING_STORE_PASSWORD, XS_STAGING_KEY_ALIAS, XS_STAGING_KEY_PASSWORD, or build on EAS with the staging profile credentials)'
+    else if (cfg.storeFile.name == 'debug.keystore') problem = 'it points at the debug keystore'
+    else if (!cfg.storeFile.exists()) problem = "the keystore file does not exist: ${cfg.storeFile}"
+    if (problem != null) {
+        throw new GradleException("Refusing to build a STAGING RELEASE: ${problem}. Staging releases are never signed with the debug key.")
     }
 }

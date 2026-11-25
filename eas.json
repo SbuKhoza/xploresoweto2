@@ -6,20 +6,90 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyCwRLeFV0lxbez-G3YONR-WIcdgF3xSUpg",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "xploresoweto.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "xploresoweto",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "xploresoweto.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "549315620435",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:549315620435:web:49b7fa6887d89a94c560a6"
+      },
+      "android": {
+        "gradleCommand": ":app:assembleProductionDebug"
+      }
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyCwRLeFV0lxbez-G3YONR-WIcdgF3xSUpg",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "xploresoweto.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "xploresoweto",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "xploresoweto.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "549315620435",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:549315620435:web:49b7fa6887d89a94c560a6"
+      },
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleProductionRelease"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyCwRLeFV0lxbez-G3YONR-WIcdgF3xSUpg",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "xploresoweto.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "xploresoweto",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "xploresoweto.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "549315620435",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:549315620435:web:49b7fa6887d89a94c560a6"
+      },
+      "android": {
+        "gradleCommand": ":app:bundleProductionRelease"
+      }
     },
     "local": {
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyCwRLeFV0lxbez-G3YONR-WIcdgF3xSUpg",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "xploresoweto.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "xploresoweto",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "xploresoweto.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "549315620435",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:549315620435:web:49b7fa6887d89a94c560a6"
+      },
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleProductionRelease"
+      }
+    },
+    "staging": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "staging",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "xploresoweto-staging.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "xploresoweto-staging",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "xploresoweto-staging.firebasestorage.app"
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleStagingRelease"
+      }
+    },
+    "staging-dev": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "staging",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "xploresoweto-staging.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "xploresoweto-staging",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "xploresoweto-staging.firebasestorage.app"
+      },
+      "android": {
+        "gradleCommand": ":app:assembleStagingDebug"
       }
     }
   },
