@@ -16,17 +16,23 @@ const admin = require("firebase-admin")
 const lib = require("../src/lib/bootstrap")
 
 const args = process.argv.slice(2)
-const command = args[0]
+const VALUE_FLAGS = ["--project", "--uid", "--confirm-email", "--confirm-project"]
+const command = args.find((a, i) => !a.startsWith("--") && !VALUE_FLAGS.includes(args[i - 1]))
 const flag = (n) => { const i = args.indexOf(`--${n}`); return i > -1 && args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : undefined }
 const has = (n) => args.includes(`--${n}`)
 const die = (m) => { console.error(`\nERROR: ${m}\n`); process.exit(1) }
 
-const projectId = flag("project") || "xploresoweto"
-if (projectId === lib.OLD_PROJECT) die(`Refusing to run against the old project "${lib.OLD_PROJECT}".`)
+// The project is REQUIRED (no default) and must be an exact allow-listed id. Production also needs --production and the id typed again.
+const { resolveTarget, TargetError } = require("./lib/target")
+let target
+try {
+  target = resolveTarget({ project: flag("project"), production: has("production"), confirmProject: flag("confirm-project") })
+} catch (e) { if (e instanceof TargetError) die(e.message); throw e }
+const projectId = target.projectId
 const key = process.env.GOOGLE_APPLICATION_CREDENTIALS
 if (key && path.resolve(key).startsWith(path.resolve(__dirname, "..", "..") + path.sep)) die("GOOGLE_APPLICATION_CREDENTIALS points inside this repository. Keep service-account keys outside the repo (or use ADC).")
 admin.initializeApp({ projectId })
-console.log(`Target: ${process.env.FIRESTORE_EMULATOR_HOST ? `EMULATOR ${process.env.FIRESTORE_EMULATOR_HOST}` : `LIVE project "${projectId}"`}`)
+console.log(`Target: ${process.env.FIRESTORE_EMULATOR_HOST ? `EMULATOR ${process.env.FIRESTORE_EMULATOR_HOST}` : `LIVE ${target.production ? "PRODUCTION " : ""}project "${projectId}"`}`)
 
 const ask = (q) => new Promise((res) => { const rl = readline.createInterface({ input: process.stdin, output: process.stdout }); rl.question(q, (a) => { rl.close(); res(a.trim()) }) })
 
