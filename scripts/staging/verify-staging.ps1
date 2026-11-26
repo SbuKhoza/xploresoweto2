@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
   READ-ONLY checks of the deployed staging project.
@@ -88,4 +88,3 @@ Write-Host 'Maximum 3 instances per function'
 Write-Host 'No secret bindings'
 Write-Host 'No secrets stored'
 Write-Host "Region: $Region"
-
