@@ -34,12 +34,12 @@ const staging = Object.freeze({
   androidApplicationId: "com.sbudamalloya.xploresoweto.staging",
   webHosts: Object.freeze(["xploresoweto-staging.web.app", "xploresoweto-staging.firebaseapp.com", "localhost", "127.0.0.1"]),
   firebase: Object.freeze({
-    apiKey: null, // REQUIRED after project creation: Firebase console > Project settings > Your apps > Web app
+    apiKey: "AIzaSyAFJbkp89UhcPKXLe1VQKwODfMP-3WyU3c",
     authDomain: "xploresoweto-staging.firebaseapp.com",
     projectId: "xploresoweto-staging",
     storageBucket: "xploresoweto-staging.firebasestorage.app", // [verify] the actual default bucket name in the console
-    messagingSenderId: null, // REQUIRED after project creation
-    appId: null, // REQUIRED after project creation (the WEB app id: 1:<senderId>:web:<hex>)
+    messagingSenderId: "343560971631",
+    appId: "1:343560971631:web:e66f8410b2052db899749a",
   }),
 })
 
