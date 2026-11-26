@@ -6,15 +6,15 @@ const { signature } = require("./screen")
 const store = require("./store")
 
 const CORRECTIONS = require("./vocab").CORRECTION_INTENTS
-async function fromTurn({ uid, message, signals, cfg }) {
+async function fromTurn({ uid, message, signals, cfg, requestId }) {
   try {
-    const L = cfg.learning
+    const L = cfg.learning // a cheap early exit only: the authoritative check is re-done inside the recording transaction
     if (!L || L.collect !== true || L.privacyAcknowledged !== true || !Array.isArray(signals) || !signals.length) return { recorded: 0 }
     if (await store.isOptedOut(uid)) return { recorded: 0 }
     const sg = signature(message)
     if (!sg.ok) return { recorded: 0, skipped: sg.reason } // fail closed: no safe signature, no candidate
     let n = 0
-    for (const s of signals.slice(0, 2)) { const r = await store.recordSignal({ uid, kind: s.kind, sig: sg.sig, hintIntent: s.hintIntent, cfg }); if (r.recorded) n += 1 }
+    for (const s of signals.slice(0, 2)) { const r = await store.recordSignal({ uid, kind: s.kind, sig: sg.sig, hintIntent: s.hintIntent, dedupeKey: `chat:${requestId}` }); if (r.recorded) n += 1 }
     return { recorded: n }
   } catch (e) { log.warn("ai.learning.capture_failed", { code: e && e.code }); return { recorded: 0, skipped: "error" } }
 }
@@ -27,6 +27,6 @@ async function fromFeedback({ uid, userText, messageId, rating, correctionIntent
   const sg = signature(userText)
   if (!sg.ok) return { recorded: false, reason: "not-safe-to-keep" }
   const sugg = CORRECTIONS.includes(correctionIntent) ? correctionIntent : null
-  return store.recordSignal({ uid, kind: sugg ? "feedback_correction" : "feedback_unhelpful", sig: sg.sig, hintIntent, suggestedIntent: sugg, dedupeKey: messageId, cfg })
+  return store.recordSignal({ uid, kind: sugg ? "feedback_correction" : "feedback_unhelpful", sig: sg.sig, hintIntent, suggestedIntent: sugg, dedupeKey: `fb:${messageId}` })
 }
 module.exports = { fromTurn, fromFeedback }

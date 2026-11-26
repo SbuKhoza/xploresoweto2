@@ -67,6 +67,7 @@ module.exports = {
   aiGetConversation: wrap(ai.aiGetConversation),
   aiDeleteConversation: wrap(ai.aiDeleteConversation),
   aiDeleteAllMyAiData: wrap(ai.aiDeleteAllMyAiData),
+  aiEraseMyAiData: wrap(ai.aiEraseMyAiData),
   aiAdminGetUsage: wrap(ai.aiAdminGetUsage),
   aiAdminUpdateConfig: wrap(ai.aiAdminUpdateConfig),
   // Reviewed learning (collection is OFF by default). No secrets are bound to any of these.

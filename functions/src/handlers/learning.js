@@ -115,10 +115,6 @@ async function aiAdminPurgeLearning(request) {
   const d = V.object(request.data)
   V.onlyKeys(d, ["scope", "confirm"])
   if (d.scope === "all" && d.confirm !== "DELETE-ALL-CANDIDATES") throw bad("confirmation-required")
-  const r = await store.purge({ scope: d.scope })
-  const b = fb.db().batch()
-  writeAudit(b, { action: "ai.learning.purge", actorUid: actor.uid, details: { scope: d.scope, deleted: r.deleted } })
-  await b.commit()
-  return r
+  return store.purge({ scope: d.scope, actorUid: actor.uid })
 }
 module.exports = { aiSubmitFeedback, aiSetLearningOptOut, aiAdminListLearningCandidates, aiAdminReviewCandidate, aiAdminSaveKnowledge, aiAdminUpdateKnowledge, aiAdminListKnowledge, aiAdminKnowledgeHistory, aiAdminLearningStats, aiAdminPurgeLearning }

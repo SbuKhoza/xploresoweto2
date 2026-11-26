@@ -216,15 +216,6 @@ test("feedback does nothing while learning is off, and respects the opt-out", as
   assert.equal(col(AI_COL.candidates).length, 0)
 })
 
-test("account erasure removes the user's learning throttle records and opt-out; personal memory stays separate (nothing is stored per user beyond that)", async () => {
-  fresh(ON)
-  await say("u1", "do you have a helicopter trip over soweto", 1); await H.aiSetLearningOptOut(user("u1", { optOut: true }))
-  assert.ok(col(AI_COL.seen).some((d) => d.ownerUid === "u1")); assert.ok(env.db.store.has("ai-learning-optout/u1"))
-  await AI.aiDeleteAllMyAiData(user("u1", {}))
-  assert.ok(!col(AI_COL.seen).some((d) => d.ownerUid === "u1")); assert.ok(!env.db.store.has("ai-learning-optout/u1"))
-  assert.equal(col(AI_COL.candidates).length, 1, "anonymous aggregate candidates remain; they hold no identifier (documented)")
-})
-
 test("retention: candidates expire, and a Super Admin can purge expired, rejected, new or (with confirmation) all", async () => {
   fresh({ learning: { collect: true, privacyAcknowledged: true, candidateRetentionDays: 10 } })
   await say("u1", "do you have a helicopter trip over soweto", 1)

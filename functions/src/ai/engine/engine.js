@@ -103,7 +103,13 @@ async function respond(args) {
   else if (!out.clarification && ASKS.has(out.intent) && !(out.evidence || []).length && !out.learned) signals.push({ kind: "missing_knowledge", hintIntent: out.intent })
   return { ...out, signals }
 }
-const applyAliases = (text, aliases) => aliases.reduce((t, a) => t.replace(new RegExp(`(^|[^a-z0-9])${a.alias.replace(/ /g, "\\s+")}(?![a-z0-9])`, "gi"), (m, pre) => pre + a.canonical), text)
+// One pass over the text, longest alias first, so a substituted name is never itself rewritten by another alias.
+const applyAliases = (text, aliases) => {
+  if (!aliases.length) return text
+  const by = new Map(aliases.map((a) => [a.alias, a.canonical]))
+  const alt = aliases.map((a) => a.alias.replace(/ /g, "\\s+")).join("|")
+  return text.replace(new RegExp(`(^|[^a-z0-9])(${alt})(?![a-z0-9])`, "gi"), (m, pre, hit) => pre + by.get(hit.toLowerCase().replace(/\s+/g, " ")))
+}
 
 async function respondCore({ message: rawMessage, context, location, cfg, now }, learned) {
   const language = detectLanguage(rawMessage)

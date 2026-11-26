@@ -30,6 +30,11 @@ const STOP = new Set(w(`a an the and or but if so to of in on at for from with w
 const PLACEHOLDERS = new Set(["<x>", "<n>", "<place>"])
 // A message that mentions any of these is NEVER captured (health, identity, finance, credentials, crisis, politics, religion, sexuality, crime).
 const SENSITIVE = /\b(password|passcode|pin|otp|cvv|passport|identity|id number|id no|salary|income|bank|account number|card number|credit card|iban|swift|loan|debt|diagnos\w*|hiv|aids|std|stds|pregnan\w*|medic\w*|prescription|depress\w*|anxiety|suicid\w*|self harm|kill|rape|raped|abuse\w*|assault\w*|violen\w*|domestic|religio\w*|church|mosque|pastor|politic\w*|anc|da|eff|vote|voting|election|sexual\w*|gay|lesbian|trans|race|racist|tribe|ethnic\w*|criminal|arrest\w*|prison|jail|court|lawyer|police case|emergency|ambulance|help me|danger\w*|attack\w*|robbed|robbery|stolen|gun|weapon|drugs?|dagga|my name|i am called|call me|named|surname|my address|i live|i stay at|my wife|my husband|my son|my daughter|my mother|my father|my boss|my number|my email|whatsapp)\b/i
+
+// More refusals: health/status/identity terms and first-person disclosure in English, isiZulu, isiXhosa, Sesotho, Setswana and Afrikaans.
+// A message matching either is NEVER captured. Lists are deliberately over-broad: a false refusal only costs one candidate.
+const SENSITIVE_MORE = /\b(social security|id book|medical aid|cancer|tb|arvs?|diabetes|epilepsy|disabilit\w*|disabled|immigra\w*|asylum|refugee|undocumented|visa|mental|therap\w*|counsel\w*|funeral|died|death|dying|telegram|facebook|instagram|tiktok|igciwane|isifo|ukudlwengula|ukubulala|ukuzibulala|ukuhlukunyezwa|iphasiwedi|bolwetse|lefu|siekte|selfmoord|verkrag|dwelms?|wagwoord|ngigula|ngiyagula)\b/i
+const DISCLOSURE = /\b(my|ek|ngi|ke|ndi)\s+(name|naam|surname|van|id|email|e mail|phone|cell|cellphone|mobile|number|nommer|address|adres|password|pin|wife|husband|son|daughter|mother|father|boss|child|children|baby|girlfriend|boyfriend|partner|house|street|work|job|employer|salary|income|doctor|illness|health|status|religion|church|account|card|birthday)\b|\b(igama\s+lami|ikheli\s+lami|inombolo\s+yami|igama\s+lam|idilesi\s+yam|inombolo\s+yam|lebitso\s+la\s+ka|aterese\s+ya\s+ka|nomoro\s+ya\s+ka|leina\s+la\s+me|ngiyahlala|ngihlala|ndihlala|ke\s+dula|ek\s+woon|ons\s+woon|i\s+(?:am|m)\s+(?:a|an))\b/i
 const PII_PATTERNS = [
   /[a-z0-9._%+-]+@[a-z0-9.-]+/i, // email
   /https?:|www\.|\b[a-z0-9-]+\.(com|co\.za|org|net|gov|io|app)\b/i, // link
@@ -39,4 +44,4 @@ const PII_PATTERNS = [
 // The supported intents an approved phrase may be pointed at. Side-effecting or safety intents are NOT here: learning can never route to them.
 const LEARNABLE_INTENTS = Object.freeze(["find_restaurants", "find_accommodation", "find_attractions", "find_activities", "find_events", "find_news", "find_businesses", "find_tours", "find_tour_guides", "plan_trip", "build_itinerary", "recommend", "discover_things", "ask_price", "ask_hours", "ask_place", "find_townships", "help"])
 const CORRECTION_INTENTS = LEARNABLE_INTENTS
-module.exports = { ALLOWED, STOP, PLACEHOLDERS, SENSITIVE, PII_PATTERNS, LEARNABLE_INTENTS, CORRECTION_INTENTS }
+module.exports = { ALLOWED, STOP, PLACEHOLDERS, SENSITIVE, SENSITIVE_MORE, DISCLOSURE, PII_PATTERNS, LEARNABLE_INTENTS, CORRECTION_INTENTS }

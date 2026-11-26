@@ -89,7 +89,7 @@ async function runChat({ uid, data, cfg }) {
     if (Array.isArray(saved.blocks)) assistant.blocks = saved.blocks // what was actually stored (consent may have been withdrawn mid-call; a duplicate returns the first answer)
     result = { conversationId: cid, messageId: saved.id, ...responseShape(assistant, cards, offers, cfg), duplicate: saved.duplicate === true }
     outcome = "ok"
-    await capture.fromTurn({ uid, message: input.message, signals: out.signals, cfg }) // best effort, never throws, off unless a Super Admin enabled it
+    await capture.fromTurn({ uid, message: input.message, signals: out.signals, cfg, requestId: input.requestId }) // best effort, never throws, off unless a Super Admin enabled it
     log.info("ai.chat.ok", { uidHash: log.uidHash(uid), intent: out.intent, language: out.language, cards: cards.length })
   } catch (e) {
     refund = !(e instanceof HttpsError) // an internal failure must not cost the user a message

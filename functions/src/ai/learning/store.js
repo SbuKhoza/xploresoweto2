@@ -8,9 +8,11 @@ const crypto = require("crypto")
 const { HttpsError } = require("firebase-functions/v2/https")
 const fb = require("../../lib/firebase")
 const clock = require("../../lib/clock")
+const { writeAudit } = require("../../lib/audit")
 const { AI_COL } = require("../constants")
 const { validSignature } = require("./screen")
-const { PII_PATTERNS, SENSITIVE, LEARNABLE_INTENTS } = require("./vocab")
+const { PII_PATTERNS, SENSITIVE, LEARNABLE_INTENTS, ALLOWED } = require("./vocab")
+const { LANDMARKS } = require("../engine/landmarks")
 
 const KINDS = Object.freeze(["unsupported_intent", "no_match", "missing_knowledge", "feedback_unhelpful", "feedback_correction"])
 const TYPES = Object.freeze(["phrase_intent", "answer", "place_alias"])
@@ -24,33 +26,44 @@ const candId = (kind, sig) => sha(`${kind}|${sig}`).slice(0, 24)
 const knowId = (type, key) => sha(`${type}|${key}`).slice(0, 24)
 
 // ---- collection (best effort, bounded, throttled; the caller has already screened the text into `sig`) ---------------------------
-async function recordSignal({ uid, kind, sig, hintIntent = null, suggestedIntent = null, dedupeKey = "", cfg }) {
-  const L = cfg.learning
-  if (!L || L.collect !== true || L.privacyAcknowledged !== true) return { recorded: false, reason: "off" }
-  if (!KINDS.includes(kind) || !validSignature(sig)) return { recorded: false, reason: "invalid" }
-  const now = clock.now(), day = dayOf(now)
+// EVERYTHING that decides whether to record is read INSIDE the transaction: the stored settings (a collection switch-off or a lowered cap
+// applies at once, not after the config cache expires), the user's opt-out, the per-event de-duplication record, the caps and the candidate.
+// A concurrent opt-out / config write conflicts with this transaction, which then re-runs and sees it. `dedupeKey` is REQUIRED: it is the
+// requestId (chat) or messageId (feedback), and the event record is not day-scoped, so a retry after midnight cannot count twice.
+const expired = (c, nowMs) => !!(c.expireAt && c.expireAt.toMillis && c.expireAt.toMillis() <= nowMs)
+async function recordSignal({ uid, kind, sig, hintIntent = null, suggestedIntent = null, dedupeKey }) {
+  if (!KINDS.includes(kind) || !validSignature(sig) || typeof dedupeKey !== "string" || !dedupeKey || typeof uid !== "string" || !uid) return { recorded: false, reason: "invalid" }
   const hint = typeof hintIntent === "string" && /^[a-z_]{3,30}$/.test(hintIntent) ? hintIntent : null
   const sugg = LEARNABLE_INTENTS.includes(suggestedIntent) ? suggestedIntent : null
-  const key = sha(`${kind}|${sig}|${dedupeKey}`).slice(0, 12)
   const db = fb.db()
-  const seenRef = db.collection(AI_COL.seen).doc(`${uid}_${day}`), gRef = db.collection(AI_COL.seen).doc(`g_${day}`), cRef = db.collection(AI_COL.candidates).doc(candId(kind, sig))
+  const evId = sha(`${uid}|${kind}|${dedupeKey}`).slice(0, 32), sigKey = sha(`${kind}|${sig}`).slice(0, 12)
+  const evRef = db.collection(AI_COL.events).doc(evId), cRef = db.collection(AI_COL.candidates).doc(candId(kind, sig))
+  const cfgRef = db.collection(AI_COL.config).doc("default"), optRef2 = db.collection(AI_COL.optout).doc(uid)
   return db.runTransaction(async (tx) => {
-    const [seen, g, cand] = [await tx.get(seenRef), await tx.get(gRef), await tx.get(cRef)]
+    const now = clock.now(), nowMs = now.getTime(), day = dayOf(now)
+    const seenRef = db.collection(AI_COL.seen).doc(`${uid}_${day}`), gRef = db.collection(AI_COL.seen).doc(`g_${day}`)
+    const [cfgSnap, opt, ev, seen, g, cand] = [await tx.get(cfgRef), await tx.get(optRef2), await tx.get(evRef), await tx.get(seenRef), await tx.get(gRef), await tx.get(cRef)]
+    const L = require("../config").effectiveFromStored(cfgSnap.exists ? cfgSnap.data() : null).learning
+    if (L.collect !== true || L.privacyAcknowledged !== true) return { recorded: false, reason: "off" }
+    if (opt.exists) return { recorded: false, reason: "opted-out" }
+    if (ev.exists) return { recorded: false, reason: "duplicate" }
     const s = seen.exists ? seen.data() : { n: 0, keys: [] }
     if (s.n >= L.maxPerUserPerDay) return { recorded: false, reason: "user-cap" }
-    if ((s.keys || []).includes(key)) return { recorded: false, reason: "duplicate" }
+    if ((s.keys || []).includes(sigKey)) return { recorded: false, reason: "duplicate" } // the same user asking the same thing again today counts once
     const gn = g.exists ? g.data().n : 0
-    const exp = ts(now.getTime() + L.candidateRetentionDays * 86400000)
-    if (cand.exists) {
+    const exp = ts(nowMs + L.candidateRetentionDays * 86400000)
+    const live = cand.exists && !expired(cand.data(), nowMs) // an expired candidate is treated as absent: it restarts from 1 and must be reviewed afresh
+    if (live) {
       const c = cand.data(), sg = { ...(c.suggestions || {}) }
       if (sugg) sg[sugg] = (sg[sugg] || 0) + 1
-      tx.set(cRef, { ...c, count: c.count + 1, lastDay: day, suggestions: sg, expireAt: exp, updatedAt: fb.FieldValue().serverTimestamp() })
+      tx.set(cRef, { ...c, count: c.count + 1, lastDay: day, suggestions: sg, expireAt: c.status === "new" ? exp : c.expireAt, updatedAt: fb.FieldValue().serverTimestamp() })
     } else {
       if (gn >= L.maxNewPerDay) return { recorded: false, reason: "daily-cap" }
       tx.set(cRef, { kind, sig, hintIntent: hint, suggestions: sugg ? { [sugg]: 1 } : {}, count: 1, firstDay: day, lastDay: day, status: "new", expireAt: exp, createdAt: fb.FieldValue().serverTimestamp(), updatedAt: fb.FieldValue().serverTimestamp() })
-      tx.set(gRef, { n: gn + 1, expireAt: ts(now.getTime() + SEEN_DAYS * 86400000) })
+      tx.set(gRef, { n: gn + 1, expireAt: ts(nowMs + SEEN_DAYS * 86400000) })
     }
-    tx.set(seenRef, { ownerUid: uid, n: s.n + 1, keys: [...(s.keys || []), key].slice(-30), expireAt: ts(now.getTime() + SEEN_DAYS * 86400000) })
+    tx.set(evRef, { ownerUid: uid, expireAt: ts(nowMs + 7 * 86400000) }) // long enough to cover any retry window; holds no text
+    tx.set(seenRef, { ownerUid: uid, n: s.n + 1, keys: [...(s.keys || []), sigKey].slice(-30), expireAt: ts(nowMs + SEEN_DAYS * 86400000) })
     return { recorded: true }
   })
 }
@@ -63,15 +76,20 @@ async function setOptOut(uid, optedOut) {
   else await optRef(uid).delete()
   return optedOut
 }
-// Account erasure. Candidates hold no uid and no text, so a single contribution cannot be picked out and withdrawn: that is documented.
-async function eraseUser(uid) {
-  let seen = 0
-  await optRef(uid).delete()
-  for (;;) {
-    const snap = await fb.db().collection(AI_COL.seen).where("ownerUid", "==", uid).limit(100).get()
-    if (snap.empty) return { seen }
-    for (const d of snap.docs) { await d.ref.delete(); seen += 1 }
+// Removes this user's learning bookkeeping (throttle + de-duplication records). The opt-out flag is a protective PREFERENCE: it is kept unless
+// the account itself is being closed, so erasing data never silently re-enrols someone. Candidates hold no uid and no text, so a single
+// contribution cannot be picked out and withdrawn: that is documented in the privacy notice.
+async function eraseUser(uid, { accountClosed = false } = {}) {
+  const out = { seen: 0, events: 0, optOut: false }
+  if (accountClosed) { await optRef(uid).delete(); out.optOut = true }
+  for (const [name, key] of [[AI_COL.seen, "seen"], [AI_COL.events, "events"]]) {
+    for (;;) {
+      const snap = await fb.db().collection(name).where("ownerUid", "==", uid).limit(100).get()
+      if (snap.empty) break
+      for (const d of snap.docs) { await d.ref.delete(); out[key] += 1 }
+    }
   }
+  return out
 }
 
 // ---- review ---------------------------------------------------------------------------------------------------------------------------
@@ -79,7 +97,8 @@ const candView = (id, c) => ({ id, kind: c.kind, signature: c.sig, hintIntent: c
   ...(c.knowledgeId ? { knowledgeId: c.knowledgeId } : {}), ...(c.reason ? { reason: c.reason } : {}) })
 async function listCandidates({ status = "new", kind = null, limit = 50 }) {
   const snap = await fb.db().collection(AI_COL.candidates).where("status", "==", status).limit(500).get()
-  return snap.docs.filter((d) => !kind || d.data().kind === kind).map((d) => candView(d.id, d.data())).sort((a, b) => b.count - a.count || (a.lastDay < b.lastDay ? 1 : -1)).slice(0, limit)
+  const nowMs = clock.now().getTime()
+  return snap.docs.filter((d) => (!kind || d.data().kind === kind) && !expired(d.data(), nowMs)).map((d) => candView(d.id, d.data())).sort((a, b) => b.count - a.count || (a.lastDay < b.lastDay ? 1 : -1)).slice(0, limit)
 }
 
 function cleanText(t) {
@@ -103,10 +122,26 @@ function cleanPayload(type, p, { partial = false } = {}) {
   if (type === "phrase_intent" && (!partial || p.intent !== undefined)) { if (!LEARNABLE_INTENTS.includes(p.intent)) throw bad("intent-not-learnable"); out.intent = p.intent }
   if (type === "answer" && (!partial || p.text !== undefined)) out.text = cleanText(p.text)
   if (type === "place_alias") {
-    if (!partial || p.alias !== undefined) { if (typeof p.alias !== "string" || !ALIAS.test(p.alias) || p.alias.length < 3 || p.alias.length > 40 || SENSITIVE.test(p.alias)) throw bad("invalid-alias"); out.alias = p.alias }
+    if (!partial || p.alias !== undefined) { 
+      if (typeof p.alias !== "string" || !ALIAS.test(p.alias) || p.alias.length < 4 || p.alias.length > 40 || SENSITIVE.test(p.alias)) throw bad("invalid-alias")
+      if (p.alias.split(" ").every((w) => ALLOWED.has(w))) throw bad("alias-too-generic") // "mall", "the park": ordinary words must never be rewritten into a place
+      if (LANDMARKS.some((l) => l.aliases.includes(p.alias))) throw bad("alias-already-built-in")
+      out.alias = p.alias }
     if (!partial || p.canonical !== undefined) { if (typeof p.canonical !== "string" || p.canonical.length < 3 || p.canonical.length > 60 || /[\u0000-\u001f<>]/.test(p.canonical)) throw bad("invalid-canonical"); out.canonical = p.canonical.trim() }
   }
+  if (partial && !Object.keys(out).length) throw bad("invalid-payload") // an edit must change something
   return out
+}
+// No two non-revoked items may claim the same signature / alias (the engine would otherwise have to pick one). Bounded scan; the residual race
+// between two simultaneous creates is documented, and the engine breaks any tie deterministically (lowest id).
+async function assertUnique(type, fields, exceptId = null) {
+  const snap = await fb.db().collection(AI_COL.knowledge).limit(500).get()
+  for (const d of snap.docs) {
+    const k = d.data()
+    if (d.id === exceptId || k.status === "revoked") continue
+    if (type === "place_alias") { if (k.type === "place_alias" && fields.alias !== undefined && k.alias === fields.alias) throw new HttpsError("already-exists", "alias-in-use") }
+    else if (k.type === type && fields.sigs && (k.sigs || []).some((x) => fields.sigs.includes(x))) throw new HttpsError("already-exists", "signature-in-use")
+  }
 }
 const keyOf = (type, f) => (type === "place_alias" ? f.alias : (f.sigs || []).join("|"))
 const knowView = (id, k) => ({ id, type: k.type, status: k.status, version: k.version, ...(k.sigs ? { signatures: k.sigs } : {}), ...(k.intent ? { intent: k.intent } : {}), ...(k.text ? { text: k.text } : {}),
@@ -119,7 +154,7 @@ function writeVersion(tx, kRef, k, { action, actorUid, reason }) {
 }
 // Create knowledge (from a reviewed candidate, or directly by a Super Admin). Always starts ACTIVE at version 1.
 function createInTx(tx, { type, fields, actorUid, sourceCandidate = null }) {
-  const id = knowId(type, keyOf(type, fields)), kRef = fb.db().collection(AI_COL.knowledge).doc(id)
+  const id = crypto.randomBytes(12).toString("hex"), kRef = fb.db().collection(AI_COL.knowledge).doc(id)
   const k = { type, status: "active", version: 1, ...fields, ...(sourceCandidate ? { sourceCandidate } : {}), createdBy: actorUid, updatedBy: actorUid, createdAt: fb.FieldValue().serverTimestamp(), updatedAt: fb.FieldValue().serverTimestamp() }
   return { id, kRef, k }
 }
@@ -129,6 +164,7 @@ async function reviewCandidate({ id, decision, actorUid, type, payload, reason, 
   if (decision === "approve" && type === "place_alias") throw bad("place-alias-is-created-directly") // a candidate has no place name to approve (names are never stored)
   const fields = decision === "approve" ? cleanPayload(type, payload) : null
   const rsn = decision === "reject" ? reasonOf(reason) : null
+  if (fields) await assertUnique(type, fields)
   const cRef = fb.db().collection(AI_COL.candidates).doc(id)
   return fb.db().runTransaction(async (tx) => {
     const c = await tx.get(cRef)
@@ -136,6 +172,7 @@ async function reviewCandidate({ id, decision, actorUid, type, payload, reason, 
     const cd = c.data()
     if (cd.status !== "new") throw new HttpsError("failed-precondition", "already-reviewed")
     const now = clock.now()
+    if (expired(cd, now.getTime())) throw new HttpsError("failed-precondition", "candidate-expired") // retention has passed: it can no longer be approved
     const keep = ts(now.getTime() + 365 * 86400000) // a reviewed candidate is kept for a year so the same text is not re-proposed
     if (decision === "reject") {
       tx.set(cRef, { ...cd, status: "rejected", reason: rsn, expireAt: keep, reviewedBy: actorUid, updatedAt: fb.FieldValue().serverTimestamp() })
@@ -152,6 +189,7 @@ async function reviewCandidate({ id, decision, actorUid, type, payload, reason, 
 }
 async function createKnowledge({ type, payload, actorUid, audit }) {
   const fields = cleanPayload(type, payload)
+  await assertUnique(type, fields)
   return fb.db().runTransaction(async (tx) => {
     const { id, kRef, k } = createInTx(tx, { type, fields, actorUid })
     if ((await tx.get(kRef)).exists) throw new HttpsError("already-exists", "knowledge-exists")
@@ -165,6 +203,10 @@ async function updateKnowledge({ id, action, payload, reason, actorUid, audit })
   if (!["edit", "disable", "enable", "revoke"].includes(action)) throw bad("invalid-action")
   const rsn = action === "edit" || action === "enable" ? (reason === undefined ? null : reasonOf(reason)) : reasonOf(reason)
   const kRef = fb.db().collection(AI_COL.knowledge).doc(id)
+  if (action === "edit" || action === "enable") { // re-activating or changing signatures must not collide with another live item
+    const cur = await kRef.get()
+    if (cur.exists && cur.data().status !== "revoked") await assertUnique(cur.data().type, action === "edit" ? cleanPayload(cur.data().type, payload, { partial: true }) : (cur.data().type === "place_alias" ? { alias: cur.data().alias } : { sigs: cur.data().sigs }), id)
+  }
   return fb.db().runTransaction(async (tx) => {
     const s = await tx.get(kRef)
     if (!s.exists) throw new HttpsError("not-found", "knowledge-not-found")
@@ -202,13 +244,14 @@ async function stats() {
   return { candidates: { total: c.length, byStatus: tally(c, (x) => x.status), byKind: tally(c, (x) => x.kind), occurrences: c.reduce((n, x) => n + x.count, 0), top, truncated: c.length >= 500 },
     knowledge: { total: k.length, byStatus: tally(k, (x) => x.status), byType: tally(k, (x) => x.type), truncated: k.length >= 500 }, newCandidatesToday: g.exists ? g.data().n : 0 }
 }
-async function purge({ scope, olderThanDays }) {
+async function purge({ scope, actorUid }) {
   if (!["expired", "rejected", "new", "all"].includes(scope)) throw bad("invalid-scope")
   const now = clock.now().getTime()
   const snap = await fb.db().collection(AI_COL.candidates).limit(400).get()
-  const doomed = snap.docs.filter((d) => { const c = d.data(); return scope === "all" || (scope === "expired" ? c.expireAt && c.expireAt.toMillis() <= now : scope === "rejected" ? c.status === "rejected" : c.status === "new") })
+  const doomed = snap.docs.filter((d) => { const c = d.data(); return scope === "all" || (scope === "expired" ? expired(c, now) : scope === "rejected" ? c.status === "rejected" : c.status === "new") })
   const b = fb.db().batch()
   doomed.forEach((d) => b.delete(d.ref))
+  writeAudit(b, { action: "ai.learning.purge", actorUid, details: { scope, deleted: doomed.length } }) // the deletion and its audit entry commit together
   await b.commit()
   return { deleted: doomed.length, more: snap.docs.length >= 400 }
 }

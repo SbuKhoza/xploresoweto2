@@ -72,6 +72,14 @@ function validateConfig(c) {
 
 const EDITABLE = Object.freeze(["enabled", "limits", "retention", "languages", "cache", "retrieval", "learning", "luna"])
 
+// The effective settings from a stored `ai-config/default` document (or none): invalid -> defaults. Shared by the cached reader and by
+// learning transactions, which re-read the stored document INSIDE the transaction so a just-disabled setting is honoured at once.
+function effectiveFromStored(data) {
+  if (!data) return DEFAULTS
+  const picked = Object.fromEntries(Object.entries(data).filter(([k]) => EDITABLE.includes(k)))
+  const merged = merge(DEFAULTS, picked)
+  return validateConfig(merged).length === 0 ? merged : DEFAULTS
+}
 let cache = { at: 0, value: null }
 let ttlMs = 60000
 const invalidateConfigCache = () => { cache = { at: 0, value: null } }
@@ -94,4 +102,4 @@ async function getAiConfig() {
   cache = { at: now, value }
   return value
 }
-module.exports = { DEFAULTS, EDITABLE, merge, validateConfig, getAiConfig, invalidateConfigCache, setConfigCacheTtlForTests }
+module.exports = { effectiveFromStored, DEFAULTS, EDITABLE, merge, validateConfig, getAiConfig, invalidateConfigCache, setConfigCacheTtlForTests }

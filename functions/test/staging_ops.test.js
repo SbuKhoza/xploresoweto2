@@ -101,7 +101,7 @@ test("seed data is entirely synthetic, public-collection shaped, and contains no
 })
 test("the offline manifest check passes for staging", () => {
   const r = spawnSync(process.execPath, [path.join(__dirname, "..", "scripts", "check-manifest.js")], { env: clean(), encoding: "utf8" })
-  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /40 functions, no secrets, maxInstances 3/)
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /41 functions, no secrets, maxInstances 3/)
 })
 test("gitignore keeps tester lists and keystores out of the repository", () => {
   const g = read(".gitignore"); for (const p of ["*.jks", "serviceAccount*.json"]) assert.ok(g.includes(p), p)

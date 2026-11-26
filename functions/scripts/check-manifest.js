@@ -14,7 +14,7 @@ const r = spawnSync(process.execPath, [BIN, path.join(__dirname, "..")], { env, 
 const fail = (m) => { console.error(`check-manifest FAILED: ${m}`); process.exit(1) }
 if (r.status !== 0) fail(r.stderr || "discovery failed (is `npm ci` done in functions/?)")
 const m = JSON.parse(fs.readFileSync(out, "utf8")), names = Object.keys(m.endpoints), problems = []
-if (names.length !== 40) problems.push(`expected 40 functions (30 original + 10 reviewed-learning), found ${names.length}`)
+if (names.length !== 41) problems.push(`expected 41 functions (30 original + 11 learning/erasure), found ${names.length}`)
 for (const n of names) {
   const e = m.endpoints[n]
   if ((e.secretEnvironmentVariables || []).length) problems.push(`${n} binds a secret`)

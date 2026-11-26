@@ -204,7 +204,7 @@ describe("Firestore rules (Stage 1, proposed)", () => {
 
   describe("AI assistant collections are server-only (Stage 2A)", () => {
     const paths = ["ai-conversations/c_1", "ai-conversations/c_1/messages/m1", "ai-usage/u_alice_2026-11-14", "ai-usage/g_2026-11", "ai-config/default",
-      "ai-learning-candidates/cand1", "ai-knowledge/k1", "ai-knowledge/k1/versions/1", "ai-learning-seen/alice_2026-11-14", "ai-learning-optout/alice"]
+      "ai-learning-candidates/cand1", "ai-knowledge/k1", "ai-knowledge/k1/versions/1", "ai-learning-seen/alice_2026-11-14", "ai-learning-optout/alice", "ai-learning-events/e1"]
     beforeEach(async () => {
       await env.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore()

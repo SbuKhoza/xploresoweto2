@@ -178,6 +178,7 @@ service cloud.firestore {
     }
     match /ai-learning-seen/{id}   { allow read, write: if false; }
     match /ai-learning-optout/{id} { allow read, write: if false; }
+    match /ai-learning-events/{id} { allow read, write: if false; }
 
     // everything else is denied (Person-Of-Interest, any legacy or future collection)
     match /{document=**} { allow read, write: if false; }
