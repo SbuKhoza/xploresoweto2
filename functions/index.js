@@ -32,6 +32,7 @@ const requests = require("./src/handlers/requests")
 const reviews = require("./src/handlers/reviews")
 const listings = require("./src/handlers/listings")
 const ai = require("./src/handlers/ai")
+const learning = require("./src/handlers/learning")
 
 module.exports = {
   // required Stage 1 functions
@@ -68,4 +69,15 @@ module.exports = {
   aiDeleteAllMyAiData: wrap(ai.aiDeleteAllMyAiData),
   aiAdminGetUsage: wrap(ai.aiAdminGetUsage),
   aiAdminUpdateConfig: wrap(ai.aiAdminUpdateConfig),
+  // Reviewed learning (collection is OFF by default). No secrets are bound to any of these.
+  aiSubmitFeedback: wrap(learning.aiSubmitFeedback),
+  aiSetLearningOptOut: wrap(learning.aiSetLearningOptOut),
+  aiAdminListLearningCandidates: wrap(learning.aiAdminListLearningCandidates),
+  aiAdminReviewCandidate: wrap(learning.aiAdminReviewCandidate),
+  aiAdminSaveKnowledge: wrap(learning.aiAdminSaveKnowledge),
+  aiAdminUpdateKnowledge: wrap(learning.aiAdminUpdateKnowledge),
+  aiAdminListKnowledge: wrap(learning.aiAdminListKnowledge),
+  aiAdminKnowledgeHistory: wrap(learning.aiAdminKnowledgeHistory),
+  aiAdminLearningStats: wrap(learning.aiAdminLearningStats),
+  aiAdminPurgeLearning: wrap(learning.aiAdminPurgeLearning),
 }

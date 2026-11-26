@@ -99,6 +99,7 @@ async function deleteConversation(uid, cid) {
 // "delete all my data" would reset the daily limit and become a way to bypass it.
 async function deleteAllForUser(uid) {
   let conversations = 0
+  await require("./learning/store").eraseUser(uid) // the learning throttle records and the opt-out flag go with the account's AI data
   for (;;) {
     const snap = await fb.db().collection(AI_COL.conversations).where("ownerUid", "==", uid).limit(50).get()
     if (snap.empty) return { conversations }

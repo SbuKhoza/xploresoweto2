@@ -176,6 +176,8 @@ function composeFallback({ L, misses }) {
   const follow = [[L.follow.cats, L.follow.stay, L.follow.see], [L.follow.stay, L.follow.attractions, L.follow.events], [L.follow.events, L.follow.cats, L.follow.see]][i]
   return { ...out([block("general", L.fallback[i])], [], follow), clarification: true, fallback: true }
 }
+// An answer a Super Admin approved. Shown as "knowledge" (never "verified"): it is reviewed guidance, not a stored listing record.
+const composeLearned = ({ L, text }) => ({ ...out([block("knowledge", text)], [], [L.follow.cats, L.follow.stay, L.follow.see]) })
 // A destination the person named (street, landmark, township): what the records say about it, or an honest "nothing", then a question.
 function composeExplore({ L, place, party, entries, kb }) {
   const blocks = [block("general", L.exploreLead(place, party))]
@@ -205,4 +207,4 @@ function composePick({ L, entry, count }) {
   blocks.push(block("suggestion", why.length ? `${L.pickWhy} ${why.join("; ")}.` : L.pickBasis))
   return { ...out(blocks, [it.evidence], [L.follow.details, L.follow.directions, L.follow.plan]), keepRefs: true }
 }
-module.exports = { composePick, composeSocial, composeFallback, composeExplore, composeAcknowledge, composeFind, composeAsk, composeCompare, composePlan, composeKnowledge, composeEvents, composeEmergency, composeTours, composeTransport, composeNews, composeAnnouncements, composeLoadshedding, composeTownships, composeClarify, composeStatic, factLine, block }
+module.exports = { composeLearned, composePick, composeSocial, composeFallback, composeExplore, composeAcknowledge, composeFind, composeAsk, composeCompare, composePlan, composeKnowledge, composeEvents, composeEmergency, composeTours, composeTransport, composeNews, composeAnnouncements, composeLoadshedding, composeTownships, composeClarify, composeStatic, factLine, block }

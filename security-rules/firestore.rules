@@ -170,6 +170,14 @@ service cloud.firestore {
     }
     match /ai-usage/{usageId}   { allow read, write: if false; }   // per-user and global counters, budget and circuit breaker
     match /ai-config/{configId} { allow read, write: if false; }   // changed only by aiAdminUpdateConfig (Super Admin, audited)
+    // Reviewed learning (docs/malloya/LEARNING.md): candidates, approved knowledge (+ versions), per-user throttle and opt-out. Server-only; the Admin SDK in the callables is the only reader/writer.
+    match /ai-learning-candidates/{id} { allow read, write: if false; }
+    match /ai-knowledge/{id} {
+      allow read, write: if false;
+      match /versions/{v} { allow read, write: if false; }
+    }
+    match /ai-learning-seen/{id}   { allow read, write: if false; }
+    match /ai-learning-optout/{id} { allow read, write: if false; }
 
     // everything else is denied (Person-Of-Interest, any legacy or future collection)
     match /{document=**} { allow read, write: if false; }

@@ -61,7 +61,7 @@ async function aiGetConversation(request) {
   const messages = []
   for (const m of c.messages) {
     const cards = m.role === "assistant" ? await hydrateRefs((m.cardRefs || []).map((x) => x.ref), { cfg, now: clock.now(), location: null }) : []
-    const { cardRefs, bookingOfferRefs, ownerUid, expireAt, requestId, conversationId, createdAt, ...rest } = m
+    const { cardRefs, bookingOfferRefs, intent, ownerUid, expireAt, requestId, conversationId, createdAt, ...rest } = m
     messages.push({ ...rest, createdAt: createdAt && createdAt.toMillis ? createdAt.toMillis() : null, ...(m.role === "assistant" ? { cards } : {}) })
   }
   return { conversation: c.conversation, messages }
@@ -86,7 +86,7 @@ async function aiAdminGetUsage(request) {
   // Numbers only. The Luna block shows the settings, the breaker state and today's global token use (never any text or user data).
   let luna = { enabled: cfg.luna.enabled }
   try { const b = await lunaBreaker.peek(); luna = { ...cfg.luna, breaker: { ...cfg.luna.breaker, state: b ? b.state : "unreadable", blockedKind: b ? b.blockedKind || null : null }, today: await lunaUsage.globalToday() } } catch (e) { /* keep the short form */ }
-  return { config: { enabled: cfg.enabled, limits: cfg.limits, retention: cfg.retention, languages: cfg.languages, cache: cfg.cache, retrieval: cfg.retrieval, luna } }
+  return { config: { enabled: cfg.enabled, limits: cfg.limits, retention: cfg.retention, languages: cfg.languages, cache: cfg.cache, retrieval: cfg.retrieval, learning: cfg.learning, luna } }
 }
 async function aiAdminUpdateConfig(request) {
   const actor = await G.requireActiveSuperAdmin(request)

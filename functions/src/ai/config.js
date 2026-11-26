@@ -17,6 +17,9 @@ const DEFAULTS = Object.freeze({
   languages: { en: { enabled: true, verified: true }, zu: { enabled: false, verified: false } }, // isiZulu: NOT implemented; detected and answered in English with a notice
   cache: { listingTtlSeconds: 300 },
   retrieval: { scanLimit: 150, maxResults: 6, queryTimeoutMs: 8000 },
+  // Reviewed learning (docs/malloya/LEARNING.md). Collection is OFF and cannot be switched on until a Super Admin has also recorded that the
+  // privacy notice and review are done (privacyAcknowledged). `use` only matters once an admin has APPROVED something; it is the kill switch for that.
+  learning: { collect: false, privacyAcknowledged: false, use: true, maxNewPerDay: 200, maxPerUserPerDay: 10, candidateRetentionDays: 60 },
   luna: {
     enabled: false, // kill switch: OFF until the privacy notice, privacy policy and POPIA review are settled and a Super Admin turns it on
     resetEpoch: 0, // bump to clear a "blocked" breaker (billing/quota/key problem) after the operator has fixed it
@@ -36,6 +39,7 @@ const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
 
 function validateConfig(c) {
   const p = []
+  const only0 = (o, keys, name) => { if (!(isObj(o) && Object.keys(o).every((k) => keys.includes(k)))) p.push(`${name}.unknown-key`) }
   const need = (ok, msg) => { if (!ok) p.push(msg) }
   need(typeof c.enabled === "boolean", "enabled")
   const L = c.limits || {}
@@ -45,6 +49,11 @@ function validateConfig(c) {
   need(isObj(c.languages) && Object.entries(c.languages).every(([k, v]) => /^[a-z]{2,3}$/.test(k) && typeof v?.enabled === "boolean" && typeof v?.verified === "boolean"), "languages")
   need(int(c.cache?.listingTtlSeconds, 0, 3600), "cache.listingTtlSeconds")
   need(int(c.retrieval?.scanLimit, 20, 500), "retrieval.scanLimit"); need(int(c.retrieval?.maxResults, 1, 10), "retrieval.maxResults"); need(int(c.retrieval?.queryTimeoutMs, 500, 30000), "retrieval.queryTimeoutMs")
+  const G = c.learning || {}
+  only0(G, ["collect", "privacyAcknowledged", "use", "maxNewPerDay", "maxPerUserPerDay", "candidateRetentionDays"], "learning")
+  need(typeof G.collect === "boolean" && typeof G.privacyAcknowledged === "boolean" && typeof G.use === "boolean", "learning.flags")
+  need(!(G.collect === true && G.privacyAcknowledged !== true), "learning.collect-needs-privacyAcknowledged") // fail closed: no collection without the recorded privacy gate
+  need(int(G.maxNewPerDay, 1, 2000), "learning.maxNewPerDay"); need(int(G.maxPerUserPerDay, 1, 50), "learning.maxPerUserPerDay"); need(int(G.candidateRetentionDays, 1, 365), "learning.candidateRetentionDays")
   const N = c.luna || {}, NL = N.limits || {}, NB = N.breaker || {}
   const only = (o, keys, name) => need(isObj(o) && Object.keys(o).every((k) => keys.includes(k)), `${name}.unknown-key`) // no model/provider/key/price settings can be smuggled in
   only(N, ["enabled", "resetEpoch", "limits", "breaker"], "luna"); only(NL, ["dailySuccessPerUser", "dailyAttemptsPerUser", "maxInputTokens", "maxOutputTokens", "dailyGlobalTokens", "maxConcurrentPerInstance", "recoveryConcurrent", "timeoutMs"], "luna.limits")
@@ -61,7 +70,7 @@ function validateConfig(c) {
   return p
 }
 
-const EDITABLE = Object.freeze(["enabled", "limits", "retention", "languages", "cache", "retrieval", "luna"])
+const EDITABLE = Object.freeze(["enabled", "limits", "retention", "languages", "cache", "retrieval", "learning", "luna"])
 
 let cache = { at: 0, value: null }
 let ttlMs = 60000

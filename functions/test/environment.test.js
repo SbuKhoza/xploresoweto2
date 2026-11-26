@@ -47,22 +47,26 @@ function manifest(env) {
   assert.equal(r.status, 0, r.stderr)
   return JSON.parse(fs.readFileSync(out, "utf8"))
 }
+// The 10 reviewed-learning callables added after the golden manifest was taken. Everything else must still match it exactly.
+const LEARNING = ["aiSubmitFeedback", "aiSetLearningOptOut", "aiAdminListLearningCandidates", "aiAdminReviewCandidate", "aiAdminSaveKnowledge", "aiAdminUpdateKnowledge", "aiAdminListKnowledge", "aiAdminKnowledgeHistory", "aiAdminLearningStats", "aiAdminPurgeLearning"]
+const original = (m) => { const c = JSON.parse(JSON.stringify(m)); for (const n of LEARNING) delete c.endpoints[n]; return c }
 const bound = (m) => Object.entries(m.endpoints).filter(([, e]) => (e.secretEnvironmentVariables || []).length).map(([n]) => n)
 test("PRODUCTION REGRESSION: the production manifest is identical to the one generated from the unmodified c419086 code", () => {
   const m = manifest({ GCLOUD_PROJECT: "xploresoweto" })
-  assert.deepEqual(m, GOLDEN)
-  assert.equal(Object.keys(m.endpoints).length, 30); assert.deepEqual(bound(m), ["aiChat"])
+  assert.deepEqual(original(m), GOLDEN)
+  assert.equal(Object.keys(m.endpoints).length, 40); assert.deepEqual(bound(m), ["aiChat"]) // still ONLY aiChat binds a secret; the 10 new callables bind none
+  assert.deepEqual(Object.keys(m.endpoints).filter((n) => !GOLDEN.endpoints[n]).sort(), [...LEARNING].sort())
   assert.ok(Object.values(m.endpoints).every((e) => e.maxInstances === 10 && e.region[0] === "africa-south1"))
 })
 test("an unknown or missing project keeps today's behaviour (secret bound, 10 instances): a staging deploy cannot lose the binding by accident, a wrong target fails loudly", () => {
-  assert.deepEqual(manifest({}), GOLDEN); assert.deepEqual(manifest({ GCLOUD_PROJECT: "xploresoweto-staging-2" }), GOLDEN)
+  assert.deepEqual(original(manifest({})), GOLDEN); assert.deepEqual(original(manifest({ GCLOUD_PROJECT: "xploresoweto-staging-2" })), GOLDEN)
 })
-test("STAGING: all 30 functions remain, none binds a secret, none declares one, every function is capped at 3 instances, nothing else differs", () => {
+test("STAGING: all 30 original functions remain (plus the 10 learning callables), none binds a secret, none declares one, every function is capped at 3 instances, nothing else differs", () => {
   const m = manifest({ GCLOUD_PROJECT: "xploresoweto-staging" })
-  assert.deepEqual(Object.keys(m.endpoints), Object.keys(GOLDEN.endpoints)); assert.equal(Object.keys(m.endpoints).length, 30)
+  assert.deepEqual(Object.keys(original(m).endpoints), Object.keys(GOLDEN.endpoints)); assert.equal(Object.keys(m.endpoints).length, 40)
   assert.deepEqual(bound(m), []); assert.ok(!JSON.stringify(m).includes("OPENAI_API_KEY"))
   assert.ok(Object.values(m.endpoints).every((e) => e.maxInstances === 3 && e.region[0] === "africa-south1"))
-  const back = JSON.parse(JSON.stringify(m))
+  const back = original(m)
   for (const e of Object.values(back.endpoints)) e.maxInstances = 10
   back.endpoints.aiChat.secretEnvironmentVariables = GOLDEN.endpoints.aiChat.secretEnvironmentVariables; back.params = GOLDEN.params
   assert.deepEqual(back, GOLDEN) // the ONLY differences are maxInstances, aiChat's secret binding and the secret's declaration

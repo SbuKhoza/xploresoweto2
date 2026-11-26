@@ -179,9 +179,13 @@ test("an unknown named street is acknowledged honestly and the person is asked w
   const r = await say("we're going to Mohale Street tomorrow")
   assert.ok(!r.blocks.some((b) => b.type === "verified")); assert.match(text(r), /\?/)
 })
-test("production Luna safeguards are untouched by the engine work", () => {
+test("production Luna safeguards are untouched, and the security rules only GAINED the learning collections (nothing removed or loosened)", () => {
   const { execFileSync } = require("node:child_process")
-  let out
-  try { out = execFileSync("git", ["diff", "--name-only", "staging/env-foundation", "--", "functions/src/ai/luna", "security-rules"], { cwd: path.join(__dirname, "..", "..") }).toString().trim() } catch (e) { return } // no such branch here (e.g. after merging): nothing to compare
-  assert.equal(out, "", "Luna and the security rules must not change in this branch")
+  const git = (...args) => execFileSync("git", args, { cwd: path.join(__dirname, "..", "..") }).toString()
+  let luna, stat
+  try { luna = git("diff", "--name-only", "staging/env-foundation", "--", "functions/src/ai/luna").trim(); stat = git("diff", "--numstat", "staging/env-foundation", "--", "security-rules/firestore.rules", "security-rules/storage.rules").trim() } catch (e) { return } // no such branch here (e.g. after merging): nothing to compare
+  assert.equal(luna, "", "Luna must not change")
+  for (const line of stat.split("\n").filter(Boolean)) { const [added, removed, file] = line.split("\t"); assert.equal(removed, "0", `${file}: no rule line may be removed or changed`); assert.match(file, /firestore\.rules$/, "storage rules must not change") }
+  const added = git("diff", "-U0", "staging/env-foundation", "--", "security-rules/firestore.rules").split("\n").filter((l) => /^\+[^+]/.test(l)).join("\n")
+  assert.ok(!/allow (read|write|get|list|create|update|delete)[^;]*:\s*if\s+(?!false)/.test(added), "every added rule is deny-all")
 })

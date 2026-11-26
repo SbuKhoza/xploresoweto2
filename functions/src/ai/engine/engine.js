@@ -17,6 +17,8 @@ const L = require("./lexicon")
 const { rank, tokens } = require("./ranking")
 const { buildItinerary } = require("./itinerary")
 const ctxMod = require("./context")
+const screen = require("../learning/screen")
+const learnedKnowledge = require("../learning/knowledge")
 const C = require("./compose")
 const locales = { en: require("./locales/en") }
 
@@ -90,9 +92,22 @@ function rankWithFallback(items, crit) {
 const entriesOf = (ranked, n) => ranked.slice(0, n).map((e) => ({ item: e.item, reasons: e.reasons, flags: e.flags, score: e.score }))
 
 // ---- the pipeline -----------------------------------------------------------------------------------------------------------
-async function respond({ message: rawMessage, context, location, cfg, now }) {
+// Public entry: loads ACTIVE approved knowledge (empty unless a Super Admin approved something and learning use is on), runs the engine,
+// and attaches `signals`: what could not be answered, as KINDS only (the caller screens the text; nothing here stores anything).
+const ASKS = new Set(["find_restaurants", "find_accommodation", "find_attractions", "find_activities", "find_businesses", "ask_place", "ask_price", "ask_hours", "explore_place", "recommend", "discover_things"])
+async function respond(args) {
+  const learned = await learnedKnowledge.loadActive(args.cfg)
+  const out = await respondCore(args, learned)
+  const signals = []
+  if (out.fallback) signals.push({ kind: out.intent === "unknown" ? "unsupported_intent" : "no_match", hintIntent: out.intent })
+  else if (!out.clarification && ASKS.has(out.intent) && !(out.evidence || []).length && !out.learned) signals.push({ kind: "missing_knowledge", hintIntent: out.intent })
+  return { ...out, signals }
+}
+const applyAliases = (text, aliases) => aliases.reduce((t, a) => t.replace(new RegExp(`(^|[^a-z0-9])${a.alias.replace(/ /g, "\\s+")}(?![a-z0-9])`, "gi"), (m, pre) => pre + a.canonical), text)
+
+async function respondCore({ message: rawMessage, context, location, cfg, now }, learned) {
   const language = detectLanguage(rawMessage)
-  const cleaned = nlp.clean(rawMessage) // abbreviations ("Vilakazi St"), typing shortcuts and misspellings are repaired before anything is matched
+  const cleaned = applyAliases(nlp.clean(rawMessage), learned.aliases) // abbreviations ("Vilakazi St"), typing shortcuts and misspellings are repaired before anything is matched
   let soc = social.classify(cleaned) // greetings / thanks / farewells / acknowledgements; a request after them ("Hi, where can I stay?") is still answered
   if (!soc.kind && language === "en" && soc.stripped.length && soc.rest && /^(greeting|thanks|farewell)$/.test(soc.stripped[0]) && !detectIntents(soc.rest).length) {
     const e = extract(soc.rest, { now, places: [] }) // "thanks, my email is ..." has no request in it: it is still a thanks (and nothing after it is used)
@@ -103,8 +118,16 @@ async function respond({ message: rawMessage, context, location, cfg, now }) {
   const ctx = { cfg, now, location: location || null }
   const intents = detectIntents(message)
   let primary = intents[0] || null
+  const sg = learned.phrases.size || learned.answers.size ? screen.signature(message) : { ok: false }
+  const lPhrase = sg.ok ? learned.phrases.get(sg.sig) : null, lAnswer = sg.ok ? learned.answers.get(sg.sig) : null
+  const usedLearning = []
+  // An approved phrase only fills a gap: never over a clear built-in match, never over an emergency, and only to a supported, side-effect-free intent.
+  if (lPhrase && (!primary || primary.score < 3) && !intents.some((i) => i.id === "emergency") && intentDef(lPhrase.intent)) {
+    primary = { id: lPhrase.intent, score: 0, hits: [], category: intentDef(lPhrase.intent).category || null, attribute: intentDef(lPhrase.intent).attribute || null }
+    usedLearning.push({ id: lPhrase.id, version: lPhrase.version, type: "phrase_intent" })
+  }
   const prev = ctxMod.sanitize(context)
-  const result = (o, extra = {}) => ({ language, languageFallback: language !== "en", intent: extra.intent || (primary ? primary.id : "unknown"), ...o })
+  const result = (o, extra = {}) => ({ ...(usedLearning.length ? { learned: usedLearning } : {}), language, languageFallback: language !== "en", intent: extra.intent || (primary ? primary.id : "unknown"), ...o })
   const zuBlock = language === "zu" && !soc.kind ? [C.block("unverified", Lc.notSupportedLanguage)] : []
   const KEEP_INTENT = new Set(["greeting", "thanks", "farewell", "acknowledge", "help", "emergency", "provide_details"])
   const done = (composed, { slots = {}, refs = [], pending = null, intent } = {}) => result({ ...composed, blocks: intent === "emergency" ? composed.blocks : [...zuBlock, ...composed.blocks],
@@ -253,10 +276,14 @@ async function respond({ message: rawMessage, context, location, cfg, now }) {
   if (id === "unknown" && !cols) {
     const q = await runQuery("searchKnowledge", { query: message.slice(0, 120).length >= 2 ? message.slice(0, 120) : "soweto" }, ctx)
     const rel = relevantKb(q.ok ? q.data.results : [], queryTerms(message, { intentHits: [] }))
+    if (lAnswer) { usedLearning.push({ id: lAnswer.id, version: lAnswer.version, type: "answer" }); return finish(C.composeLearned({ L: Lc, text: lAnswer.text })) }
     if (rel.length) return finish(C.composeKnowledge({ L: Lc, results: rel }))
     return finish(C.composeFallback({ L: Lc, misses: prev.misses }))
   }
-  if (!cols) return finish(C.composeFallback({ L: Lc, misses: prev.misses }))
+  if (!cols) {
+    if (lAnswer) { usedLearning.push({ id: lAnswer.id, version: lAnswer.version, type: "answer" }); return finish(C.composeLearned({ L: Lc, text: lAnswer.text })) }
+    return finish(C.composeFallback({ L: Lc, misses: prev.misses }))
+  }
   cols = cols.slice(0, 3)
   const loaded = await loadMany(cols, ctx)
   const place = slots.place || guessPlace(message, loaded.items) || askedPlace(message)
