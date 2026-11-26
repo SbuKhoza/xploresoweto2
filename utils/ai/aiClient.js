@@ -2,6 +2,7 @@
 // The Firebase callable is injected: in the app it is utils/callable.js `callFunction`.
 
 import { LUNA_NOTICE_VERSION, consentPayload } from "./notice.js"
+import { feedbackPayload, optOutPayload, erasePayload } from "./learning.js"
 
 export const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,64}$/
 export const MAX_MESSAGE_CHARS_FALLBACK = 1000
@@ -50,5 +51,8 @@ export function createAiApi(call) {
     open: (conversationId) => call("aiGetConversation", { conversationId }),
     remove: (conversationId) => call("aiDeleteConversation", { conversationId }),
     removeAll: () => call("aiDeleteAllMyAiData", {}),
+    erase: () => call("aiEraseMyAiData", erasePayload()),
+    feedback: (args) => call("aiSubmitFeedback", feedbackPayload(args)),
+    setLearningOptOut: (optOut) => call("aiSetLearningOptOut", optOutPayload(optOut)),
   }
 }

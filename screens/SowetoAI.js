@@ -19,6 +19,7 @@ import { describeAiError } from "../utils/ai/errors"
 import { LUNA_NOTICE_TITLE, LUNA_NOTICE_TEXT, LUNA_DELETE_ALL_LABEL, LUNA_DELETE_ALL_NOTE, lunaPanel } from "../utils/ai/notice"
 import { assistantItemFromResponse, itemsFromConversation, blockStyle, screenForCard } from "../utils/ai/blocks"
 import { canCallAssistant, locationDecision } from "../utils/ai/gates"
+import { learningPanel, feedbackOutcome, CORRECTION_CHOICES, LEARNING_NOTICE_TITLE, LEARNING_NOTICE_TEXT, OPT_OUT_LABEL, deleteConversationNote, deleteAllNote, ERASE_LABEL, ERASE_NOTE } from "../utils/ai/learning"
 import { TEAL, BRAND, INK, MUTED, STAR } from "../components/xplorescreens/shared/theme"
 
 const api = createAiApi(callFunction)
@@ -78,7 +79,45 @@ const Card = ({ c, offered, onOpen }) => {
   )
 }
 
-const AssistantBubble = ({ m, onFollowUp, onOpenCard, busy }) => (
+// Thumbs up / down under an answer. Shown ONLY when the server says learning is on and the person has not opted out. What the person is told
+// comes from the server's answer: "recorded" is never claimed unless the server said so.
+const FeedbackRow = ({ messageId, onSubmit }) => {
+  const [phase, setPhase] = useState("idle") // idle | choosing | sending | done
+  const [note, setNote] = useState(null)
+  const [last, setLast] = useState(null)
+  const send = async (rating, correctionIntent) => {
+    setLast({ rating, correctionIntent }); setPhase("sending"); setNote(null)
+    try { const o = feedbackOutcome(await onSubmit({ messageId, rating, correctionIntent })); setNote({ text: o.text, error: false }); setPhase("done") }
+    catch (e) { setNote({ text: describeAiError(e).text, error: true }); setPhase(rating === "unhelpful" ? "choosing" : "idle") }
+  }
+  if (phase === "done") return <Text accessibilityLiveRegion="polite" style={{ color: MUTED, fontSize: 11.5, marginTop: 4 }}>{note.text}</Text>
+  return (
+    <View style={{ marginTop: 4 }}>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <TouchableOpacity disabled={phase === "sending"} onPress={() => send("helpful")} accessibilityLabel="This answer helped" style={{ padding: 6 }}><Ionicons name="thumbs-up-outline" size={17} color={MUTED} /></TouchableOpacity>
+        <TouchableOpacity disabled={phase === "sending"} onPress={() => setPhase("choosing")} accessibilityLabel="This answer didn't help" style={{ padding: 6 }}><Ionicons name="thumbs-down-outline" size={17} color={phase === "choosing" ? TEAL : MUTED} /></TouchableOpacity>
+        {phase === "sending" ? <ActivityIndicator size="small" color={TEAL} style={{ marginLeft: 6 }} /> : null}
+      </View>
+      {phase === "choosing" ? (
+        <View style={{ backgroundColor: "#fff", borderRadius: 14, padding: 10, marginTop: 4, ...shadow }}>
+          <Text style={{ color: INK, fontWeight: "700", fontSize: 13 }}>Sorry about that. What were you after? (optional)</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 8 }}>
+            {CORRECTION_CHOICES.map((c) => <Chip key={c.intent} text={c.label} onPress={() => send("unhelpful", c.intent)} />)}
+          </View>
+          <TouchableOpacity onPress={() => send("unhelpful")} style={{ alignSelf: "flex-start", paddingVertical: 4 }}><Text style={{ color: TEAL, fontWeight: "700", fontSize: 13 }}>Just report it</Text></TouchableOpacity>
+        </View>
+      ) : null}
+      {note && note.error ? (
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+          <Text style={{ color: "#B42318", fontSize: 12, flex: 1 }}>{note.text}</Text>
+          {last ? <TouchableOpacity onPress={() => send(last.rating, last.correctionIntent)}><Text style={{ color: TEAL, fontWeight: "700", fontSize: 12 }}>Try again</Text></TouchableOpacity> : null}
+        </View>
+      ) : null}
+    </View>
+  )
+}
+
+const AssistantBubble = ({ m, onFollowUp, onOpenCard, busy, onFeedback }) => (
   <View style={{ marginBottom: 14, alignItems: "flex-start" }}>
     <View style={{ maxWidth: "94%", width: "100%" }}>
       {m.languageNotice ? <Text style={{ color: "#9A6200", fontSize: 12, marginBottom: 6 }}>{m.languageNotice}</Text> : null}
@@ -122,6 +161,7 @@ const AssistantBubble = ({ m, onFollowUp, onOpenCard, busy }) => (
           {m.followUps.map((f) => <Chip key={f} text={f} disabled={busy} onPress={() => onFollowUp(f)} />)}
         </View>
       ) : null}
+      {onFeedback && m.id ? <FeedbackRow messageId={m.id} onSubmit={onFeedback} /> : null}
     </View>
   </View>
 )
@@ -156,6 +196,9 @@ export default function SowetoAI() {
   const [locOptOut, setLocOptOut] = useState(false)
   const [luna, setLuna] = useState(null)         // the `luna` block of aiGetUsage: whether the optional AI wording is offered and whether the user accepted the notice
   const [noticeHidden, setNoticeHidden] = useState(false)
+  const [learning, setLearning] = useState(null)   // the `learning` block of aiGetUsage: what the server says is on, and the person's own opt-out
+  const [learningBusy, setLearningBusy] = useState(false)
+  const [learningNotice, setLearningNotice] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState({ loading: false, error: null, rows: [] })
 
@@ -163,7 +206,7 @@ export default function SowetoAI() {
   useEffect(() => { setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60) }, [items, busy, error, locAsk])
 
   const loadUsage = useCallback(async () => {
-    try { const u = await api.usage(); setUsage({ dailyLimit: u.dailyLimit, remainingToday: u.remainingToday }); setRetentionDays(u.retentionDays ?? null); setLuna(u.luna || null) } catch { /* usage is optional */ }
+    try { const u = await api.usage(); setUsage({ dailyLimit: u.dailyLimit, remainingToday: u.remainingToday }); setRetentionDays(u.retentionDays ?? null); setLuna(u.luna || null); setLearning(u.learning || null) } catch { /* usage is optional */ }
   }, [])
   useEffect(() => { if (verified.allowed) loadUsage() }, [verified.allowed, loadUsage])
 
@@ -236,7 +279,22 @@ export default function SowetoAI() {
       send.reset(); setItems(itemsFromConversation(r)); setConversationId(id); setError(null); setHistoryOpen(false)
     } catch (e) { setHistory((h) => ({ ...h, loading: false, error: describeAiError(e).text })) }
   }
-  const deleteConversation = (id) => Alert.alert("Delete conversation", "This permanently deletes this conversation from our servers.", [
+  const lp = learningPanel(learning)
+  const sendFeedback = (a) => api.feedback({ conversationId, ...a })
+  const chooseLearning = async (participate) => { // the server's answer decides what is shown: the switch never moves ahead of it
+    setLearningBusy(true)
+    try { const r = await api.setLearningOptOut(!participate); setLearning((l) => ({ ...l, optedOut: r.optOut === true })) }
+    catch (e) { Alert.alert("Couldn't save your choice", describeAiError(e).text) }
+    finally { setLearningBusy(false) }
+  }
+  const eraseData = () => Alert.alert(ERASE_LABEL, ERASE_NOTE, [
+    { text: "Cancel", style: "cancel" },
+    { text: "Erase", style: "destructive", onPress: async () => {
+      try { const r = await api.erase(); newChat(); setHistory({ loading: false, error: null, rows: [] }); setLuna((l) => (l ? { ...l, consent: { active: false } } : l)); Alert.alert("Erased", `${r.conversations ?? 0} conversation(s) and your Malloya records were erased. Your "help Malloya learn" choice was kept.`) }
+      catch (e) { Alert.alert("Couldn't erase", describeAiError(e).text) }
+    } },
+  ])
+  const deleteConversation = (id) => Alert.alert("Delete conversation", deleteConversationNote(lp.available), [
     { text: "Cancel", style: "cancel" },
     { text: "Delete", style: "destructive", onPress: async () => {
       try { await api.remove(id); setHistory((h) => ({ ...h, rows: h.rows.filter((r) => r.conversationId !== id) })); if (id === conversationId) newChat() }
@@ -249,7 +307,7 @@ export default function SowetoAI() {
     catch (e) { Alert.alert("Couldn't save your choice", describeAiError(e).text) }
   }
   const deleteAll = () => Alert.alert(LUNA_DELETE_ALL_LABEL,
-    LUNA_DELETE_ALL_NOTE, [
+    deleteAllNote(), [
     { text: "Cancel", style: "cancel" },
     { text: "Delete everything", style: "destructive", onPress: async () => {
       try { const r = await api.removeAll(); newChat(); setHistory({ loading: false, error: null, rows: [] }); Alert.alert("Deleted", `${r.conversations ?? 0} conversation(s) deleted.`) }
@@ -327,7 +385,7 @@ export default function SowetoAI() {
 
           {items.map((m) => m.role === "user"
             ? <UserBubble key={m.id} text={m.text} />
-            : <AssistantBubble key={m.id} m={m} busy={busy || !verified.allowed} onFollowUp={(f) => onSend(f)} onOpenCard={openCard} />)}
+            : <AssistantBubble key={m.id} m={m} busy={busy || !verified.allowed} onFollowUp={(f) => onSend(f)} onOpenCard={openCard} onFeedback={lp.canGiveFeedback && conversationId ? sendFeedback : null} />)}
 
           {busy ? (
             <View style={{ alignSelf: "flex-start", backgroundColor: "#fff", borderRadius: 18, borderTopLeftRadius: 6, paddingHorizontal: 14, paddingVertical: 12, flexDirection: "row", alignItems: "center", ...shadow }}>
@@ -421,9 +479,24 @@ export default function SowetoAI() {
                 <Text style={{ color: MUTED, fontSize: 12, lineHeight: 17, marginTop: 6 }}>{LUNA_NOTICE_TEXT} Turning this off keeps your saved conversations.</Text>
               </View>
             ) : null}
+            {lp.showSettings ? (
+              <View style={{ backgroundColor: "#fff", borderRadius: 14, padding: 12, marginTop: 12, ...shadow }}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Text style={{ flex: 1, color: INK, fontWeight: "700", fontSize: 14 }}>{LEARNING_NOTICE_TITLE}</Text>
+                  {learningBusy ? <ActivityIndicator size="small" color={TEAL} style={{ marginRight: 8 }} /> : null}
+                  <Switch value={!lp.optedOut} disabled={learningBusy} onValueChange={chooseLearning} accessibilityLabel={OPT_OUT_LABEL} />
+                </View>
+                <Text style={{ color: lp.participating ? "#1F7A4D" : MUTED, fontSize: 12, marginTop: 4 }}>{lp.status}</Text>
+                <TouchableOpacity onPress={() => setLearningNotice((v) => !v)} style={{ paddingVertical: 4 }}><Text style={{ color: TEAL, fontWeight: "700", fontSize: 12.5 }}>{learningNotice ? "Hide privacy notice" : "Read the privacy notice"}</Text></TouchableOpacity>
+                {learningNotice ? <Text style={{ color: MUTED, fontSize: 12, lineHeight: 17 }}>{LEARNING_NOTICE_TEXT}</Text> : null}
+              </View>
+            ) : null}
             <Text style={{ color: MUTED, fontSize: 12, lineHeight: 17, marginTop: 12 }}>{retention} Your exact location is never saved with a chat.</Text>
             <TouchableOpacity onPress={deleteAll} style={{ marginTop: 14, borderWidth: 1, borderColor: "#B42318", borderRadius: 12, paddingVertical: 11, alignItems: "center" }}>
               <Text style={{ color: "#B42318", fontWeight: "800" }}>{LUNA_DELETE_ALL_LABEL}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={eraseData} style={{ marginTop: 10, borderWidth: 1, borderColor: "#B42318", borderRadius: 12, paddingVertical: 11, alignItems: "center" }}>
+              <Text style={{ color: "#B42318", fontWeight: "800" }}>{ERASE_LABEL}</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
