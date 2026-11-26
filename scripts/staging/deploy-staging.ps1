@@ -7,7 +7,7 @@
     `firebase use`, or any project left in your shell: every firebase command carries --project explicitly.
   * Refuses unless you are on a staging/* branch with a clean working tree (scripts/staging/guard.js).
   * Clears ambient project variables, then pins GCLOUD_PROJECT to the staging project for THIS process only.
-  * For functions it first generates the manifest OFFLINE and checks: 30 functions, no secret bound, max 3 instances.
+  * For functions it first generates the manifest OFFLINE and checks: 41 functions, no secret bound, max 3 instances.
   * Asks you to type the project id before deploying. Never uses --force. No secret is read or set.
 .EXAMPLE
   .\scripts\staging\deploy-staging.ps1 -What rules -DryRun

@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
   READ-ONLY checks of the deployed staging project.
-  Verifies 30 active functions in africa-south1,
+  Verifies 41 active functions in africa-south1,
   each limited to 3 instances, with no secret bindings
   and no secrets stored in Secret Manager.
 #>
@@ -30,8 +30,8 @@ if ($LASTEXITCODE -ne 0) {
 
 $fns = @((($raw -join "`n") | ConvertFrom-Json) | ForEach-Object { $_ })
 
-if ($fns.Count -ne 30) {
-    $bad += "Expected 30 functions, found $($fns.Count)"
+if ($fns.Count -ne 41) {
+    $bad += "Expected 41 functions, found $($fns.Count)"
 }
 
 foreach ($f in $fns) {
@@ -83,7 +83,7 @@ if ($bad.Count -gt 0) {
 }
 
 Write-Host "Verified: $Project" -ForegroundColor Green
-Write-Host '30 active Cloud Functions'
+Write-Host '41 active Cloud Functions'
 Write-Host 'Maximum 3 instances per function'
 Write-Host 'No secret bindings'
 Write-Host 'No secrets stored'
