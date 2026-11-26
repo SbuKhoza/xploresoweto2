@@ -1,25 +1,91 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  READ-ONLY checks of the deployed staging project (needs the gcloud CLI signed in). Changes nothing.
-  Verifies: 30 functions in africa-south1, none with a secret, each limited to 3 instances; Secret Manager holds no secrets.
+  READ-ONLY checks of the deployed staging project.
+  Verifies 30 active functions in africa-south1,
+  each limited to 3 instances, with no secret bindings
+  and no secrets stored in Secret Manager.
 #>
 [CmdletBinding()] param()
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
 $Project = 'xploresoweto-staging'
+$Region = 'africa-south1'
 $bad = @()
-if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) { Write-Host 'gcloud is not installed.' -ForegroundColor Red; exit 1 }
 
-$fns = gcloud functions list --gen2 --regions africa-south1 --project $Project --format=json | ConvertFrom-Json
-if ($fns.Count -ne 30) { $bad += "expected 30 functions, found $($fns.Count)" }
-foreach ($f in $fns) {
-  $cfg = $f.serviceConfig
-  if ($cfg.maxInstanceCount -ne 3) { $bad += "$($f.name): maxInstanceCount=$($cfg.maxInstanceCount) (want 3)" }
-  if ($cfg.PSObject.Properties.Name -contains 'secretEnvironmentVariables' -and $cfg.secretEnvironmentVariables) { $bad += "$($f.name): has a secret binding" }
+if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+    throw 'gcloud is not installed.'
 }
-$secrets = gcloud secrets list --project $Project --format=json | ConvertFrom-Json
-if ($secrets -and @($secrets).Count -gt 0) { $bad += "Secret Manager in $Project is not empty ($(@($secrets).Count) secret(s)); it must be empty while Luna is disabled" }
 
-if ($bad.Count -gt 0) { Write-Host 'VERIFY FAILED:' -ForegroundColor Red; $bad | ForEach-Object { Write-Host "  - $_" }; exit 1 }
-Write-Host "Verified: $Project has 30 functions, none with a secret, all limited to 3 instances, and no secrets stored." -ForegroundColor Green
+$raw = gcloud functions list --v2 `
+    --regions=$Region `
+    --project=$Project `
+    --format=json
+
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to list staging Cloud Functions.'
+}
+
+$fns = @((($raw -join "`n") | ConvertFrom-Json) | ForEach-Object { $_ })
+
+if ($fns.Count -ne 30) {
+    $bad += "Expected 30 functions, found $($fns.Count)"
+}
+
+foreach ($f in $fns) {
+    if ($f.state -ne 'ACTIVE') {
+        $bad += "$($f.name): function is not ACTIVE"
+    }
+
+    $cfg = $f.serviceConfig
+
+    if ($cfg.maxInstanceCount -ne 3) {
+        $bad += "$($f.name): maxInstanceCount is not 3"
+    }
+
+    foreach ($property in @(
+        'secretEnvironmentVariables',
+        'secretVolumes'
+    )) {
+        if (
+            ($cfg.PSObject.Properties.Name -contains $property) `
+            -and $cfg.$property
+        ) {
+            $bad += "$($f.name): has $property"
+        }
+    }
+}
+
+$rawSecrets = gcloud secrets list `
+    --project=$Project `
+    --format=json
+
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to list staging secrets.'
+}
+
+$secrets = @((($rawSecrets -join "`n") | ConvertFrom-Json) | ForEach-Object { $_ })
+
+if ($secrets.Count -gt 0) {
+    $bad += "Secret Manager contains $($secrets.Count) secret(s)"
+}
+
+if ($bad.Count -gt 0) {
+    Write-Host 'VERIFY FAILED:' -ForegroundColor Red
+
+    $bad | ForEach-Object {
+        Write-Host "  - $_"
+    }
+
+    exit 1
+}
+
+Write-Host "Verified: $Project" -ForegroundColor Green
+Write-Host '30 active Cloud Functions'
+Write-Host 'Maximum 3 instances per function'
+Write-Host 'No secret bindings'
+Write-Host 'No secrets stored'
+Write-Host "Region: $Region"
+
