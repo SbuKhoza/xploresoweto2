@@ -63,13 +63,13 @@ service firebase.storage {
     //      Immutable once uploaded (no update/delete from clients).
     match /listing-submissions/{orgId}/{submissionId}/{file} {
       allow read: if orgContentManager(orgId) || isStaff();
-      allow create: if orgContentManager(orgId) && submissionId.matches(orgId + '_.*') && isImage() && underMB(5);
+      allow create: if resource == null && orgContentManager(orgId) && submissionId.matches(orgId + '_.*') && isImage() && underMB(5);
     }
 
     // ---- provider application documents: private to the applicant and super admins; immutable
     match /provider-applications/{uid}/{applicationId}/{file} {
       allow read: if signedIn() && (request.auth.uid == uid || isActiveSuperAdmin());
-      allow create: if verified() && request.auth.uid == uid && applicationId.matches(uid + '_.*') && isDocument() && underMB(10);
+      allow create: if resource == null && verified() && request.auth.uid == uid && applicationId.matches(uid + '_.*') && isDocument() && underMB(10);
     }
 
     // everything else (including person-of-interest/*) is denied
