@@ -20,13 +20,13 @@ const BUILTIN = [
   { id: "recommend", priority: 60, patterns: [[/\brecommend(ation|ations)?\b/, 5], [/\bsuggest(ion|ions)?\b/, 4], [/\bbest\b/, 3], [/\btop\b/, 2], [/\bpopular\b/, 3], [/\bmust[- ](see|visit|try|do)\b/, 5], [/\bwhat'?s good\b/, 3], [/\bgood (place|spot)s?\b/, 2]] },
   { id: "discover_things", priority: 55, patterns: [[/\bthings to (do|see)\b/, 6], [/\bwhat to (do|see)\b/, 5], [/\bexplore\b/, 3], [/\bsomething (fun|interesting|different)\b/, 4], [/\bactivities\b/, 3], [/\bto do in soweto\b/, 4]] },
   // ---- finding things (category intents)
-  { id: "find_restaurants", priority: 40, category: "restaurants", patterns: [[/\b(restaurants?|eateries|eatery|cafes?|takeaways?)\b/, 5], [/\bwhere (can|do|should) (i|we) eat\b/, 6], [/\b(food|lunch|dinner|breakfast|braai|shisa ?nyama|kota|coffee|hungry)\b/, 3]] },
-  { id: "find_accommodation", priority: 40, category: "accommodations", patterns: [[/\baccommodation\b/, 6], [/\b(hotels?|lodges?|guest ?houses?|hostels?|b&b|bnb|homestay)\b/, 5], [/\b(where|place) to stay\b/, 6], [/\b(sleep|overnight)\b/, 3]] },
-  { id: "find_attractions", priority: 40, category: "attractions", patterns: [[/\battractions?\b/, 6], [/\b(museums?|memorials?|monuments?|landmarks?|sights?|sightseeing)\b/, 4], [/\b(historic|historical|heritage) (sites?|places?)\b/, 5]] },
+  { id: "find_restaurants", priority: 40, category: "restaurants", patterns: [[/\b(restaurants?|resto|eateries|eatery|cafes?|takeaways?|diner)\b/, 5], [/\bwhere (can|could|do|should|would|to) (i|we)? ?(eat|dine|grab|get (some )?(food|lunch|dinner|breakfast|a bite))\b/, 6], [/\bplaces? to (eat|dine|grab|have (lunch|dinner|breakfast|a (meal|bite)))\b/, 6], [/\b(somewhere|something|anywhere|a place) to (eat|dine|grab)\b/, 6], [/\b(eat|eating|dine|dining|grab a bite|bite to eat)\b/, 4], [/\b(food|lunch|dinner|breakfast|brunch|meals?|braai|shisa ?nyama|kota|coffee|hungry|starving|snacks?|tavern|shebeen)\b/, 3]] },
+  { id: "find_accommodation", priority: 40, category: "accommodations", patterns: [[/\baccommodations?\b/, 6], [/\b(hotels?|lodges?|guest ?houses?|hostels?|b&b|bnb|b and b|bed and breakfast|homestay|airbnb|backpackers?|lodging)\b/, 5], [/\b(where|place|places|somewhere|anywhere) to (stay|sleep)\b/, 6], [/\bwhere (can|could|should|do|would|will) (i|we) (stay|sleep|spend the night|check in)\b/, 6], [/\b(somewhere|a place|places|anywhere) (for (me|us) )?to (stay|sleep)\b/, 6], [/\b(need|want|looking for|find|get) (me |us )?(a |an )?(room|rooms|bed|beds)\b/, 5], [/\b(stay|staying) (the night|overnight|for the night|in soweto|near)\b/, 5], [/\b(sleep|overnight|a room for)\b/, 3]] },
+  { id: "find_attractions", priority: 40, category: "attractions", patterns: [[/\battractions?\b/, 6], [/\b(museums?|memorials?|monuments?|landmarks?|sights?|sightseeing)\b/, 4], [/\b(historic|historical|heritage) (sites?|places?)\b/, 5], [/\bplaces? to (visit|see|go)\b/, 6], [/\b(somewhere|something|anywhere|things?|sights?) to (visit|see|explore)\b/, 5], [/\bwhere (can|should|could) (i|we) (go|visit|see)\b/, 5]] },
   { id: "find_tour_guides", priority: 45, patterns: [[/\btour ?guides?\b/, 8], [/\bguides?\b/, 3], [/\bguided\b/, 2]] },
   { id: "find_tours", priority: 44, patterns: [[/\btours?\b/, 6], [/\bguided (tour|walk|experience)\b/, 6], [/\bexperiences?\b/, 2]] },
   { id: "find_businesses", priority: 38, category: "business", patterns: [[/\b(local )?(business|businesses)\b/, 5], [/\b(shops?|stores?|markets?|salons?|crafts?|souvenirs?|vendors?)\b/, 3]] },
-  { id: "find_events", priority: 42, patterns: [[/\bevents?\b/, 5], [/\bwhat'?s on\b/, 5], [/\b(festival|concert|gig|show)s?\b/, 3]] },
+  { id: "find_events", priority: 42, patterns: [[/\bevents?\b/, 5], [/\bwhat'?s on\b/, 5], [/\b(festivals?|concerts?|gigs?)\b/, 4], [/\b(live|comedy|music|theatre|stage|dance) shows?\b/, 5], [/\bshows? (on|tonight|this|happening)\b/, 4], [/\bwhat'?s (happening|going on)\b/, 5], [/\b(upcoming|happening) (events?|shows?)\b/, 5]] },
   // ---- other public content (each has its own stored collection)
   { id: "find_healthcare", priority: 40, category: "healthcare", patterns: [[/\b(clinics?|hospitals?|pharmac(y|ies)|doctors?|dentists?|medical|healthcare)\b/, 5]] },
   { id: "find_publicservice", priority: 40, category: "publicservice", patterns: [[/\b(home affairs|post office|librar(y|ies)|municipal(ity)?|government offices?|public services?)\b/, 5]] },
@@ -35,6 +35,9 @@ const BUILTIN = [
   { id: "find_announcements", priority: 41, patterns: [[/\b(announcements?|notices?|alerts?|advisor(y|ies)|road closures?|water (outage|shutdown)s?)\b/, 6]] },
   { id: "loadshedding", priority: 43, patterns: [[/\b(load ?shedding|power cuts?|blackouts?|eskom)\b/, 7]] },
   { id: "find_townships", priority: 39, patterns: [[/\b(list|which|what|show|name)\b.*\b(townships?|suburbs?|areas|neighbou?rhoods?)\b/, 6], [/\b(townships?|suburbs?) (of|in) soweto\b/, 6]] },
+  { id: "find_activities", priority: 41, category: "recreation", patterns: [[/\b(adventure|bungee|hik(e|ing)|cycling|zip ?line|quad ?bik(e|ing)|outdoor activit(y|ies)|recreation)\b/, 6]] },
+  // someone mentioning a destination they have heard of or want to see (the engine needs a recognised street/landmark/township to answer)
+  { id: "explore_place", priority: 35, patterns: [[/\b(heard|read|hear|told|seen|saw|been told)( a lot)? (about|of)\b/, 5], [/\b(want|would like|hope|hoping|keen|planning|plan|going|wish) to (see|visit|go to|check out|explore|walk)\b/, 4], [/\b(sounds?|looks?) (amazing|great|interesting|cool|nice|lovely|beautiful)\b/, 3], [/\b(famous|iconic|well known)\b/, 2]] },
   // ---- questions about a particular place
   { id: "ask_place", priority: 30, patterns: [[/\btell me (more )?about\b/, 6], [/\bwhat is\b/, 2], [/\bwhat'?s\b.*\blike\b/, 3], [/\binfo(rmation)? (on|about)\b/, 5], [/\bhistory of\b/, 5], [/\bwho (is|was)\b/, 4], [/\bmore (info|details)\b/, 4], [/\bdetails\b/, 2]] },
   { id: "ask_price", priority: 32, attribute: "price", patterns: [[/\bhow much\b/, 6], [/\bprices?\b/, 5], [/\bcosts?\b/, 4], [/\b(entry|entrance|admission) fees?\b/, 6], [/\bfees?\b/, 3], [/\bcharge[sd]?\b/, 3], [/\bafford(able)?\b/, 3], [/\b(cheap|cheaper|cheapest)\b/, 2]] },
@@ -64,4 +67,5 @@ function detectIntents(text) {
   return scored
 }
 const knownIntents = () => [...REGISTRY.keys()]
-module.exports = { registerIntent, detectIntents, knownIntents }
+const intentDef = (id) => REGISTRY.get(id) || null
+module.exports = { registerIntent, detectIntents, knownIntents, intentDef }

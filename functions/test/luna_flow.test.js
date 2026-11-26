@@ -35,7 +35,7 @@ afterEach(() => luna.setDepsForTests({}))
 test("consented user, calibrated payload: a thanks is reworded; facts, pinned text and the response shape are untouched; usage commits with the turn", async () => {
   await accept(); const r = await chat("u1", "thanks!")
   assert.equal(textOf(r), REWRITE); assert.equal(calls.length, 1)
-  assert.deepEqual(r.blocks.map((b) => b.type), ["verified"]); assert.equal(r.engine, "database-v1")
+  assert.deepEqual(r.blocks.map((b) => b.type), ["general"]); assert.equal(r.engine, "database-v1")
   assert.doesNotMatch(JSON.stringify(r), /luna|openai|token|rewrit|gpt/i) // no label, no provider or token field in anything the app receives
   const u = lunaUser(); assert.deepEqual([u.attempts, u.successes, u.inputTokens, u.outputTokens], [1, 1, 400, 30]); assert.equal(shardTotal(), 430) // reservation trued-up to actual
   assert.equal(env.list("ai-usage").find((d) => d.id.startsWith("luna_r_")).state, "settled")

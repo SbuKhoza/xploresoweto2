@@ -9,7 +9,9 @@ const { sanitizeText } = require("../sanitize")
 const { runQuery } = require("../retrieval/queries")
 const { loadCategory, loadPlaces, mentionedItems, getItemByRef, nm } = require("../retrieval/listings")
 const { extract } = require("./entities")
-const { detectIntents } = require("./intents")
+const { detectIntents, intentDef } = require("./intents")
+const nlp = require("./nlp")
+const { termsFor } = require("./landmarks")
 const L = require("./lexicon")
 const { rank, tokens } = require("./ranking")
 const { buildItinerary } = require("./itinerary")
@@ -20,7 +22,7 @@ const locales = { en: require("./locales/en") }
 const VISITOR = ["attractions", "restaurants", "recreation", "accommodations", "business"]
 const SERVICES = ["healthcare", "publicservice"] // clinics and public offices: searchable like any listing, but not part of trip plans
 const FINDABLE = [...VISITOR, ...SERVICES]
-const GENERIC = new Set(["want", "need", "looking", "look", "please", "give", "tell", "get", "place", "places", "spot", "spots", "thing", "things", "nice", "great", "cheap", "cheaper", "cheapest", "like", "love", "would", "could", "should", "let", "know", "about", "have", "has", "there", "here", "around", "visit", "visiting", "trip", "plan", "day", "days", "half", "full", "tomorrow", "today", "tonight", "weekend", "budget", "enjoy", "recommend", "suggest", "list", "which", "how", "much", "many", "open", "near", "nearby", "yes", "ok", "okay", "just", "also", "more", "other", "another", "else", "free", "enjoy", "options", "option", "serving", "serve", "serves", "selling", "sells", "offering", "with", "that", "for", "any", "some", "need", "show", "on", "this", "whats", "happening", "upcoming", "coming", "events", "event", "next", "week", "month"])
+const GENERIC = new Set(["want", "need", "looking", "look", "please", "give", "tell", "get", "place", "places", "spot", "spots", "thing", "things", "nice", "great", "cheap", "cheaper", "cheapest", "like", "love", "would", "could", "should", "let", "know", "about", "have", "has", "there", "here", "around", "visit", "visiting", "trip", "plan", "day", "days", "half", "full", "tomorrow", "today", "tonight", "weekend", "budget", "enjoy", "recommend", "suggest", "list", "which", "how", "much", "many", "open", "near", "nearby", "yes", "ok", "okay", "just", "also", "more", "other", "another", "else", "free", "enjoy", "options", "option", "serving", "serve", "serves", "selling", "sells", "offering", "with", "that", "for", "any", "some", "need", "show", "on", "this", "whats", "happening", "upcoming", "coming", "events", "event", "next", "week", "month", "heard", "traveling", "travelling", "wife", "husband", "partner", "couple", "going", "told", "hear", "street", "road", "avenue", "sounds", "amazing", "interesting", "know", "want", "wanna"])
 const ORDINAL = [[/\b(first|1st|top)\b/, 0], [/\b(second|2nd)\b/, 1], [/\b(third|3rd)\b/, 2], [/\b(fourth|4th)\b/, 3]]
 const MEAL_AND_ACTIVITY = { activity: ["attractions", "recreation"], meal: ["restaurants"], stay: ["accommodations"] }
 
@@ -41,6 +43,18 @@ function guessPlace(message, items) {
   const words = m[1].trim().split(" ").slice(0, 3)
   for (let n = words.length; n >= 1; n--) { const cand = words.slice(0, n).join(" "); if (cand.length >= 4 && !GENERIC.has(cand) && !["soweto", "gauteng", "south africa", "johannesburg"].includes(cand) && items.some((it) => it.h.addr.includes(cand))) return cand }
   return null
+}
+// A place the user asked for that we know nothing about ("in Kliptown"): kept so the answer can say it matched nothing there,
+// instead of silently answering for all of Soweto. Words that are not places (the, tonight, me, ...) never count.
+const NOT_PLACE = new Set(["the", "a", "an", "my", "our", "this", "that", "me", "us", "you", "here", "there", "town", "area", "city", "soweto", "gauteng", "johannesburg", "south africa", "the evening", "the morning", "the afternoon", "tonight", "tomorrow", "today", "general", "total", "advance", "person", "people", "order"])
+function askedPlace(message) {
+  const m = / (?:in|near|at|around) ([a-z][a-z ]{3,30})/i.exec(` ${nm(message)}`)
+  if (!m) return null
+  const words = []
+  for (const w of m[1].trim().split(" ")) { if (["for", "with", "under", "on", "and", "that", "which", "please", "by", "from", "to", "tomorrow", "today", "tonight", "this", "next"].includes(w)) break; words.push(w); if (words.length === 3) break }
+  const cand = words.join(" ")
+  if (cand.length < 4 || NOT_PLACE.has(cand) || NOT_PLACE.has(words[0]) || GENERIC.has(words[0])) return null
+  return cand
 }
 const toBlockless = (r) => r
 
@@ -64,16 +78,19 @@ function rankWithFallback(items, crit) {
 const entriesOf = (ranked, n) => ranked.slice(0, n).map((e) => ({ item: e.item, reasons: e.reasons, flags: e.flags, score: e.score }))
 
 // ---- the pipeline -----------------------------------------------------------------------------------------------------------
-async function respond({ message, context, location, cfg, now }) {
-  const language = detectLanguage(message)
+async function respond({ message: rawMessage, context, location, cfg, now }) {
+  const language = detectLanguage(rawMessage)
+  const message = nlp.clean(rawMessage) // abbreviations ("Vilakazi St"), typing shortcuts and misspellings are repaired before anything is matched
   const Lc = locales.en // English only: isiZulu is detected, answered in English, and never claimed (see docs)
   const ctx = { cfg, now, location: location || null }
   const intents = detectIntents(message)
-  const primary = intents[0] || null
+  let primary = intents[0] || null
   const prev = ctxMod.sanitize(context)
   const result = (o, extra = {}) => ({ language, languageFallback: language !== "en", intent: extra.intent || (primary ? primary.id : "unknown"), ...o })
   const zuBlock = language === "zu" ? [C.block("unverified", Lc.notSupportedLanguage)] : []
-  const done = (composed, { slots = {}, refs = [], pending = null, intent } = {}) => result({ ...composed, blocks: intent === "emergency" ? composed.blocks : [...zuBlock, ...composed.blocks], context: ctxMod.next(prev, { slots, refs, pending }) }, { intent })
+  const KEEP_INTENT = new Set(["greeting", "thanks", "help", "emergency", "provide_details"])
+  const done = (composed, { slots = {}, refs = [], pending = null, intent } = {}) => result({ ...composed, blocks: intent === "emergency" ? composed.blocks : [...zuBlock, ...composed.blocks],
+    context: ctxMod.next(prev, { slots, refs, pending, lastIntent: composed.fallback || KEEP_INTENT.has(intent) ? prev.lastIntent : intent, misses: composed.fallback ? prev.misses + 1 : KEEP_INTENT.has(intent) ? prev.misses : 0 }) }, { intent })
 
   // ---- no-data intents first (no reads at all)
   if (primary && ["greeting", "thanks"].includes(primary.id) && intents.length === 1) return done(C.composeStatic({ L: Lc, key: primary.id }), { intent: primary.id })
@@ -88,11 +105,18 @@ async function respond({ message, context, location, cfg, now }) {
   const places = await safe(() => loadPlaces(ctx), [])
   const ents = extract(message, { now, places })
   const pendingPlan = prev.pending === "plan" && (!primary || ["recommend", "discover_things"].includes(primary.id) || primary.score < 4) && (ents.interests.length || ents.budget || ents.duration || ents.party || ents.categories.length)
-  const id = pendingPlan ? "plan_trip" : primary ? primary.id : "unknown"
+  // The CURRENT message decides what is wanted; earlier context only fills in details (place, party, budget...) it does not state.
+  const named = ents.landmarks[0] || (ents.places[0] || null)
+  const hasDetails = !!(ents.party || ents.budget || ents.duration || (ents.date && !ents.date.past) || ents.interests.length)
+  const strong = primary && primary.id !== "explore_place" && primary.score >= 3
+  let id = pendingPlan ? "plan_trip" : primary ? primary.id : "unknown"
+  if (!pendingPlan && named && (!strong || id === "explore_place" || (id === "plan_trip" && primary.score < 7 && !hasDetails && !ents.categories.length))) id = "explore_place"
+  else if (!pendingPlan && !strong && !named && hasDetails && !ents.categories.length) id = prev.lastIntent && /^find_/.test(prev.lastIntent) ? prev.lastIntent : "provide_details"
+  if ((!primary || primary.id !== id) && intentDef(id)) primary = { id, score: 0, hits: [], category: intentDef(id).category || null, attribute: intentDef(id).attribute || null } // an intent taken from the previous turn
   const planning = ["plan_trip", "build_itinerary"].includes(id)
   const asking = ["ask_place", "ask_price", "ask_hours", "ask_services", "ask_directions", "booking_request"].includes(id)
-  const isFind = /^find_(restaurants|accommodation|attractions|businesses|healthcare|publicservice)$/.test(id) || ["recommend", "discover_things"].includes(id)
-  const carry = planning || pendingPlan ? ["budget", "party", "date", "duration", "interests", "place"] : isFind && ents.refersToPrevious ? ["budget", "place"] : []
+  const isFind = /^find_(restaurants|accommodation|attractions|businesses|healthcare|publicservice|activities)$/.test(id) || ["recommend", "discover_things"].includes(id)
+  const carry = planning || pendingPlan ? ["budget", "party", "date", "duration", "interests", "place"] : isFind ? ["place", "party", ...(ents.refersToPrevious || id === prev.lastIntent ? ["budget"] : [])] : id === "explore_place" || id === "provide_details" ? ["party"] : []
   const slots = ctxMod.merge(ents, prev, { carry })
 
   const notes = []
@@ -106,6 +130,13 @@ async function respond({ message, context, location, cfg, now }) {
   const remembered = { budget: ents.budget, party: ents.party, date: ents.date && !ents.date.past ? ents.date : null, duration: ents.duration, interests: ents.interests, categories: ents.categories, place: ents.places[0] || null }
   const refsOf = (composed) => [...new Set(composed.evidence.filter((e) => e && e.ref && String(e.ref).startsWith("listing:")).map((e) => e.ref))].slice(0, ctxMod.MAX_REFS)
   const finish = (composed, o = {}) => { const c = withNotes(composed, o.carried); return done(c, { slots: remembered, refs: refsOf(c), pending: c.clarification && planning ? "plan" : null, intent: id }) }
+
+  // ---- a destination the person named or heard about (street, landmark, township), or details given without a request
+  if (id === "provide_details") return finish(C.composeAcknowledge({ L: Lc, partyTotal: ents.party && ents.party.total ? ents.party.total : slots.party ? slots.party.total : null }))
+  if (id === "explore_place") {
+    if (!named) return finish(C.composeClarify({ L: Lc, text: Lc.exploreWhich, followUps: [Lc.follow.cats, Lc.follow.stay, Lc.follow.see] }))
+    return finish(await explore({ Lc, ctx, place: named, party: slots.party || ents.party, message, cfg }))
+  }
 
   // ---- events
   if (id === "find_events") {
@@ -141,7 +172,7 @@ async function respond({ message, context, location, cfg, now }) {
   if (id === "find_townships") return finish(C.composeTownships({ L: Lc, names: places }))
 
   // ---- planning and itineraries
-  if (planning) return finish(await planTrip({ Lc, ctx, slots, ents, message }), { carried: slots.carried })
+  if (planning) return finish(await planTrip({ Lc, ctx, slots, ents, message, prev }), { carried: slots.carried })
 
   // ---- compare
   if (id === "compare") {
@@ -155,13 +186,20 @@ async function respond({ message, context, location, cfg, now }) {
     const attributes = new Set(intents.filter((i) => i.attribute).map((i) => i.attribute))
     if (id === "ask_place") attributes.add("about")
     const wantsBooking = intents.some((i) => i.id === "booking_request")
-    const item = await resolveOne({ message, prev, ents, ctx })
+    const pluralRef = /\b(these|those|them|which (one|of)|lowest|cheapest|cheaper|the cheaper)\b/i.test(message)
+    const item = await resolveOne({ message, prev, ents, ctx, preferNamed: pluralRef })
+    if (!item && pluralRef) { // "which of these is cheapest": compare what was just shown, or say that nothing was
+      const shown = await candidatesFromPrev(prev, ctx)
+      return finish(shown.length >= 2 ? C.composeCompare({ L: Lc, items: shown.slice(0, 3) }) : C.composeClarify({ L: Lc, text: Lc.compareNoneShown(shown.length), followUps: [Lc.follow.cats, Lc.follow.stay, Lc.follow.see] }))
+    }
     if (!item) {
+      if (ents.landmarks[0]) return finish(await explore({ Lc, ctx, place: ents.landmarks[0], party: slots.party || ents.party, message, cfg }))
       if (id === "ask_place" || id === "ask_directions") { // maybe a township / history question
         const q = await runQuery("searchKnowledge", { query: queryTerms(message, { intentHits: primary.hits }).join(" ") || message.slice(0, 100) }, ctx)
-        if (q.ok && q.data.results.length) return finish(C.composeKnowledge({ L: Lc, results: q.data.results }))
+        const rel = relevantKb(q.ok ? q.data.results : [], queryTerms(message, { intentHits: primary.hits }))
+        if (rel.length) return finish(C.composeKnowledge({ L: Lc, results: rel }))
       }
-      return finish(C.composeClarify({ L: Lc, text: wantsBooking ? Lc.bookingNoPlace : Lc.askWhich, followUps: [Lc.follow.cats, Lc.follow.stay] }))
+      return finish(C.composeClarify({ L: Lc, text: wantsBooking ? Lc.bookingNoPlace : Lc.askWhich, followUps: [Lc.follow.cats, Lc.follow.stay, Lc.follow.see] }))
     }
     if (wantsBooking) attributes.delete("about")
     return finish(C.composeAsk({ L: Lc, item, attributes, wantsBooking }))
@@ -183,22 +221,23 @@ async function respond({ message, context, location, cfg, now }) {
   let cols = hinted.length ? hinted : id === "discover_things" ? ["attractions", "recreation"] : interestCats.length ? interestCats : null
   if (id === "unknown" && !cols) {
     const q = await runQuery("searchKnowledge", { query: message.slice(0, 120).length >= 2 ? message.slice(0, 120) : "soweto" }, ctx)
-    if (q.ok && q.data.results.length && queryTerms(message, { intentHits: [] }).length) return finish(C.composeKnowledge({ L: Lc, results: q.data.results }))
-    return finish(C.composeStatic({ L: Lc, key: "unknown" }))
+    const rel = relevantKb(q.ok ? q.data.results : [], queryTerms(message, { intentHits: [] }))
+    if (rel.length) return finish(C.composeKnowledge({ L: Lc, results: rel }))
+    return finish(C.composeFallback({ L: Lc, misses: prev.misses }))
   }
-  if (!cols) return finish(C.composeClarify({ L: Lc, text: Lc.unknown, followUps: [Lc.follow.cats, Lc.follow.stay, Lc.follow.plan] }))
+  if (!cols) return finish(C.composeFallback({ L: Lc, misses: prev.misses }))
   cols = cols.slice(0, 3)
   const loaded = await loadMany(cols, ctx)
-  const place = slots.place || guessPlace(message, loaded.items)
+  const place = slots.place || guessPlace(message, loaded.items) || askedPlace(message)
   let pool = loaded.items, relaxedPlace = null
-  if (place) { const inPlace = loaded.items.filter((it) => it.h.addr.includes(nm(place)) || it.h.all.includes(nm(place))); if (inPlace.length) pool = inPlace; else relaxedPlace = place }
+  if (place) { const inPlace = loaded.items.filter((it) => matchesPlace(it, place)); if (inPlace.length) pool = inPlace; else relaxedPlace = place }
   const terms = queryTerms(message, { intentHits: primary ? primary.hits : [], placeWords: place ? [place] : [] })
   const crit = { queryTerms: terms, interestWords: interestWords(ents.interests), place, budgetMax: budgetMax(slots.budget, slots.party), minRating: null, accessibleOnly: ents.constraints.accessible, openNow: ents.constraints.openNow, useDistance: !!ctx.location }
   const { r, relaxed } = rankWithFallback(pool, crit)
   const label = cols.length === 1 ? Lc.categoryLabel[cols[0]] : "places"
   const entries = entriesOf(r.ranked, maxResults(cfg))
   const wantsBooking = intents.some((i) => i.id === "booking_request")
-  const composed = C.composeFind({ L: Lc, label, entries, where: place && !relaxedPlace ? place : null, relaxed: relaxed || (relaxedPlace ? { place: relaxedPlace } : null), truncated: loaded.truncated, scanned: loaded.scanned, excluded: r.excluded, noLocation: ents.constraints.nearMe && !ctx.location, distanceNote: r.distanceNote, wantsBooking })
+  const composed = C.composeFind({ L: Lc, lead: cols.length === 1 ? Lc.lead[cols[0]] : null, followUps: followsFor(cols, entries), label, entries, where: place && !relaxedPlace ? place : null, relaxed: relaxed || (relaxedPlace ? { place: relaxedPlace } : null), truncated: loaded.truncated, scanned: loaded.scanned, excluded: r.excluded, noLocation: ents.constraints.nearMe && !ctx.location, distanceNote: r.distanceNote, wantsBooking })
   return finish(composed)
 }
 
@@ -208,7 +247,7 @@ async function candidatesFromPrev(prev, ctx) {
   for (const ref of prev.lastRefs) { const it = await safe(() => getItemByRef(ref, ctx), null); if (it) items.push(it) }
   return items
 }
-async function resolveOne({ message, prev, ents, ctx }) {
+async function resolveOne({ message, prev, ents, ctx, preferNamed = false }) {
   const last = await candidatesFromPrev(prev, ctx)
   const t = message.toLowerCase()
   let found = mentionedItems(message, last)
@@ -216,6 +255,7 @@ async function resolveOne({ message, prev, ents, ctx }) {
   const cols = (ents.categories.filter((c) => FINDABLE.includes(c)).length ? ents.categories.filter((c) => FINDABLE.includes(c)) : FINDABLE).slice(0, 7)
   found = mentionedItems(message, (await loadMany(cols, ctx)).items)
   if (found.length) return found[0]
+  if (preferNamed) return null // a plural question ("which of these...") is about the whole last answer, not its first item
   if (last.length) { for (const [re, i] of ORDINAL) if (re.test(t) && last[i]) return last[i]; if (ents.refersToPrevious && last.length) return last[0] }
   return null
 }
@@ -236,8 +276,20 @@ async function resolveMany({ message, prev, ents, ctx }) {
 }
 
 // ---- trip planning -----------------------------------------------------------------------------------------------------------
-async function planTrip({ Lc, ctx, slots, ents, message }) {
+async function planTrip({ Lc, ctx, slots, ents, message, prev }) {
   const interests = slots.interests, hasBudget = !!slots.budget
+  // "Plan a day using these": build from the places that were just shown, not from a fresh search.
+  const shown = /\b(these|those|them)\b/i.test(message) && prev ? await candidatesFromPrev(prev, ctx) : []
+  if (shown.length) {
+    const by = (cols) => rank(shown.filter((i) => cols.includes(i.collection)), { queryTerms: [], interestWords: {}, budgetMax: budgetMax(slots.budget, slots.party), useDistance: !!ctx.location }).ranked
+    const total = budgetMax(slots.budget, slots.party)
+    const plan = buildItinerary({ duration: slots.duration, budget: slots.budget ? { ...slots.budget, max: total } : null, party: slots.party, interests,
+      pools: { activity: by(["attractions", "recreation", "business"]), meal: by(["restaurants"]), stay: by(["accommodations"]) } })
+    if (plan.days.some((d) => d.stops.length)) {
+      plan.assumptions.push("I used the places I just showed you.")
+      return C.composePlan({ L: Lc, plan, dateLabel: slots.date ? slots.date.label : null })
+    } // too little was shown to fill a day: plan from a fresh search instead
+  }
   if (!interests.length && !ents.categories.length) return C.composeClarify({ L: Lc, text: hasBudget ? Lc.clarifyPlanBudgetOnly : Lc.clarifyPlan, followUps: [Lc.follow.interests, Lc.follow.party] })
   const duration = slots.duration
   const wantStay = duration && duration.kind === "multi_day"
@@ -260,6 +312,35 @@ async function planTrip({ Lc, ctx, slots, ents, message }) {
   if (!interests.length) composed.blocks.unshift(C.block("unverified", Lc.clarifyPlanBudgetOnly))
   if (ents.constraints.nearMe && !ctx.location) composed.blocks.push(C.block("unverified", Lc.noLocation))
   return composed
+}
+
+// ---- helpers added for natural-language handling ----------------------------------------------------------------------------
+// A record is "in" a place when every distinctive word of the place (e.g. "vilakazi") appears in its own name, address, category or text.
+function matchesPlace(item, place) {
+  const terms = termsFor(place) || [nm(place)]
+  return terms.every((t) => item.h.all.includes(t))
+}
+// Township-guide passages are accepted only when they really mention what was asked about (whole word), never on a stray substring.
+function relevantKb(results, terms) {
+  const words = terms.filter((t) => t.length >= 4)
+  if (!words.length) return []
+  return results.filter((r) => { const h = ` ${nm(`${r.title} ${r.text}`)} `; return words.some((w) => h.includes(` ${w} `) || h.includes(` ${w}s `)) })
+}
+function followsFor(cols, entries) {
+  const F = locales.en.follow, c = cols.length === 1 ? cols[0] : null
+  const other = c === "restaurants" ? F.stay : c === "accommodations" ? F.cats : F.stay
+  if (!entries.length) return [c === "restaurants" ? F.stay : F.cats, c === "attractions" ? F.events : F.see, c === "restaurants" || c === "accommodations" ? F.attractions : F.stay].filter((x, i, a) => a.indexOf(x) === i)
+  if (entries.length === 1) return [F.details, F.directions, other]
+  return [F.details, F.cheaper, other]
+}
+async function explore({ Lc, ctx, place, party, message, cfg }) {
+  const loaded = await loadMany(VISITOR, ctx)
+  const here = loaded.items.filter((it) => matchesPlace(it, place))
+  const r = rank(here, { queryTerms: [], interestWords: {}, budgetMax: null, useDistance: !!ctx.location })
+  const entries = entriesOf(r.ranked, maxResults(cfg))
+  const q = await runQuery("searchKnowledge", { query: place.slice(0, 100) }, ctx)
+  const kb = relevantKb(q.ok ? q.data.results : [], (termsFor(place) || nm(place).split(" ")).filter((t) => t.length >= 4))
+  return C.composeExplore({ L: Lc, place, party: party && party.total ? party.total : null, entries, kb })
 }
 
 async function safe(fn, fallback) { try { return await fn() } catch (e) { return fallback } }

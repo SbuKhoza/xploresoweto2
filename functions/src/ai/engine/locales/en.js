@@ -8,10 +8,26 @@ module.exports = {
   code: "en",
   categoryLabel: { restaurants: "restaurants", accommodations: "places to stay", attractions: "attractions", recreation: "activities", business: "local businesses", healthcare: "healthcare services", publicservice: "public services" },
   rand, plural,
-  greeting: "Hi! I can help you find attractions, restaurants, places to stay and local businesses in Soweto, and suggest a plan for your visit using what is listed on XploreSoweto. What would you like to do?",
+  greeting: "Hi! I can help you find attractions, restaurants, places to stay and local businesses in Soweto, and suggest a plan for your visit using what is listed on XploreSoweto. What would you like to do?", // pinned byte-for-byte by the optional Luna template: do not reword here
   help: "I can: find restaurants, places to stay, attractions, activities, local businesses, clinics and public offices; share taxi, bus and train options, news, announcements, events and load shedding schedules; suggest a half-day, full-day or multi-day plan from your interests and budget; compare places; tell you the listed price, hours and services of a place; and share what the XploreSoweto township guide says. Everything I show comes from XploreSoweto records. Try: \"Plan a day in Soweto with R800, I like history and food\".",
   thanks: "You're welcome! Ask me anything else about Soweto.",
-  unknown: "I'm not sure what you'd like to do. I can find restaurants, places to stay, attractions, activities and local businesses, or plan a visit. Try asking, for example, \"Where can I eat kota in Orlando West?\" or \"Plan a day with R800, I like history and food\".",
+  // Not understood: the wording changes each time the same trouble repeats, and always asks a specific question instead of repeating itself.
+  fallback: [
+    "Eish, I didn't quite catch that one. I can help you find somewhere to eat or stay, things to see and do, or what's on. What would you like to start with?",
+    "Sorry, I still can't tell what you're after, and I'd rather ask than guess. Is it somewhere to eat, a place to stay, something to see or do, or an event? You can also name a place, like Vilakazi Street, and I'll see what XploreSoweto has on it.",
+    "Let's try it another way. Pick one of the options below, or tell me in a few words what you need, for example \"restaurants in Orlando West\" or \"plan a day with R800, I like history\".",
+  ],
+  unknown: "I didn't quite catch that. I can find restaurants, places to stay, attractions, activities and local businesses, or plan a visit. Try, for example, \"Where can I eat kota in Orlando West?\" or \"Plan a day with R800, I like history and food\".",
+  // ---- destination talk ("we heard about Vilakazi Street")
+  exploreLead: (place, party) => (party === 2 ? `${place}! Good one for the two of you. Let me see what XploreSoweto has on it.` : `${place}, good one to have on your list. Let me see what XploreSoweto has on it.`),
+  exploreFound: (place) => `Here is what XploreSoweto lists on or around ${place}:`,
+  exploreNone: (place) => `XploreSoweto doesn't have a listing or township-guide entry for ${place} yet, so I won't guess about it or make anything up.`,
+  exploreAsk: (place) => `What would you like to do around ${place}: see the sights, find somewhere to eat, or somewhere to stay?`,
+  exploreAskMore: (place) => `Would you like to find somewhere to eat or stay near ${place}, or plan a day around it?`,
+  exploreWhich: "That sounds exciting! Which place or street did you hear about? Tell me its name and I'll see what XploreSoweto has on it.",
+  detailsThanks: (n) => (n ? `Thanks, I'll keep in mind that there ${n === 1 ? "is one of you" : `are ${n} of you`} (just for this chat). What would you like to look for first: somewhere to eat, a place to stay, or things to see?` : "Thanks, noted for this chat. What would you like to look for first: somewhere to eat, a place to stay, or things to see?"),
+  compareNoneShown: (n) => `${n === 1 ? "I've only shown you one place so far" : "I haven't shown you any places yet"}, so there's nothing to compare. Shall I look for somewhere to eat or a place to stay first?`,
+  lead: { restaurants: "Let's get you fed! Here is what's listed.", accommodations: "Let's find you a good place to rest your head.", attractions: "Plenty to see. Here is what's listed.", recreation: "Looking for some fun? Here is what's listed.", business: "Supporting local is always a good idea. Here is what's listed." },
   notSupportedLanguage: "I can only answer in English for now, so I'll reply in English. isiZulu support is planned but not ready yet.",
   currencyNote: "I only work in South African rand (R), and I can't convert other currencies, so I haven't used that amount.",
   datePast: (label) => `${label} has already passed, so I haven't used it.`,
@@ -99,5 +115,5 @@ module.exports = {
   townshipsIntro: (n) => `The XploreSoweto township guide covers ${n} ${n === 1 ? "area" : "areas"}:`,
   townshipsNone: "The township guide has no areas listed right now.",
   // ---- follow-ups
-  follow: { details: "Tell me more about the first one", cheaper: "Which of these has the lowest listed price?", plan: "Plan a day using these", cats: "Show me places to eat", stay: "Where can I stay?", party: "I'm travelling with 2 people", interests: "I like history and food", directions: "How far is the first one?", events: "What events are on?" },
+  follow: { details: "Tell me more about the first one", cheaper: "Which of these has the lowest listed price?", plan: "Plan a day using these", cats: "Show me places to eat", stay: "Where can I stay?", party: "I'm travelling with 2 people", interests: "I like history and food", directions: "How far is the first one?", events: "What events are on?", see: "What are some things to do in Soweto?", attractions: "Show me attractions" },
 }

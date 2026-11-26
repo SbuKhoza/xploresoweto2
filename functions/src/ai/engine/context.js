@@ -5,7 +5,7 @@
 // back to the user so nothing is used silently; context read from storage is re-validated (a tampered document cannot widen anything).
 const REF = /^listing:[a-z-]+\/[A-Za-z0-9_.-]{1,128}$/
 const MAX_REFS = 6
-const empty = () => ({ slots: {}, lastRefs: [], pending: null })
+const empty = () => ({ slots: {}, lastRefs: [], pending: null, lastIntent: null, misses: 0 })
 const arr = (v, n, ok) => (Array.isArray(v) ? v.filter(ok).slice(0, n) : [])
 const str = (v, n) => (typeof v === "string" && v.length <= n ? v : null)
 const num = (v, lo, hi) => (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : null)
@@ -21,7 +21,9 @@ function sanitize(raw) {
   const interests = arr(s.interests, 6, (x) => typeof x === "string" && /^[a-z]{3,20}$/.test(x)); if (interests.length) slots.interests = interests
   const categories = arr(s.categories, 4, (x) => typeof x === "string" && /^[a-z]{3,20}$/.test(x)); if (categories.length) slots.categories = categories
   if (str(s.place, 80)) slots.place = s.place
-  return { slots, lastRefs: arr(raw.lastRefs, MAX_REFS, (x) => typeof x === "string" && REF.test(x)), pending: raw.pending === "plan" ? "plan" : null }
+  const lastIntent = typeof raw.lastIntent === "string" && /^[a-z_]{3,30}$/.test(raw.lastIntent) ? raw.lastIntent : null
+  const misses = Number.isInteger(raw.misses) && raw.misses >= 0 ? Math.min(raw.misses, 5) : 0 // how many turns in a row went unanswered (varies the fallback)
+  return { slots, lastRefs: arr(raw.lastRefs, MAX_REFS, (x) => typeof x === "string" && REF.test(x)), pending: raw.pending === "plan" ? "plan" : null, lastIntent, misses }
 }
 
 // Effective slots for this turn = what the message says, else (if allowed) what was said earlier. `carried` lists what came from before.
@@ -45,7 +47,7 @@ function merge(ents, prev, { carry }) {
   }
 }
 
-function next(prev, { slots, refs, pending }) {
+function next(prev, { slots, refs, pending, lastIntent = null, misses = 0 }) {
   const old = sanitize(prev)
   const s = { ...old.slots }
   if (slots.budget) s.budget = slots.budget
@@ -55,6 +57,6 @@ function next(prev, { slots, refs, pending }) {
   if (slots.interests && slots.interests.length) s.interests = slots.interests
   if (slots.categories && slots.categories.length) s.categories = slots.categories
   if (slots.place) s.place = slots.place
-  return sanitize({ slots: s, lastRefs: refs && refs.length ? refs : old.lastRefs, pending: pending || null })
+  return sanitize({ slots: s, lastRefs: refs && refs.length ? refs : old.lastRefs, pending: pending || null, lastIntent, misses })
 }
 module.exports = { sanitize, merge, next, empty, MAX_REFS }

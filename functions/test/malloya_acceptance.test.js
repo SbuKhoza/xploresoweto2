@@ -24,7 +24,7 @@ const chat = (uid, message, extra = {}, opts) => H.aiChat(req(uid, { message, re
 const solo = (message, extra = {}) => chat(`solo-${++n}`, message, extra) // fresh user each time: the 5-per-minute burst limit is tested separately
 const said = (r) => r.blocks.map((b) => b.text).join("\n")
 
-test("1. 'Hi' gets a greeting", async () => { const r = await chat("u1", "Hi"); assert.match(said(r), /./); assert.equal(r.blocks[0].type, "verified"); assert.match(said(r).toLowerCase(), /soweto|help|hello|hi/) })
+test("1. 'Hi' gets a greeting", async () => { const r = await chat("u1", "Hi"); assert.match(said(r), /./); assert.equal(r.blocks[0].type, "general"); assert.match(said(r).toLowerCase(), /soweto|help|hello|hi/) })
 test("2. restaurants: published records from Firestore, with cards; inactive / suspended / draft never", async () => {
   const r = await chat("u1", "restaurants"); const t = said(r)
   assert.match(t, /Gogo's Kitchen/); assert.ok(r.cards.length >= 2 && r.cards.every((c) => c.ref.startsWith("listing:restaurants/")))

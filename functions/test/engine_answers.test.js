@@ -105,7 +105,7 @@ test("other currencies, past dates and isiZulu are handled honestly", async () =
 })
 test("greeting, thanks, help, gibberish, empty-ish and very long inputs never crash and never invent", async () => {
   for (const m of ["hi", "thanks", "what can you do?", "asdfgh qwerty", "?", "a".repeat(900), "<script>alert(1)</script> restaurants", "' OR 1=1 --"]) { const r = await say(m); assert.ok(r.blocks.length >= 1, m); assert.ok(Array.isArray(r.followUps)) }
-  assert.match(text(await say("asdfgh qwerty")), /not sure what you'd like to do/)
+  assert.match(text(await say("asdfgh qwerty")), /didn't quite catch that/)
 })
 test("emergency answers with stored numbers only, never a conversation, and falls back to general numbers labelled as such", async () => {
   const r = await say("I've been robbed, need police"); assert.equal(r.intent, "emergency"); assert.match(text(r), /Police: 10111/)

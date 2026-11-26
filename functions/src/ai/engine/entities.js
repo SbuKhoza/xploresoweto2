@@ -7,6 +7,7 @@
 const { normalizeName } = require("../sanitize")
 const { sastParts, sastDayStartMs, ymd } = require("../retrieval/normalize")
 const L = require("./lexicon")
+const { findLandmarks } = require("./landmarks")
 
 const DAY = 86400000
 const pad = (t) => ` ${normalizeName(t)} `
@@ -44,6 +45,7 @@ function parseParty(raw) {
   if ((m = t.match(/\bfamily of (\d{1,2})\b/))) total = +m[1]
   else if ((m = t.match(/\b(\d{1,2})\s*(?:people|persons|adults|guests|pax|of us|travell?ers|tourists|friends|visitors)\b/))) total = +m[1]
   else if (/\b(couple|two of us|the two of us)\b/.test(t)) total = 2
+  else if (/\b(my|our) (wife|husband|partner|girlfriend|boyfriend|fianc[eé]e?|spouse|better half)\b|\b(wife|husband|partner|girlfriend|boyfriend|fianc[eé]e?) and (i|me)\b|\b(me and|i and) my (wife|husband|partner|girlfriend|boyfriend)\b/.test(t)) total = 2 // a stated couple; only the group size is kept, never the relationship
   else if (/\b(solo|alone|by myself|just me|on my own|only me)\b/.test(t)) total = 1
   else if ((m = t.match(/(?<![r\d.,])\bfor (\d{1,2})\b(?!\s*(?:hours?|hrs?|days?|nights?|minutes?|mins?|rand|km|%|weeks?|\d))/))) total = +m[1]
   if ((m = t.match(/\b(\d{1,2})\s*(?:kids|children|child|toddlers|teens|teenagers)\b/))) children = +m[1]
@@ -108,7 +110,8 @@ function extract(text, { now = new Date(), places = [] } = {}) {
   const categories = Object.keys(L.CATEGORIES).filter((k) => L.CATEGORIES[k].words.some((w) => hasWord(p, w)))
   const interests = collectKeys(p, L.INTERESTS)
   const experience = collectKeys(p, L.EXPERIENCE)
-  const placeHits = places.filter((n) => n && hasWord(p, n)).slice(0, 3)
+  const landmarks = findLandmarks(raw)
+  const placeHits = [...landmarks, ...places.filter((n) => n && hasWord(p, n))].filter((v, i, a) => a.indexOf(v) === i).slice(0, 3)
   const constraints = {
     accessible: /\b(wheelchair|accessible|disabled|disability|step[- ]free|mobility)\b/i.test(raw),
     openNow: /\b(open now|currently open|open right now|still open)\b/i.test(raw),
@@ -119,7 +122,8 @@ function extract(text, { now = new Date(), places = [] } = {}) {
   return {
     budget, party: parseParty(raw), date: parseDate(raw, nowMs), time: parseTime(raw), duration: parseDuration(raw),
     categories, interests, experience, places: placeHits, constraints,
-    refersToPrevious: /\b(it|there|that place|this place|that one|this one|the first one|the second one|the third one|them|those|the cheaper one)\b/i.test(raw),
+    landmarks,
+    refersToPrevious: /\b(it|there|that place|this place|that one|this one|the first one|the second one|the third one|them|those|these|the cheaper one)\b/i.test(raw),
     unsupported,
   }
 }
