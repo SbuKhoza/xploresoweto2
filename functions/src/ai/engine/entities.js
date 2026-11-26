@@ -42,8 +42,10 @@ function parseBudget(raw) {
 function parseParty(raw) {
   const t = String(raw).toLowerCase()
   let total = null, children = null, m
-  if ((m = t.match(/\bfamily of (\d{1,2})\b/))) total = +m[1]
-  else if ((m = t.match(/\b(\d{1,2})\s*(?:people|persons|adults|guests|pax|of us|travell?ers|tourists|friends|visitors)\b/))) total = +m[1]
+  const NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }
+  const num = (x) => (/^\d+$/.test(x) ? +x : NUM[x] || null)
+  if ((m = t.match(/\b(?:family|group|party) of (\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\b/))) total = num(m[1])
+  else if ((m = t.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s*(?:people|persons|adults|guests|pax|of us|travell?ers|tourists|friends|visitors)\b/))) total = num(m[1])
   else if (/\b(couple|two of us|the two of us)\b/.test(t)) total = 2
   else if (/\b(my|our) (wife|husband|partner|girlfriend|boyfriend|fianc[eé]e?|spouse|better half)\b|\b(wife|husband|partner|girlfriend|boyfriend|fianc[eé]e?) and (i|me)\b|\b(me and|i and) my (wife|husband|partner|girlfriend|boyfriend)\b/.test(t)) total = 2 // a stated couple; only the group size is kept, never the relationship
   else if (/\b(solo|alone|by myself|just me|on my own|only me)\b/.test(t)) total = 1

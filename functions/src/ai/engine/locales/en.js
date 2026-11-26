@@ -11,6 +11,15 @@ module.exports = {
   greeting: "Hi! I can help you find attractions, restaurants, places to stay and local businesses in Soweto, and suggest a plan for your visit using what is listed on XploreSoweto. What would you like to do?", // pinned byte-for-byte by the optional Luna template: do not reword here
   help: "I can: find restaurants, places to stay, attractions, activities, local businesses, clinics and public offices; share taxi, bus and train options, news, announcements, events and load shedding schedules; suggest a half-day, full-day or multi-day plan from your interests and budget; compare places; tell you the listed price, hours and services of a place; and share what the XploreSoweto township guide says. Everything I show comes from XploreSoweto records. Try: \"Plan a day in Soweto with R800, I like history and food\".",
   thanks: "You're welcome! Ask me anything else about Soweto.",
+  pickLead: (name, n) => `From the ${n} I just showed you, I'd start with ${name}.`,
+  pickWhy: "Why: ranked on what is stored (rating, price against your budget, fit with what you told me), not on a visit of mine:",
+  pickBasis: "It comes first when I rank them on what is stored (rating, price against your budget, fit with what you told me). That is a ranking of records, not a visit of mine, so check it suits you.",
+  pickNoneShown: "I haven't shown you any places yet, so there's nothing to choose between. Shall I look for somewhere to eat or a place to stay first?",
+  pickNoneFit: "None of the places I showed you fit what you've told me, so I'd rather not pick one. Want me to search again?",
+  farewell: "Hamba kahle! Enjoy Soweto, and come back any time you'd like a hand with your visit.",
+  ackAfter: "Glad that helps! Is there anything else I can look up for you, or shall we plan the rest of your visit?",
+  ackFresh: "Lekker! What would you like to look for first: somewhere to eat, a place to stay, or things to see?",
+  ackPlan: "Great, let's carry on with your plan. What are you interested in (for example history, food, music), and roughly what budget do you have?",
   // Not understood: the wording changes each time the same trouble repeats, and always asks a specific question instead of repeating itself.
   fallback: [
     "Eish, I didn't quite catch that one. I can help you find somewhere to eat or stay, things to see and do, or what's on. What would you like to start with?",
@@ -33,7 +42,7 @@ module.exports = {
   datePast: (label) => `${label} has already passed, so I haven't used it.`,
   carried: (parts) => `Still using what you told me earlier: ${parts.join("; ")}.`,
   // ---- find
-  foundIntro: (n, label, where) => `I found ${n} ${plural(n, "match", "matches")} for ${label}${where ? ` in ${where}` : ""} on XploreSoweto.`,
+  foundIntro: (n, label, where, c = {}) => `I found ${n} ${plural(n, "match", "matches")} for ${label}${where ? ` in ${where}` : ""}${c.party && c.party > 1 ? `, with ${c.party} of you in mind` : ""}${c.budget ? `, within your R${c.budget} budget` : ""}.`,
   foundNone: (label, where) => `I couldn't find any ${label}${where ? ` in ${where}` : ""} on XploreSoweto that match your request.`,
   relaxedTerms: (terms, label) => `Nothing matched "${terms}", so these are the highest-ranked ${label} instead.`,
   relaxedPlace: (place, label) => `Nothing matched ${place} exactly, so these are the highest-ranked ${label} across Soweto.`,
@@ -69,13 +78,22 @@ module.exports = {
   compareRating: (a, b) => `${a} has the higher rating (${b}).`,
   compareNoBasis: "There isn't enough stored information (price or rating on both) to say which is better value.",
   // ---- plan
-  planIntro: (kind, days, dateLabel) => `Here is a suggested ${kind === "half_day" ? "half-day" : days > 1 ? `${days}-day` : "one-day"} plan${dateLabel ? ` for ${dateLabel}` : ""}, built only from records on XploreSoweto. Names, prices, hours and ratings come from the records; the order and timing are only my suggestion.`,
+  planIntro: (kind, days, dateLabel, party, budget) => `Here is a suggested ${kind === "half_day" ? "half-day" : days > 1 ? `${days}-day` : "one-day"} plan${party && party > 1 ? ` for ${party} people` : ""}${dateLabel ? ` for ${dateLabel}` : ""}${budget != null ? `, with ${rand(budget)} to spend` : ""}, built only from records on XploreSoweto. Names, prices, hours and ratings come from the records; the order and timing are only my suggestion.`,
   slot: { morning: "Morning", midday: "Midday", afternoon: "Afternoon", evening: "Evening" },
   dayHeader: (d, total) => (total > 1 ? `Day ${d}` : null),
   stopKm: (k) => `about ${k} km from the previous stop (approximate)`,
-  planTotal: (n, budget) => `Listed prices for these stops add up to at least ${rand(n)} (the lowest figure is used where a range is listed)${budget != null ? `, against your budget of ${rand(budget)}` : ""}.`,
+  // Totals use the listed unit for THIS group. "within" is the only verdict that says the plan fits; every other one says why it cannot.
+  unitSuffix: (text, unit) => (!text || /\bper\b|\bpp\b|\bp\/p\b/i.test(text) || !["per_person", "per_group", "per_room", "per_night"].includes(unit) ? (unit === "unknown" && text && !/free/i.test(text) ? " (unit not stated)" : "") : ` ${{ per_person: "per person", per_group: "per group", per_room: "per room", per_night: "per night" }[unit]}`),
+  planTotal: (t, party) => {
+    const n = party && party > 1 ? `${party} people` : "one person", range = t.costHi > t.costLo ? `${rand(t.costLo)} to ${rand(t.costHi)}` : rand(t.costLo), b = t.budgetMax != null ? rand(t.budgetMax) : null
+    if (t.verdict === "within") return `For ${n}, the listed prices come to ${range}, within your budget of ${b}.`
+    if (t.verdict === "within_listed") return `For ${n}, the listed prices come to ${range}, within your budget of ${b}, but ${t.unknownPriceCount} ${plural(t.unknownPriceCount, "place has", "places have")} no listed price, so I can't say the whole plan fits.`
+    if (t.verdict === "over") return `For ${n}, even reading the prices as low as the listings allow, this comes to ${rand(t.costLo)}, above your budget of ${b}. Tell me if you'd like a cheaper plan.`
+    if (t.verdict === "unclear") return `I can't promise this fits your budget of ${b}. For ${n} it comes to ${rand(t.costLo)} if the listed prices cover the whole group, and up to ${rand(t.costHi)} if they are per person, and the listings don't say which. Please check with the places, or ask me for a plan using only places with clear prices.`
+    return t.costHi > t.costLo ? `For ${n}, the listed prices come to ${range}: the lower figure if the prices cover the whole group, the higher if they are per person. The listings don't always say which.` : `For ${n}, the listed prices come to ${range}.`
+  },
   planNoCost: "None of the chosen stops has a listed price, so I can't total the cost.",
-  planStay: (name, price) => `If you need somewhere to stay: ${name}${price ? ` (${price})` : ""}. Accommodation is not included in the total above.`,
+  planStay: (name, price, unit) => `If you need somewhere to stay: ${name}${price ? ` (${price}${unit && unit !== "unknown" && !/\bper\b/i.test(price) ? `, ${unit.replace("_", " ")}` : ""})` : ""}. Its cost is included in the total above using the listed unit.`,
   planNothing: "I couldn't find suitable records to build a plan from, so I haven't invented one.",
   planMissing: (kinds) => `There were not enough matching ${kinds.map((k) => (k === "meal" ? "restaurants" : "attractions or activities")).join(" and ")} in the records to fill every slot, so some slots are left empty rather than invented.`,
   // ---- clarification

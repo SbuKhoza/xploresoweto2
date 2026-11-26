@@ -11,6 +11,7 @@ const { loadCategory, loadPlaces, mentionedItems, getItemByRef, nm } = require("
 const { extract } = require("./entities")
 const { detectIntents, intentDef } = require("./intents")
 const nlp = require("./nlp")
+const social = require("./social")
 const { termsFor } = require("./landmarks")
 const L = require("./lexicon")
 const { rank, tokens } = require("./ranking")
@@ -23,7 +24,18 @@ const VISITOR = ["attractions", "restaurants", "recreation", "accommodations", "
 const SERVICES = ["healthcare", "publicservice"] // clinics and public offices: searchable like any listing, but not part of trip plans
 const FINDABLE = [...VISITOR, ...SERVICES]
 const GENERIC = new Set(["want", "need", "looking", "look", "please", "give", "tell", "get", "place", "places", "spot", "spots", "thing", "things", "nice", "great", "cheap", "cheaper", "cheapest", "like", "love", "would", "could", "should", "let", "know", "about", "have", "has", "there", "here", "around", "visit", "visiting", "trip", "plan", "day", "days", "half", "full", "tomorrow", "today", "tonight", "weekend", "budget", "enjoy", "recommend", "suggest", "list", "which", "how", "much", "many", "open", "near", "nearby", "yes", "ok", "okay", "just", "also", "more", "other", "another", "else", "free", "enjoy", "options", "option", "serving", "serve", "serves", "selling", "sells", "offering", "with", "that", "for", "any", "some", "need", "show", "on", "this", "whats", "happening", "upcoming", "coming", "events", "event", "next", "week", "month", "heard", "traveling", "travelling", "wife", "husband", "partner", "couple", "going", "told", "hear", "street", "road", "avenue", "sounds", "amazing", "interesting", "know", "want", "wanna"])
-const ORDINAL = [[/\b(first|1st|top)\b/, 0], [/\b(second|2nd)\b/, 1], [/\b(third|3rd)\b/, 2], [/\b(fourth|4th)\b/, 3]]
+const WORD_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }
+// "the second one", "number 3", "option two", "the last one", "the other one" -> a 0-based position in the list that was just shown (or null)
+function ordinalIndex(t, n) {
+  if (!n) return null
+  const words = [[/\b(first|1st|top)\b/, 0], [/\b(second|2nd)\b/, 1], [/\b(third|3rd)\b/, 2], [/\b(fourth|4th)\b/, 3], [/\b(fifth|5th)\b/, 4], [/\b(sixth|6th)\b/, 5]]
+  for (const [re, i] of words) if (re.test(t)) return i < n ? i : null
+  if (/\b(last|final|bottom)\b/.test(t)) return n - 1
+  const m = /\b(?:number|option|no\.?|item|choice|#)\s*(\d|one|two|three|four|five|six)\b/.exec(t)
+  if (m) { const k = /^\d$/.test(m[1]) ? +m[1] : WORD_NUM[m[1]]; return k >= 1 && k <= n ? k - 1 : null }
+  if (/\bthe other one\b/.test(t) && n === 2) return 1
+  return null
+}
 const MEAL_AND_ACTIVITY = { activity: ["attractions", "recreation"], meal: ["restaurants"], stay: ["accommodations"] }
 
 const interestWords = (names) => Object.fromEntries(names.filter((k) => L.INTERESTS[k]).map((k) => [k, L.INTERESTS[k].words]))
@@ -80,18 +92,28 @@ const entriesOf = (ranked, n) => ranked.slice(0, n).map((e) => ({ item: e.item, 
 // ---- the pipeline -----------------------------------------------------------------------------------------------------------
 async function respond({ message: rawMessage, context, location, cfg, now }) {
   const language = detectLanguage(rawMessage)
-  const message = nlp.clean(rawMessage) // abbreviations ("Vilakazi St"), typing shortcuts and misspellings are repaired before anything is matched
+  const cleaned = nlp.clean(rawMessage) // abbreviations ("Vilakazi St"), typing shortcuts and misspellings are repaired before anything is matched
+  let soc = social.classify(cleaned) // greetings / thanks / farewells / acknowledgements; a request after them ("Hi, where can I stay?") is still answered
+  if (!soc.kind && language === "en" && soc.stripped.length && soc.rest && /^(greeting|thanks|farewell)$/.test(soc.stripped[0]) && !detectIntents(soc.rest).length) {
+    const e = extract(soc.rest, { now, places: [] }) // "thanks, my email is ..." has no request in it: it is still a thanks (and nothing after it is used)
+    if (!(e.interests.length || e.categories.length || e.budget || e.party || e.duration || e.date || e.landmarks.length)) soc = { ...soc, kind: soc.stripped[0] }
+  }
+  const message = soc.kind ? cleaned : soc.stripped.length && soc.rest ? soc.rest : cleaned
   const Lc = locales.en // English only: isiZulu is detected, answered in English, and never claimed (see docs)
   const ctx = { cfg, now, location: location || null }
   const intents = detectIntents(message)
   let primary = intents[0] || null
   const prev = ctxMod.sanitize(context)
   const result = (o, extra = {}) => ({ language, languageFallback: language !== "en", intent: extra.intent || (primary ? primary.id : "unknown"), ...o })
-  const zuBlock = language === "zu" ? [C.block("unverified", Lc.notSupportedLanguage)] : []
-  const KEEP_INTENT = new Set(["greeting", "thanks", "help", "emergency", "provide_details"])
+  const zuBlock = language === "zu" && !soc.kind ? [C.block("unverified", Lc.notSupportedLanguage)] : []
+  const KEEP_INTENT = new Set(["greeting", "thanks", "farewell", "acknowledge", "help", "emergency", "provide_details"])
   const done = (composed, { slots = {}, refs = [], pending = null, intent } = {}) => result({ ...composed, blocks: intent === "emergency" ? composed.blocks : [...zuBlock, ...composed.blocks],
     context: ctxMod.next(prev, { slots, refs, pending, lastIntent: composed.fallback || KEEP_INTENT.has(intent) ? prev.lastIntent : intent, misses: composed.fallback ? prev.misses + 1 : KEEP_INTENT.has(intent) ? prev.misses : 0 }) }, { intent })
 
+  // ---- social turns (no reads at all)
+  if (soc.kind === "greeting" || soc.kind === "thanks") return done(C.composeStatic({ L: Lc, key: soc.kind }), { intent: soc.kind })
+  if (soc.kind === "farewell") return done(C.composeSocial({ L: Lc, kind: "farewell", prev }), { intent: "farewell" })
+  if (soc.kind === "acknowledge") return done(C.composeSocial({ L: Lc, kind: "acknowledge", prev }), { intent: "acknowledge" })
   // ---- no-data intents first (no reads at all)
   if (primary && ["greeting", "thanks"].includes(primary.id) && intents.length === 1) return done(C.composeStatic({ L: Lc, key: primary.id }), { intent: primary.id })
   if (primary && primary.id === "help" && intents.every((i) => ["help"].includes(i.id))) return done(C.composeStatic({ L: Lc, key: "help" }), { intent: "help" })
@@ -116,7 +138,7 @@ async function respond({ message: rawMessage, context, location, cfg, now }) {
   const planning = ["plan_trip", "build_itinerary"].includes(id)
   const asking = ["ask_place", "ask_price", "ask_hours", "ask_services", "ask_directions", "booking_request"].includes(id)
   const isFind = /^find_(restaurants|accommodation|attractions|businesses|healthcare|publicservice|activities)$/.test(id) || ["recommend", "discover_things"].includes(id)
-  const carry = planning || pendingPlan ? ["budget", "party", "date", "duration", "interests", "place"] : isFind ? ["place", "party", ...(ents.refersToPrevious || id === prev.lastIntent ? ["budget"] : [])] : id === "explore_place" || id === "provide_details" ? ["party"] : []
+  const carry = planning || pendingPlan ? ["budget", "party", "date", "duration", "interests", "place"] : isFind ? ["place", "party", ...(ents.refersToPrevious || id === prev.lastIntent ? ["budget"] : [])] : id === "pick_best" ? ["budget", "party", "interests"] : id === "explore_place" || id === "provide_details" ? ["party"] : []
   const slots = ctxMod.merge(ents, prev, { carry })
 
   const notes = []
@@ -124,18 +146,27 @@ async function respond({ message: rawMessage, context, location, cfg, now }) {
   if (ents.date && ents.date.past) notes.push(C.block("unverified", Lc.datePast(ents.date.label)))
   const withNotes = (composed, carriedList = slots.carried) => {
     const extra = [...notes]
-    if (carriedList && carriedList.length) extra.push(C.block("unverified", Lc.carried(carriedList)))
     return { ...composed, blocks: [...extra, ...composed.blocks] }
   }
   const remembered = { budget: ents.budget, party: ents.party, date: ents.date && !ents.date.past ? ents.date : null, duration: ents.duration, interests: ents.interests, categories: ents.categories, place: ents.places[0] || null }
   const refsOf = (composed) => [...new Set(composed.evidence.filter((e) => e && e.ref && String(e.ref).startsWith("listing:")).map((e) => e.ref))].slice(0, ctxMod.MAX_REFS)
-  const finish = (composed, o = {}) => { const c = withNotes(composed, o.carried); return done(c, { slots: remembered, refs: refsOf(c), pending: c.clarification && planning ? "plan" : null, intent: id }) }
+  const finish = (composed, o = {}) => { const c = withNotes(composed, o.carried); return done(c, { slots: remembered, refs: c.keepRefs ? [] : refsOf(c), pending: c.clarification && planning ? "plan" : null, intent: id }) }
 
   // ---- a destination the person named or heard about (street, landmark, township), or details given without a request
   if (id === "provide_details") return finish(C.composeAcknowledge({ L: Lc, partyTotal: ents.party && ents.party.total ? ents.party.total : slots.party ? slots.party.total : null }))
   if (id === "explore_place") {
     if (!named) return finish(C.composeClarify({ L: Lc, text: Lc.exploreWhich, followUps: [Lc.follow.cats, Lc.follow.stay, Lc.follow.see] }))
     return finish(await explore({ Lc, ctx, place: named, party: slots.party || ents.party, message, cfg }))
+  }
+
+  // ---- "which one would you recommend?": the best of what was JUST shown, ranked on stored data (never a new search, never invented)
+  if (id === "pick_best") {
+    const shown = await candidatesFromPrev(prev, ctx)
+    if (!shown.length) return finish(C.composeClarify({ L: Lc, text: Lc.pickNoneShown, followUps: [Lc.follow.cats, Lc.follow.stay, Lc.follow.see] }))
+    const r = rank(shown, { queryTerms: [], interestWords: interestWords(slots.interests), budgetMax: budgetMax(slots.budget, slots.party), useDistance: !!ctx.location })
+    const top = r.ranked[0]
+    if (!top) return finish(C.composeClarify({ L: Lc, text: Lc.pickNoneFit, followUps: [Lc.follow.cats, Lc.follow.stay, Lc.follow.see] }))
+    return finish(C.composePick({ L: Lc, entry: top, count: shown.length }))
   }
 
   // ---- events
@@ -237,14 +268,14 @@ async function respond({ message: rawMessage, context, location, cfg, now }) {
   const label = cols.length === 1 ? Lc.categoryLabel[cols[0]] : "places"
   const entries = entriesOf(r.ranked, maxResults(cfg))
   const wantsBooking = intents.some((i) => i.id === "booking_request")
-  const composed = C.composeFind({ L: Lc, lead: cols.length === 1 ? Lc.lead[cols[0]] : null, followUps: followsFor(cols, entries), label, entries, where: place && !relaxedPlace ? place : null, relaxed: relaxed || (relaxedPlace ? { place: relaxedPlace } : null), truncated: loaded.truncated, scanned: loaded.scanned, excluded: r.excluded, noLocation: ents.constraints.nearMe && !ctx.location, distanceNote: r.distanceNote, wantsBooking })
+  const composed = C.composeFind({ L: Lc, lead: cols.length === 1 ? Lc.lead[cols[0]] : null, followUps: followsFor(cols, entries), party: slots.party && slots.party.total, budget: slots.budget && !slots.budget.perPerson ? slots.budget.max : null, label, entries, where: place && !relaxedPlace ? place : null, relaxed: relaxed || (relaxedPlace ? { place: relaxedPlace } : null), truncated: loaded.truncated, scanned: loaded.scanned, excluded: r.excluded, noLocation: ents.constraints.nearMe && !ctx.location, distanceNote: r.distanceNote, wantsBooking })
   return finish(composed)
 }
 
 // ---- resolving which place(s) the user means ---------------------------------------------------------------------------------
-async function candidatesFromPrev(prev, ctx) {
+async function candidatesFromPrev(prev, ctx, { positional = false } = {}) {
   const items = []
-  for (const ref of prev.lastRefs) { const it = await safe(() => getItemByRef(ref, ctx), null); if (it) items.push(it) }
+  for (const ref of prev.lastRefs) { const it = await safe(() => getItemByRef(ref, ctx), null); if (it || positional) items.push(it) }
   return items
 }
 async function resolveOne({ message, prev, ents, ctx, preferNamed = false }) {
@@ -256,7 +287,12 @@ async function resolveOne({ message, prev, ents, ctx, preferNamed = false }) {
   found = mentionedItems(message, (await loadMany(cols, ctx)).items)
   if (found.length) return found[0]
   if (preferNamed) return null // a plural question ("which of these...") is about the whole last answer, not its first item
-  if (last.length) { for (const [re, i] of ORDINAL) if (re.test(t) && last[i]) return last[i]; if (ents.refersToPrevious && last.length) return last[0] }
+  if (last.length) {
+    const pos = await candidatesFromPrev(prev, ctx, { positional: true }) // keeps list positions even if one place has since been removed
+    const i = ordinalIndex(t, pos.length)
+    if (i !== null) return pos[i] || null
+    if (ents.refersToPrevious && last.length) return last[0]
+  }
   return null
 }
 async function resolveMany({ message, prev, ents, ctx }) {

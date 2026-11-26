@@ -24,15 +24,22 @@ function factLine(it, L, { distance = true } = {}) {
 const title = (m) => `${m.name}${m.category ? ` (${m.category})` : ""}`
 
 // ---- find / recommend -------------------------------------------------------------------------------------------------------
-function composeFind({ L, lead, label, entries, where, relaxed, truncated, scanned, excluded, noLocation, distanceNote, wantsBooking, followUps }) {
+function composeFind({ L, lead, label, entries, where, relaxed, truncated, scanned, excluded, noLocation, distanceNote, wantsBooking, followUps, party, budget }) {
   const blocks = [], evidence = []
   if (!entries.length) {
     blocks.push(block("unverified", L.foundNone(label, where)))
   } else {
+    // Two bubbles at most: a short friendly lead (no badge) and ONE verified block holding the intro and the list. The reasons for the
+    // ranking sit on each line, so nothing is said twice. The person's own details (area, group, budget) are woven into the intro.
     if (lead) blocks.push(block("general", lead))
-    blocks.push(block("verified", L.foundIntro(entries.length, label, relaxed ? null : where), { refs: entries.map((e) => e.item.ref) }))
-    blocks.push(block("verified", entries.map((e, i) => `${i + 1}. ${title(e.item.model)}${e.item.model.address ? `, ${e.item.model.address}` : ""} — ${factLine(e.item, L)}`).join("\n"), { refs: entries.map((e) => e.item.ref) }))
-    const why = entries.slice(0, 3).filter((e) => e.reasons.length).map((e) => `${e.item.model.name}: ${e.reasons.join("; ")}.`)
+    const lines = entries.map((e, i) => `${i + 1}. ${title(e.item.model)}${e.item.model.address ? `, ${e.item.model.address}` : ""} — ${factLine(e.item, L)}`)
+    blocks.push(block("verified", `${L.foundIntro(entries.length, label, relaxed ? null : where, { party, budget })}\n${lines.join("\n")}`, { refs: entries.map((e) => e.item.ref) }))
+    // My own ranking reasons stay in their own, short "suggestion" bubble (they are not facts from a record). The rating is already on each line,
+    // and a reason shared by every place is said once instead of once per place.
+    const top = entries.slice(0, 3).map((e) => ({ name: e.item.model.name, rs: e.reasons.filter((r) => !/^rated\b/i.test(r)) }))
+    const shared = top.length > 1 ? top[0].rs.filter((r) => top.every((t) => t.rs.includes(r))) : []
+    const own = top.map((t) => ({ name: t.name, rs: t.rs.filter((r) => !shared.includes(r)) })).filter((t) => t.rs.length)
+    const why = [...(shared.length ? [`${shared.join("; ")}.`] : []), ...own.map((t) => `${t.name}: ${t.rs.join("; ")}.`)]
     if (why.length) blocks.push(block("suggestion", `${L.whyHeader}\n${why.join("\n")}`))
     evidence.push(...entries.map((e) => e.item.evidence))
   }
@@ -94,21 +101,22 @@ function composePlan({ L, plan, dateLabel }) {
   const blocks = []
   const stops = plan.days.flatMap((d) => d.stops)
   if (!stops.length) return out([block("unverified", L.planNothing), ...plan.caveats.slice(1).map((c) => block("unverified", c))], [], [L.follow.interests, L.follow.stay])
-  blocks.push(block("suggestion", [L.planIntro(plan.kind, plan.dayCount, dateLabel), ...plan.assumptions].join(" ")))
+  blocks.push(block("suggestion", [L.planIntro(plan.kind, plan.dayCount, dateLabel, plan.party, plan.totals.budgetMax), ...plan.assumptions].join(" ")))
   for (const d of plan.days.filter((x) => x.stops.length)) {
     const head = L.dayHeader(d.day, plan.dayCount)
     const lines = d.stops.map((s) => {
-      const f = L.facts, bits = [s.priceKnown || s.priceText ? f.price(s.priceText) : f.noPrice, s.hoursText ? f.hours(s.hoursText) : f.noHours]
+      const f = L.facts, bits = [s.priceKnown || s.priceText ? f.price(s.priceText) + L.unitSuffix(s.priceText, s.priceUnit) : f.noPrice, s.hoursText ? f.hours(s.hoursText) : f.noHours]
       if (s.approxKmFromPrevious !== null) bits.push(L.stopKm(s.approxKmFromPrevious))
       return `${L.slot[s.slot]}: ${s.name}${s.category ? ` (${s.category})` : ""} — ${bits.join("; ")}`
     })
     blocks.push(block("suggestion", [head, ...lines].filter(Boolean).join("\n"), { refs: d.stops.map((s) => s.ref) }))
   }
   const t = plan.totals
-  blocks.push(t.knownCostMin > 0 || t.budgetMax != null ? block("verified", L.planTotal(t.knownCostMin, t.budgetMax), { refs: stops.map((s) => s.ref) }) : block("unverified", L.planNoCost))
+  const anyPrice = stops.some((x) => x.priceKnown) || (plan.stay && plan.stay.costHi > 0)
+  blocks.push(anyPrice || t.budgetMax != null ? block(t.verdict === "unclear" || t.verdict === "over" ? "unverified" : "verified", L.planTotal(t, plan.party), { refs: stops.map((x) => x.ref) }) : block("unverified", L.planNoCost))
   if (plan.adjustments.length) blocks.push(block("suggestion", plan.adjustments.join(" ")))
   if (plan.missing.length) blocks.push(block("unverified", L.planMissing(plan.missing)))
-  if (plan.stay) blocks.push(block("suggestion", L.planStay(plan.stay.name, plan.stay.priceText), { refs: [plan.stay.ref] }))
+  if (plan.stay) blocks.push(block("suggestion", L.planStay(plan.stay.name, plan.stay.priceText, plan.stay.priceUnit), { refs: [plan.stay.ref] }))
   blocks.push(block("unverified", plan.caveats.join(" ")))
   if (plan.distanceNote) blocks.push(block("unverified", plan.distanceNote))
   return out(blocks, plan.evidence, [L.follow.party, L.follow.directions, L.follow.cheaper])
@@ -183,4 +191,18 @@ function composeExplore({ L, place, party, entries, kb }) {
 }
 const composeAcknowledge = ({ L, partyTotal }) => ({ ...out([block("general", L.detailsThanks(partyTotal))], [], [L.follow.cats, L.follow.stay, L.follow.see]), clarification: true })
 
-module.exports = { composeFallback, composeExplore, composeAcknowledge, composeFind, composeAsk, composeCompare, composePlan, composeKnowledge, composeEvents, composeEmergency, composeTours, composeTransport, composeNews, composeAnnouncements, composeLoadshedding, composeTownships, composeClarify, composeStatic, factLine, block }
+// Farewells and acknowledgements. Warm, short, never a listing; what is offered next depends on what was just discussed.
+function composeSocial({ L, kind, prev }) {
+  if (kind === "farewell") return { ...out([block("general", L.farewell)], [], []), social: true }
+  if (prev && prev.pending === "plan") return { ...out([block("general", L.ackPlan)], [], [L.follow.interests, L.follow.party, L.follow.stay]), social: true }
+  const li = prev && prev.lastIntent
+  const follow = li === "find_restaurants" ? [L.follow.stay, L.follow.see, L.follow.events] : li === "find_accommodation" ? [L.follow.cats, L.follow.see, L.follow.events] : li === "find_events" ? [L.follow.cats, L.follow.stay, L.follow.see] : [L.follow.cats, L.follow.stay, L.follow.see]
+  return { ...out([block("general", li ? L.ackAfter : L.ackFresh)], [], follow), social: true }
+}
+function composePick({ L, entry, count }) {
+  const it = entry.item, why = entry.reasons.filter((r) => !/^rated\b/i.test(r))
+  const blocks = [block("general", L.pickLead(it.model.name, count)), block("verified", `${title(it.model)}${it.model.address ? `, ${it.model.address}` : ""} — ${factLine(it, L)}`, { refs: [it.ref] })]
+  blocks.push(block("suggestion", why.length ? `${L.pickWhy} ${why.join("; ")}.` : L.pickBasis))
+  return { ...out(blocks, [it.evidence], [L.follow.details, L.follow.directions, L.follow.plan]), keepRefs: true }
+}
+module.exports = { composePick, composeSocial, composeFallback, composeExplore, composeAcknowledge, composeFind, composeAsk, composeCompare, composePlan, composeKnowledge, composeEvents, composeEmergency, composeTours, composeTransport, composeNews, composeAnnouncements, composeLoadshedding, composeTownships, composeClarify, composeStatic, factLine, block }

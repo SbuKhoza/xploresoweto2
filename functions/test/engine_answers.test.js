@@ -23,7 +23,7 @@ test("EXAMPLE: 'visiting tomorrow, R800, history and local food' -> plan from ve
   const stops = [...t.matchAll(/(?:Morning|Midday|Afternoon): ([^(—\n]+?)(?: \(| —)/g)].map((m) => m[1].trim()); assert.ok(stops.length >= 2)
   for (const s of stops) assert.ok(real.includes(s), `${s} must be a stored record`)
   assert.match(t, /for tomorrow/); assert.match(t, /R800/); assert.match(t, /can't verify travel times/)
-  assert.ok(r.blocks.some((b) => b.type === "verified" && /add up to at least/.test(b.text)))
+  assert.ok(r.blocks.some((b) => b.type === "verified" && /the listed prices come to/.test(b.text)))
   assert.ok(r.evidence.length >= 2 && r.evidence.every((e) => e.ref.startsWith("listing:")))
   assert.ok(t.includes("Hector Pieterson Museum") && t.includes("Gogo's Kitchen")) // history + food interests drive the picks
   assert.ok(!/Pricey Steakhouse|Expensive Heritage Tour/.test(t)) // above the R800 budget when summed

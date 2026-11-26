@@ -84,7 +84,7 @@ test("a missing duration is an ASSUMPTION that is stated, and the plan is never 
 test("budget: stops are removed from the priciest down using LISTED prices only; unknown prices are never counted as free", async () => {
   const p = await pools()
   const plan = buildItinerary({ duration: { kind: "full_day", days: 1 }, budget: { max: 150, kind: "total" }, pools: p })
-  assert.ok(plan.totals.knownCostMin <= 150); assert.ok(plan.adjustments.length >= 1)
+  assert.ok(plan.totals.knownCostMin <= 150); assert.ok(["within", "within_listed"].includes(plan.totals.verdict)); assert.equal(plan.totals.verdict === "within", plan.totals.unknownPriceCount === 0) // affordable places are now preferred up front, so fewer (or no) stops need removing
   const unknown = plan.days.flatMap((d) => d.stops).filter((s) => !s.priceKnown)
   if (unknown.length) assert.ok(plan.caveats.some((c) => c.includes(unknown[0].name) && /No price is listed/.test(c)))
 })
