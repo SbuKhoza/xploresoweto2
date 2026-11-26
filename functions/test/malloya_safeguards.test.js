@@ -237,3 +237,12 @@ test("Luna and the financial safeguards are untouched: Luna stays off, its confi
   await assert.rejects(AI.aiAdminUpdateConfig(admin({ patch: { luna: { limits: { dailyGlobalTokens: 999999999 } } } })), (e) => e.code === "invalid-argument")
   assert.deepEqual(Object.keys(cfg.luna).sort(), ["breaker", "enabled", "limits", "resetEpoch"])
 })
+
+test("the CMS contract document names every learning/erasure callable and every Luna/learning setting that exists", () => {
+  const fs = require("fs"), path = require("path")
+  const doc = fs.readFileSync(path.join(__dirname, "..", "..", "docs", "malloya", "XPLORECMS_CONTRACTS.md"), "utf8")
+  const idx = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8")
+  for (const n of [...idx.matchAll(/^\s+(ai(?:Admin|Submit|SetLearning|Erase)\w*):/gm)].map((m) => m[1])) assert.ok(doc.includes(n), `${n} is missing from the contract document`)
+  for (const k of Object.keys(cfgMod.DEFAULTS.learning)) assert.ok(doc.includes(`\`${k}\``), `learning.${k} is undocumented`)
+  assert.ok(!/ai(Admin)?\w*\(.*\)/.test("") )
+})
