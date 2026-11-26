@@ -122,7 +122,7 @@ function cleanPayload(type, p, { partial = false } = {}) {
   if (type === "phrase_intent" && (!partial || p.intent !== undefined)) { if (!LEARNABLE_INTENTS.includes(p.intent)) throw bad("intent-not-learnable"); out.intent = p.intent }
   if (type === "answer" && (!partial || p.text !== undefined)) out.text = cleanText(p.text)
   if (type === "place_alias") {
-    if (!partial || p.alias !== undefined) { 
+    if (!partial || p.alias !== undefined) {
       if (typeof p.alias !== "string" || !ALIAS.test(p.alias) || p.alias.length < 4 || p.alias.length > 40 || SENSITIVE.test(p.alias)) throw bad("invalid-alias")
       if (p.alias.split(" ").every((w) => ALLOWED.has(w))) throw bad("alias-too-generic") // "mall", "the park": ordinary words must never be rewritten into a place
       if (LANDMARKS.some((l) => l.aliases.includes(p.alias))) throw bad("alias-already-built-in")
