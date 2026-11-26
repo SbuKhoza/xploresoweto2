@@ -75,7 +75,8 @@
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "xploresoweto-staging",
         "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "xploresoweto-staging.firebasestorage.app",
         "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "343560971631",
-        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:343560971631:web:e66f8410b2052db899749a"
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:343560971631:web:e66f8410b2052db899749a",
+        "EXPO_PUBLIC_AI_ASSISTANT": "true"
       },
       "android": {
         "buildType": "apk",
@@ -92,7 +93,8 @@
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "xploresoweto-staging",
         "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "xploresoweto-staging.firebasestorage.app",
         "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "343560971631",
-        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:343560971631:web:e66f8410b2052db899749a"
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:343560971631:web:e66f8410b2052db899749a",
+        "EXPO_PUBLIC_AI_ASSISTANT": "true"
       },
       "android": {
         "gradleCommand": ":app:assembleStagingDebug"
