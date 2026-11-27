@@ -63,3 +63,11 @@ testers*.json
 *.local.json
 *.keystore.local
 staging-*.keystore
+
+# Android generated artifacts: never upload machine-specific build caches
+/android/build/
+/android/app/build/
+/android/.gradle/
+/android/.cxx/
+/android/app/.cxx/
+/android/local.properties
