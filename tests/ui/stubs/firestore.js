@@ -8,3 +8,4 @@ export const doc = (_db, c, id) => ({ __col: c, __id: id })
 export const getDocs = async (q) => snap(globalThis.__FS?.[q.__col] || [])
 export const getDoc = async (ref) => { const r = (globalThis.__FS?.[ref.__col] || []).find((x) => x.id === ref.__id); return { exists: () => !!r, data: () => r } }
 export const addDoc = async () => ({ id: "x" })
+export const updateDoc = async (ref, data) => { globalThis.__CALLS?.push(["updateDoc", `${ref.__col}/${ref.__id}`, data]) }

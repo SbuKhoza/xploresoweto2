@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context"
 import GlossyBackground from "./components/GlossyBackground"
+import { ScrimProvider, StatusBarScrim } from "./components/StatusBarScrim"
 import ListingErrorBoundary from "./components/ListingErrorBoundary"
 import GlobalLoader from "./components/loader/GlobalLoader"
 import { LoadingProvider, useLoading } from "./components/context/LoadingContext"
@@ -64,8 +65,18 @@ const CommunityStack  = createNativeStackNavigator()
 // ─────────────────────────────────────────────────────────────────────────────
 const TOP_EXTRA = 6   /* ← adjust this value (px) to change the top breathing room */
 
-const SafeScreen = ({ children, style }) => {
+//
+// `scrim` (only for screens whose hero draws under the status bar): adds a strip as tall as the top inset that is transparent at the top of the
+// screen and fades to the screen background colour as the content scrolls (components/StatusBarScrim.js). Screens without it are unchanged.
+const SafeScreen = ({ children, style, scrim = false }) => {
   const insets = useSafeAreaInsets()
+  const body = (
+    <>
+      <GlossyBackground />
+      {children}
+      {scrim ? <StatusBarScrim /> : null}
+    </>
+  )
   return (
     <ScrollTrackingView
       style={[
@@ -76,8 +87,7 @@ const SafeScreen = ({ children, style }) => {
         style,
       ]}
     >
-      <GlossyBackground />
-      {children}
+      {scrim ? <ScrimProvider>{body}</ScrimProvider> : body}
     </ScrollTrackingView>
   )
 }
@@ -114,7 +124,7 @@ const CommunityStackNavigator = () => (
 // Home has its own hero that draws edge-to-edge under the status bar — no Header
 // component and no SafeScreen top padding; Home applies the top inset itself.
 const HomeWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <Home />
   </SafeScreen>
 )
@@ -127,16 +137,16 @@ const XploreWithHeader = () => (
 )
 
 // All Soweto townships — opened from Home → Soweto Townships → See All.
+// It draws its own hero (the dynamic banner, back button) edge-to-edge under the status bar, so no Header and no top padding.
 const SowetoTownshipsWithHeader = () => (
-  <SafeScreen>
-    <Header title="Townships" />
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <ListingErrorBoundary screen="SowetoTownships"><SowetoTownships /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 // Profile draws its own gradient hero edge-to-edge, so no Header / top padding.
 const ProfileWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <Profile />
   </SafeScreen>
 )
@@ -176,7 +186,7 @@ const PoIstWithHeader = () => (
 )
 
 const AccommodationWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <ListingErrorBoundary screen="Accommodation"><Accommodation /></ListingErrorBoundary>
   </SafeScreen>
 )
@@ -185,7 +195,7 @@ const AccommodationWithoutHeader = () => (
 // PublicService draw their own hero (back / bell buttons) edge-to-edge under the
 // status bar, so they get no Header component and no SafeScreen top padding.
 const RestaurantsWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <ListingErrorBoundary screen="Restaurants"><Restaurants /></ListingErrorBoundary>
   </SafeScreen>
 )
@@ -198,13 +208,13 @@ const EmergencyWithHeader = () => (
 )
 
 const RecreationWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <ListingErrorBoundary screen="Recreation"><Recreation /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const AttractionWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <ListingErrorBoundary screen="Attraction"><Attraction /></ListingErrorBoundary>
   </SafeScreen>
 )
@@ -217,19 +227,19 @@ const TransportWithHeader = () => (
 )
 
 const BusinessWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <ListingErrorBoundary screen="Business"><Business /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const HealthcareWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <ListingErrorBoundary screen="Healthcare"><Healthcare /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const PublicServiceWithoutHeader = () => (
-  <SafeScreen style={{ paddingTop: 0 }}>
+  <SafeScreen style={{ paddingTop: 0 }} scrim>
     <ListingErrorBoundary screen="PublicService"><PublicService /></ListingErrorBoundary>
   </SafeScreen>
 )

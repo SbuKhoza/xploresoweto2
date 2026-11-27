@@ -11,6 +11,7 @@ import { useOfflineData } from "../hooks/useOfflineData"
 import OfflineIndicator from "../components/OfflineIndicator"
 import CoverImage from "../components/content/CoverImage"
 import DetailSheet from "../components/content/DetailSheet"
+import { toExternalUrl, openExternalUrl } from "../utils/externalLink"
 import { TEAL, BRAND, cardShadow, toDate, newsImage, NEWS_FALLBACK_IMAGE, tagColor, readingTime, matchesQuery } from "../utils/content"
 
 dayjs.extend(relativeTime)
@@ -211,7 +212,11 @@ const News = ({ search = "" }) => {
           { icon: "time-outline", text: `${readingTime(body)} min read` },
         ] : []}
         body={body}
-        actions={sel ? [{ icon: "share-social-outline", label: "Share story", primary: true, onPress: () => shareArticle(sel) }] : []}
+        actions={sel ? [
+          { icon: "share-social-outline", label: "Share story", primary: true, onPress: () => shareArticle(sel) },
+          // only when the story carries a valid external website URL (CMS: News → External website URL); opens in the device browser on tap
+          toExternalUrl(sel.externalUrl) ? { icon: "open-outline", label: "Read full story", wide: true, onPress: () => openExternalUrl(sel.externalUrl) } : null,
+        ].filter(Boolean) : []}
       />
     </View>
   )

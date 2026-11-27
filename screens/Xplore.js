@@ -161,8 +161,10 @@ export default function Xplore() {
     )
   }
 
+  // The Xplore screen is mounted inside App.js SafeScreen, which already applies the top inset (plus a small constant) above the Header.
+  // This SafeAreaView must therefore not add the top inset a second time: that duplicate was the extra gap under the header.
   return (
-    <SafeAreaView className="flex-1 bg-bg">
+    <SafeAreaView className="flex-1 bg-bg" edges={["bottom", "left", "right"]}>
       <StatusBar barStyle="dark-content" />
 
       {/* Header — mirrors Community's header exactly */}

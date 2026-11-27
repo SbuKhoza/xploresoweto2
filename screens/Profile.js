@@ -23,6 +23,7 @@ import { logoutUser, validatePassword } from "../Firebase/authService"
 import { uriToBlob } from "../utils/uriToBlob"
 import KasiPicker from "../components/KasiPicker"
 import { useEnrollment } from "../utils/enrollment"
+import { useScrimScrollProps } from "../components/StatusBarScrim"
 
 // ── Design tokens (mirror tailwind.config.js / Home) ────────────────────────
 const TEAL  = "#1B4D5C"
@@ -140,6 +141,7 @@ const initialsOf = (name = "") =>
 
 export default function Profile() {
   const insets = useSafeAreaInsets()
+  const scrimScroll = useScrimScrollProps()   // fades the status-bar background in as the page scrolls
 
   const [user, setUser] = useState(null)
   const [photoURL, setPhotoURL] = useState(null)
@@ -361,7 +363,7 @@ export default function Profile() {
 
   return (
     <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : "height"}>
-      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 120 }} {...scrimScroll}>
 
         {/* ── Hero ── */}
         <LinearGradient

@@ -1,7 +1,7 @@
 import {
   Text, View, ScrollView, TextInput, TouchableOpacity,
   Image, Dimensions, Modal, FlatList, ActivityIndicator, Keyboard,
-  Animated, Easing,
+  Animated, Easing, Alert,
 } from "react-native"
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
@@ -20,6 +20,9 @@ import TownshipSheet from "../components/township/TownshipSheet"
 import { useEnrollment, DEFAULT_GREETING } from "../utils/enrollment"
 import { useTownships } from "../hooks/useTownships"
 import { useHomeContent } from "../hooks/useHomeContent"
+import { useScrimScrollProps } from "../components/StatusBarScrim"
+import MalloyaLogo from "../components/MalloyaLogo"
+import { resolveTownshipResult } from "../utils/townshipSearch"
 import { useAnnouncements } from "../hooks/useAnnouncements"
 import { announcementStyle } from "../utils/announcements"
 
@@ -313,6 +316,7 @@ const SectionHeader = ({ title, icon, bar, onSeeAll, subtitle }) => (
 const Home = () => {
   const navigation    = useNavigation()
   const insets        = useSafeAreaInsets()
+  const scrimScroll   = useScrimScrollProps()   // fades the status-bar background in as the page scrolls
   const [userDisplayName, setUserDisplayName] = useState("User")
   const [loading, setLoading]                 = useState(true)
   const { townships, loading: townshipsLoading } = useTownships()   // dynamic, from Firestore
@@ -514,9 +518,21 @@ const Home = () => {
 
   const handleResultPress = (item) => {
     closeSearch()
+    if (item.collection === "homescreen") { openTownshipResult(item); return }
     if (item.screen) {
       goXploreItem(item.screen)
     }
+  }
+
+  // A township search result opens the existing township detail sheet for that exact document (utils/townshipSearch.js).
+  // Missing, inactive or incomplete records show a short message instead of crashing or doing nothing.
+  const openTownshipResult = (item) => {
+    const r = resolveTownshipResult(item, townships)
+    if (r.kind === "unavailable") {
+      setTimeout(() => Alert.alert("Township unavailable", "This township is no longer available."), 350)
+      return
+    }
+    setTimeout(() => { setActiveTownshipIdx(r.kind === "loaded" ? r.index : 0); setActiveTownship(r.doc) }, 350)
   }
 
   // ── Search result item ───────────────────────────────────────────────────
@@ -573,7 +589,7 @@ const Home = () => {
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <>
-      <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+      <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }} {...scrimScroll}>
 
         {/* ── Hero: Orlando Towers backdrop, greeting, weather, search ── */}
         <View style={{ paddingTop: insets.top + 10 }}>
@@ -873,9 +889,7 @@ const Home = () => {
                     <Ionicons name="arrow-forward" size={14} color="#fff" style={{ marginLeft: 6 }} />
                   </View>
                 </View>
-                <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name="compass" size={32} color="#fff" />
-                </View>
+                <MalloyaLogo url={featuredImage?.malloyLogoUrl} />
               </LinearGradient>
             </TouchableOpacity>
           </View>

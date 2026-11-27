@@ -11,7 +11,7 @@ const BRAND = "#E8600A"
  * Full-article / full-event sheet shared by the News and Events screens.
  *  - meta:    [{ icon, text }]   info rows under the title
  *  - body:    string, paragraphs split on new lines
- *  - actions: [{ icon, label, onPress, primary }]
+ *  - actions: [{ icon, label, onPress, primary, wide }]   `wide` actions are drawn full-width under the regular row (used for external links)
  */
 const DetailSheet = ({ visible, onClose, image, fallbackImage, fallbackIcon, pill, pillColor = BRAND, title, meta = [], body, actions = [] }) => {
   const insets = useSafeAreaInsets()
@@ -64,16 +64,35 @@ const DetailSheet = ({ visible, onClose, image, fallbackImage, fallbackIcon, pil
             )}
 
             {actions.length > 0 && (
-              <View className="flex-row gap-2.5 mt-4">
-                {actions.map((a, i) => (
+              <View className="mt-4">
+                {actions.some((a) => !a.wide) && (
+                  <View className="flex-row gap-2.5">
+                    {actions.filter((a) => !a.wide).map((a, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        activeOpacity={0.85}
+                        onPress={a.onPress}
+                        accessibilityRole="button"
+                        accessibilityLabel={a.label}
+                        className={`flex-1 flex-row items-center justify-center py-3 rounded-2xl ${a.primary ? "bg-brand" : "bg-surface border border-line"}`}
+                      >
+                        <Ionicons name={a.icon} size={16} color={a.primary ? "#fff" : TEAL} />
+                        <Text className={`text-[13px] font-extrabold ml-1.5 ${a.primary ? "text-white" : "text-teal"}`}>{a.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                {actions.filter((a) => a.wide).map((a, i) => (
                   <TouchableOpacity
-                    key={i}
+                    key={`wide-${i}`}
                     activeOpacity={0.85}
                     onPress={a.onPress}
-                    className={`flex-1 flex-row items-center justify-center py-3 rounded-2xl ${a.primary ? "bg-brand" : "bg-surface border border-line"}`}
+                    accessibilityRole="link"
+                    accessibilityLabel={a.label}
+                    className={`flex-row items-center justify-center py-3.5 rounded-2xl mt-2.5 min-h-[48px] ${a.primary ? "bg-brand" : "bg-surface border border-line"}`}
                   >
+                    <Text className={`text-[14px] font-extrabold mr-1.5 ${a.primary ? "text-white" : "text-teal"}`}>{a.label}</Text>
                     <Ionicons name={a.icon} size={16} color={a.primary ? "#fff" : TEAL} />
-                    <Text className={`text-[13px] font-extrabold ml-1.5 ${a.primary ? "text-white" : "text-teal"}`}>{a.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>

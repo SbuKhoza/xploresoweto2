@@ -5,6 +5,7 @@ import { useRef, createContext, useContext, useEffect } from "react"
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { CommonActions } from "@react-navigation/native"
+import { useScrimOffset } from "./StatusBarScrim"
 
 // ── Design tokens — must match Home.js ──────────────────────────────────────
 const ACCENT    = "#1B4D5C"   // Deep teal
@@ -40,8 +41,13 @@ export const ScrollTrackingView = ({ children, style }) => (
 // Hook to connect FlatLists / ScrollViews to scroll tracking
 export const useScrollTracking = () => {
   const { scrollY } = useScrollContext()
+  // On screens that draw under the status bar (App.js SafeScreen scrim) the same scroll events also drive the status-bar background fade.
+  const onScrimOffset = useScrimOffset()
   return {
-    onScroll: Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true }),
+    onScroll: Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+      useNativeDriver: true,
+      ...(onScrimOffset ? { listener: (e) => onScrimOffset(e?.nativeEvent?.contentOffset?.y) } : {}),
+    }),
     scrollEventThrottle: 16,
   }
 }

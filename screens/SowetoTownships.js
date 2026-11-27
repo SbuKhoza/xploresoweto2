@@ -1,31 +1,36 @@
-import { useState, useMemo } from "react"
-import { Text, View, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, RefreshControl } from "react-native"
+import { useState, useMemo, useCallback } from "react"
+import { Text, View, TouchableOpacity, TextInput, StatusBar, ActivityIndicator, RefreshControl, useWindowDimensions } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import { LinearGradient } from "expo-linear-gradient"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useScrollTracking, AnimatedFlatList } from "../components/BottomNav"
 import TownshipSheet from "../components/township/TownshipSheet"
+import TownshipCard from "../components/township/TownshipCard"
+import DynamicHero, { CREAM } from "../components/DynamicHero"
+import { useScreenBack } from "../hooks/useScreenBack"
 import { useTownships } from "../hooks/useTownships"
 
 const TEAL = "#1B4D5C"
+const BRAND = "#E8600A"
+const INK = "#14213D"
 const MUTED = "#5E7088"
-
-const cardShadow = {
-  shadowColor: "#2B5FA8", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 16, elevation: 6,
-}
 
 /**
  * Directory of every Soweto township. Opened from Home → Soweto Townships → See All.
- * Fully dynamic: townships come from Firestore (homescreen, type "township") via
- * useTownships, cached for offline use. Manage them in the Xplore CMS → Soweto → Townships.
+ * Fully dynamic: townships come from Firestore (homescreen, type "township") via useTownships, cached for offline use, inactive ones hidden.
+ * The hero is the existing dynamic Home banner (CMS-managed). The count shown is the number of townships actually loaded.
+ * Manage townships in the Xplore CMS → Soweto → Townships.
  */
 export default function SowetoTownships() {
   const scrollProps = useScrollTracking()
+  const insets = useSafeAreaInsets()
+  const { height: screenH } = useWindowDimensions()
+  const goBack = useScreenBack()
   const { townships: all, loading, isOffline, refresh } = useTownships()
   const [query, setQuery] = useState("")
   const [active, setActive] = useState(null)
   const [activeIdx, setActiveIdx] = useState(0)
 
-  // Search matches the township name, its area, or the names of its local legends
+  // Search matches the township name, its area, its aliases, or the names of its local legends
   const q = query.trim().toLowerCase()
   const data = useMemo(() => {
     if (!q) return all
@@ -37,98 +42,78 @@ export default function SowetoTownships() {
     )
   }, [all, q])
 
-  const renderItem = ({ item }) => {
-    const { info, doc, index } = item
-    const [c1, c2] = info.colors
-    return (
-      <TouchableOpacity
-        activeOpacity={0.88}
-        onPress={() => { setActiveIdx(index); setActive(doc) }}
-        accessibilityRole="button"
-        accessibilityLabel={`${info.name} township info`}
-        style={{ width: "48%", marginBottom: 12, borderRadius: 20, ...cardShadow }}
-      >
-        <LinearGradient colors={[c1, c2]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={{ borderRadius: 20, padding: 14, minHeight: 150, overflow: "hidden" }}>
-          {/* glass highlight + big watermark letter */}
-          <LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.30)", "rgba(255,255,255,0)"]}
-            style={{ position: "absolute", top: 0, left: 0, right: 0, height: "60%" }} />
-          <Text style={{ position: "absolute", right: -6, bottom: -26, fontSize: 96, fontWeight: "900", color: "rgba(255,255,255,0.14)" }}>
-            {info.name.charAt(0)}
-          </Text>
+  const renderItem = useCallback(({ item }) => (
+    <TownshipCard info={item.info} onPress={() => { setActiveIdx(item.index); setActive(item.doc) }} />
+  ), [])
 
-          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.25)", alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="location" size={18} color="#fff" />
-          </View>
-          <Text numberOfLines={1} style={{ color: "#fff", fontSize: 18, fontWeight: "800", marginTop: 12, letterSpacing: -0.3 }}>{info.name}</Text>
-          <Text numberOfLines={2} style={{ color: "rgba(255,255,255,0.9)", fontSize: 11.5, marginTop: 3, lineHeight: 16 }}>
-            {info.tagline}
-          </Text>
+  const heroH = Math.round(Math.min(210, Math.max(150, screenH * 0.22)))
 
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-            {info.established ? (
-              <View style={{ backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 }}>
-                <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>Est. {info.established}</Text>
-              </View>
-            ) : null}
-            {info.people.length > 0 ? (
-              <View style={{ backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 }}>
-                <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>{info.people.length} legends</Text>
-              </View>
-            ) : null}
-          </View>
-        </LinearGradient>
-      </TouchableOpacity>
-    )
-  }
+  const header = (
+    <View>
+      <DynamicHero height={heroH} topInset={insets.top}>
+        <TouchableOpacity onPress={goBack} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          style={{ position: "absolute", left: 16, top: insets.top + 10, width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,248,240,0.94)", alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="chevron-back" size={22} color={INK} />
+        </TouchableOpacity>
+        <View style={{ position: "absolute", left: 72, top: insets.top + 12, backgroundColor: "rgba(255,248,240,0.9)", borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 }}>
+          <Text style={{ fontSize: 22, fontWeight: "900", color: INK, letterSpacing: -0.4 }}>Xplore<Text style={{ color: BRAND }}>Soweto</Text></Text>
+        </View>
+      </DynamicHero>
 
-  return (
-    <View className="flex-1">
-      <StatusBar barStyle="dark-content" />
-
-      {/* Title + search */}
-      <View className="px-[22px] pt-2 pb-3">
-        <Text className="text-[26px] font-extrabold text-ink -tracking-tight">Soweto Townships</Text>
-        <Text className="text-[13px] text-muted font-medium mt-0.5">
+      <View style={{ paddingHorizontal: 22, marginTop: -4, paddingBottom: 14 }}>
+        <Text style={{ fontSize: 33, lineHeight: 39, fontWeight: "900", color: INK, letterSpacing: -0.8 }} accessibilityRole="header">Soweto Townships</Text>
+        <View style={{ width: 150, height: 4, borderRadius: 2, backgroundColor: BRAND, marginTop: 1, marginLeft: 70, transform: [{ rotate: "-1deg" }] }} />
+        <Text style={{ fontSize: 14.5, lineHeight: 21, color: MUTED, fontWeight: "500", marginTop: 8 }}>
           {all.length} {all.length === 1 ? "township" : "townships"} · history, local legends & landmarks
         </Text>
 
-        <View className="flex-row items-center h-[44px] rounded-full bg-surface px-3.5 border border-line mt-3" style={{ shadowColor: "#2B5FA8", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 }}>
-          <Ionicons name="search" size={17} color={MUTED} />
+        <View style={{ flexDirection: "row", alignItems: "center", minHeight: 52, borderRadius: 26, backgroundColor: "#fff", paddingHorizontal: 16, borderWidth: 1.5, borderColor: BRAND, marginTop: 14 }}>
+          <Ionicons name="search" size={20} color={BRAND} />
           <TextInput
             value={query}
             onChangeText={setQuery}
             placeholder="Search a township or a local legend…"
-            placeholderTextColor="#9AA9AE"
+            placeholderTextColor="#8A94A0"
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="search"
-            className="flex-1 ml-2.5 text-[14px] text-ink"
-            style={{ paddingVertical: 0 }}
+            accessibilityLabel="Search townships"
+            style={{ flex: 1, marginLeft: 10, fontSize: 15, color: INK, paddingVertical: 8 }}
           />
           {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery("")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityLabel="Clear search">
-              <Ionicons name="close-circle" size={18} color="#B5BDBF" />
+            <TouchableOpacity onPress={() => setQuery("")} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityRole="button" accessibilityLabel="Clear search">
+              <Ionicons name="close-circle" size={20} color="#B5BDBF" />
             </TouchableOpacity>
           )}
         </View>
       </View>
+    </View>
+  )
+
+  return (
+    <View style={{ flex: 1, backgroundColor: CREAM }}>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
       <AnimatedFlatList
         data={data}
         keyExtractor={(item) => item.info.key}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} colors={["#E8600A"]} tintColor="#E8600A" />}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} colors={[BRAND]} tintColor={BRAND} progressViewOffset={insets.top} />}
         renderItem={renderItem}
         numColumns={2}
-        columnWrapperStyle={{ justifyContent: "space-between" }}
-        contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 4, paddingBottom: 120 }}
+        columnWrapperStyle={{ justifyContent: "space-between", paddingHorizontal: 22 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        ListHeaderComponent={header}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews
         ListEmptyComponent={
           loading ? (
-            <View className="items-center mt-16"><ActivityIndicator size="large" color="#E8600A" /></View>
+            <View className="items-center mt-12"><ActivityIndicator size="large" color={BRAND} /></View>
           ) : (
-            <View className="items-center mt-12 px-8">
+            <View className="items-center mt-8 px-8">
               <View className="w-20 h-20 rounded-3xl bg-teal-light justify-center items-center mb-4">
                 <Ionicons name={all.length === 0 ? (isOffline ? "cloud-offline-outline" : "location-outline") : "search"} size={34} color={TEAL} />
               </View>

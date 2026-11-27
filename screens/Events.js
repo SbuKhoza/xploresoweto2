@@ -10,6 +10,7 @@ import { useOfflineData } from "../hooks/useOfflineData"
 import OfflineIndicator from "../components/OfflineIndicator"
 import CoverImage from "../components/content/CoverImage"
 import DetailSheet from "../components/content/DetailSheet"
+import { toExternalUrl, openExternalUrl } from "../utils/externalLink"
 import {
   TEAL, BRAND, cardShadow, eventImage, eventTime, normaliseEvent,
   EVENT_FALLBACK_IMAGE, matchesQuery,
@@ -284,6 +285,8 @@ const Events = ({ search = "" }) => {
         actions={selected ? [
           selected.location ? { icon: "navigate", label: "Directions", primary: true, onPress: () => openMaps(selected.location) } : null,
           { icon: "share-social-outline", label: "Share", onPress: () => shareEvent(selected) },
+          // only when the event carries a valid external website URL (CMS: Events → External website URL); opens in the device browser on tap
+          toExternalUrl(selected.externalUrl) ? { icon: "open-outline", label: "More event details", wide: true, onPress: () => openExternalUrl(selected.externalUrl) } : null,
         ].filter(Boolean) : []}
       />
     </View>

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   Text, View, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform,
-  ScrollView, FlatList, ActivityIndicator, StatusBar,
+  FlatList, ActivityIndicator, StatusBar,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import GlossyBackground from "../components/GlossyBackground"
+import GreetingEnrollment from "../components/GreetingEnrollment"
 import { useEnrollment, GREETINGS } from "../utils/enrollment"
 import { getKasiOptions } from "../utils/townshipList"
 import { useTownships } from "../hooks/useTownships"
@@ -88,53 +89,7 @@ export default function EnrollmentScreen() {
   }
 
   // ── Step bodies ───────────────────────────────────────────────────────────
-  const GreetingStep = (
-    <View>
-      <View className="flex-row flex-wrap justify-between">
-        {GREETINGS.map((g) => {
-          const on = greeting === g.key
-          return (
-            <TouchableOpacity
-              key={g.key}
-              activeOpacity={0.9}
-              onPress={() => { setGreeting(g.key); setError("") }}
-              accessibilityRole="button"
-              accessibilityState={{ selected: on }}
-              accessibilityLabel={`Greeting ${g.key}`}
-              style={{ width: "48%", marginBottom: 12, borderRadius: 22, opacity: greeting && !on ? 0.72 : 1, ...cardShadow }}
-            >
-              <LinearGradient colors={g.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                style={{ borderRadius: 22, paddingVertical: 22, alignItems: "center", borderWidth: on ? 3 : 0, borderColor: "#FFFFFF", overflow: "hidden" }}>
-                <LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.3)", "rgba(255,255,255,0)"]}
-                  style={{ position: "absolute", top: 0, left: 0, right: 0, height: "60%" }} />
-                <Text style={{ fontSize: 34 }}>{g.emoji}</Text>
-                <Text className="text-[22px] font-extrabold text-white mt-1">{g.key}</Text>
-                {on && (
-                  <View className="absolute top-2.5 right-2.5 w-6 h-6 rounded-full bg-white items-center justify-center">
-                    <Ionicons name="checkmark" size={16} color={g.colors[0]} />
-                  </View>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-          )
-        })}
-      </View>
-
-      {/* Live preview */}
-      <View className="bg-surface rounded-2xl px-4 py-3.5 border border-line mt-1 flex-row items-center" style={cardShadow}>
-        <View className="w-10 h-10 rounded-xl bg-brand-light items-center justify-center">
-          <Ionicons name="eye" size={20} color={BRAND} />
-        </View>
-        <View className="ml-3 flex-1">
-          <Text className="text-[11px] font-bold text-muted uppercase">Preview</Text>
-          <Text className="text-[17px] font-extrabold text-ink" numberOfLines={1}>
-            {greeting ? `${greeting}, ${previewName}!` : "Tap a greeting above"}
-          </Text>
-        </View>
-      </View>
-    </View>
-  )
-
+  // (the greeting step is rendered by components/GreetingEnrollment.js)
   const KasiRow = ({ item }) => {
     const on = !other && kasi === item
     return (
@@ -215,6 +170,28 @@ export default function EnrollmentScreen() {
 
   const meta = COPY[step]
 
+  // Step 1 (greeting) uses the redesigned layout. Its state, validation, saving and navigation are exactly the ones above.
+  if (step === "greeting") {
+    return (
+      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <GreetingEnrollment
+          greetings={GREETINGS}
+          greeting={greeting}
+          onSelect={(key) => { setGreeting(key); setError("") }}
+          previewName={previewName}
+          stepIndex={stepIdx}
+          stepCount={steps.length}
+          title={meta.title}
+          subtitle={meta.sub}
+          canContinue={canContinue}
+          busy={busy}
+          error={error}
+          onNext={onNext}
+        />
+      </KeyboardAvoidingView>
+    )
+  }
+
   return (
     <KeyboardAvoidingView className="flex-1 bg-bg" behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <GlossyBackground />
@@ -250,23 +227,17 @@ export default function EnrollmentScreen() {
 
       {/* ── Body ── */}
       <View className="flex-1 mt-5">
-        {step === "kasi" ? (
-          <FlatList
-            data={filtered}
-            keyExtractor={(n) => n}
-            renderItem={KasiRow}
-            ListHeaderComponent={KasiHeader}
-            ListFooterComponent={KasiFooter}
-            ListEmptyComponent={<Text className="text-[13px] text-muted text-center my-6">No match. You can add your kasi below.</Text>}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}
-          />
-        ) : (
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
-            {GreetingStep}
-          </ScrollView>
-        )}
+        <FlatList
+          data={filtered}
+          keyExtractor={(n) => n}
+          renderItem={KasiRow}
+          ListHeaderComponent={KasiHeader}
+          ListFooterComponent={KasiFooter}
+          ListEmptyComponent={<Text className="text-[13px] text-muted text-center my-6">No match. You can add your kasi below.</Text>}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}
+        />
       </View>
 
       {/* ── Footer: error + continue ── */}
