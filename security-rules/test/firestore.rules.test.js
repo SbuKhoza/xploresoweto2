@@ -33,6 +33,71 @@ describe("Firestore rules (Stage 1, proposed)", () => {
     })
   })
 
+  describe("staff read access to public content (corrected rule: isStaff() || isActive == true)", () => {
+    const PUBLIC = ["accommodations", "attractions", "business", "restaurants", "recreation", "events", "news", "announcements", "transport", "healthcare", "emergency", "publicservice", "homescreen", "xplore-menu", "loadshedding"]
+    beforeEach(async () => {
+      await env.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore()
+        for (const c of PUBLIC) { await setDoc(doc(db, `${c}/act`), { name: "A", isActive: true }); await setDoc(doc(db, `${c}/off`), { name: "B", isActive: false }); await setDoc(doc(db, `${c}/noflag`), { name: "C" }) }
+      })
+    })
+    const SAv = (verified) => as_("root", SA, verified)
+    it("ordinary users can read ACTIVE public content (get and filtered query)", async () => {
+      for (const c of PUBLIC) { await assertSucceeds(getDoc(doc(as_("alice"), `${c}/act`))); await assertSucceeds(getDocs(query(collection(as_("alice"), c), where("isActive", "==", true)))) }
+    })
+    it("ordinary users cannot read INACTIVE or flag-less content", async () => {
+      for (const c of PUBLIC) { await assertFails(getDoc(doc(as_("alice"), `${c}/off`))); await assertFails(getDoc(doc(as_("alice"), `${c}/noflag`))); await assertFails(getDoc(doc(anon(), `${c}/off`))) }
+    })
+    it("ordinary users and anonymous visitors cannot run UNFILTERED queries on any public collection", async () => {
+      for (const c of PUBLIC) { await assertFails(getDocs(collection(as_("alice"), c))); await assertFails(getDocs(collection(anon(), c))); await assertFails(getDocs(query(collection(as_("alice"), c), where("isActive", "==", false)))) }
+    })
+    it("an ordinary user with a staff-looking claim but no record or wrong role still sees nothing extra", async () => {
+      for (const c of PUBLIC) { await assertFails(getDoc(doc(as_("ghost", SA), `${c}/off`))); await assertFails(getDocs(collection(as_("ghost", ED), c))) }
+    })
+    it("an ACTIVE verified Super Admin can read inactive and flag-less content and run unfiltered queries on every public collection", async () => {
+      for (const c of PUBLIC) {
+        await assertSucceeds(getDoc(doc(as_("root", SA), `${c}/off`))); await assertSucceeds(getDoc(doc(as_("root", SA), `${c}/noflag`)))
+        const snap = await assertSucceeds(getDocs(collection(as_("root", SA), c))); if (snap.size < 3) throw new Error(`${c}: expected the whole collection, got ${snap.size}`)
+        await assertSucceeds(getDocs(query(collection(as_("root", SA), c), where("isActive", "==", false))))
+      }
+    })
+    it("an ACTIVE verified Editor can read inactive and flag-less content and run unfiltered queries on every public collection", async () => {
+      for (const c of PUBLIC) {
+        await assertSucceeds(getDoc(doc(as_("ed", ED), `${c}/off`))); await assertSucceeds(getDoc(doc(as_("ed", ED), `${c}/noflag`)))
+        const snap = await assertSucceeds(getDocs(collection(as_("ed", ED), c))); if (snap.size < 3) throw new Error(`${c}: expected the whole collection, got ${snap.size}`)
+      }
+    })
+    it("staff cannot read the same documents without the claim, with an unverified email, or with an inactive record", async () => {
+      for (const c of ["restaurants", "homescreen", "xplore-menu"]) {
+        await assertFails(getDoc(doc(as_("root", {}), `${c}/off`)))                 // record, no claim
+        await assertFails(getDocs(collection(as_("root", {}), c)))
+        await assertFails(getDoc(doc(as_("root", SA, false), `${c}/off`)))        // claim + record, unverified email
+        await assertFails(getDocs(collection(as_("ed", ED, false), c)))
+        await assertFails(getDoc(doc(as_("exSA", SA), `${c}/off`)))               // claim, INACTIVE record
+        await assertFails(getDocs(collection(as_("exEd", ED), c)))
+      }
+    })
+    it("staff read access does not extend to collections outside the allow-list", async () => {
+      for (const p of ["Person-Of-Interest/p1", "admin/x", "userservices/u1", "unknown/x", "unknown/y"]) { await assertFails(getDoc(doc(as_("root", SA), p))); await assertFails(getDoc(doc(as_("ed", ED), p))) }
+      await assertFails(getDocs(collection(as_("root", SA), "unknown"))); await assertFails(getDocs(collection(as_("ed", ED), "userservices")))
+    })
+    it("private user collections stay protected from staff and others", async () => {
+      await assertSucceeds(getDoc(doc(as_("alice"), "users/alice")))                          // own profile only
+      for (const ctx of [as_("root", SA), as_("ed", ED), as_("bob")]) { await assertFails(getDoc(doc(ctx, "users/alice"))); await assertFails(getDocs(collection(ctx, "users"))) }
+      for (const p of ["bookings/alice_b1", "service-requests/alice_s1", "provider-applications/alice_r1", "organisation-invitations/inv1"]) await assertFails(getDoc(doc(as_("ed", ED), p)))
+    })
+    it("private Malloya collections stay server-only, even for Super Admins and Editors", async () => {
+      await env.withSecurityRulesDisabled(async (ctx) => { for (const p of ["ai-conversations/c_1", "ai-usage/u1", "ai-config/default", "ai-learning-candidates/c1", "ai-knowledge/k1", "ai-learning-seen/s1", "ai-learning-optout/o1", "ai-learning-events/e1", "ai-consent/x"]) await setDoc(doc(ctx.firestore(), p), { v: 1 }) })
+      for (const ctx of [as_("root", SA), as_("ed", ED), as_("alice")]) for (const c of ["ai-usage", "ai-config", "ai-learning-candidates", "ai-learning-seen", "ai-learning-optout", "ai-learning-events", "ai-consent"]) { await assertFails(getDocs(collection(ctx, c))); await assertFails(getDoc(doc(ctx, `${c}/x`))) }
+      for (const ctx of [as_("root", SA), as_("ed", ED)]) await assertFails(setDoc(doc(ctx, "ai-config/default"), { enabled: true }))
+    })
+    it("writes are unchanged: staff may write public content, ordinary users may not", async () => {
+      await assertSucceeds(setDoc(doc(as_("root", SA), "restaurants/new1"), { name: "x", isActive: false })); await assertSucceeds(setDoc(doc(as_("ed", ED), "events/new1"), { title: "x" }))
+      await assertFails(setDoc(doc(as_("alice"), "restaurants/new2"), { name: "x", isActive: true })); await assertFails(deleteDoc(doc(as_("alice"), "restaurants/act")))
+      await assertFails(setDoc(doc(as_("root", {}), "restaurants/new3"), { name: "x" }))
+    })
+  })
+
   describe("platform staff: a claim alone grants nothing", () => {
     it("active editor (claim + verified + record) can write content", () => assertSucceeds(updateDoc(doc(as_("ed", ED), "restaurants/r1"), { name: "Renamed" })))
     it("active super admin can write content and read super-admin/audit", async () => {

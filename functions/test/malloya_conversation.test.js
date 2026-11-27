@@ -179,13 +179,20 @@ test("an unknown named street is acknowledged honestly and the person is asked w
   const r = await say("we're going to Mohale Street tomorrow")
   assert.ok(!r.blocks.some((b) => b.type === "verified")); assert.match(text(r), /\?/)
 })
-test("production Luna safeguards are untouched, and the security rules only GAINED the learning collections (nothing removed or loosened)", () => {
+test("production Luna safeguards are untouched, and the security rules changed ONLY by the learning collections (deny-all) and the documented staff-read correction", () => {
   const { execFileSync } = require("node:child_process")
   const git = (...args) => execFileSync("git", args, { cwd: path.join(__dirname, "..", "..") }).toString()
   let luna, stat
-  try { luna = git("diff", "--name-only", "staging/env-foundation", "--", "functions/src/ai/luna").trim(); stat = git("diff", "--numstat", "staging/env-foundation", "--", "security-rules/firestore.rules", "security-rules/storage.rules").trim() } catch (e) { return } // no such branch here (e.g. after merging): nothing to compare
+  try { luna = git("diff", "--name-only", "staging/env-foundation", "--", "functions/src/ai/luna").trim(); stat = git("diff", "--numstat", "staging/env-foundation", "--", "security-rules/firestore.rules", "security-rules/storage.rules").trim() } catch (e) { return } // baseline branch absent (e.g. a fresh clone): nothing to compare
   assert.equal(luna, "", "Luna must not change")
-  for (const line of stat.split("\n").filter(Boolean)) { const [added, removed, file] = line.split("\t"); assert.equal(removed, "0", `${file}: no rule line may be removed or changed`); assert.match(file, /firestore\.rules$/, "storage rules must not change") }
-  const added = git("diff", "-U0", "staging/env-foundation", "--", "security-rules/firestore.rules").split("\n").filter((l) => /^\+[^+]/.test(l)).join("\n")
-  assert.ok(!/allow (read|write|get|list|create|update|delete)[^;]*:\s*if\s+(?!false)/.test(added), "every added rule is deny-all")
+  for (const line of stat.split("\n").filter(Boolean)) { const [, , file] = line.split("\t"); assert.match(file, /firestore\.rules$/, "storage rules must not change") }
+  const diff = git("diff", "-U0", "staging/env-foundation", "--", "security-rules/firestore.rules").split("\n")
+  const norm = (l) => l.slice(1).trim()
+  // The ONE intentional loosening: active platform staff may read every document in the public-content allow-list (see security-rules/test/firestore.rules.test.js).
+  const STAFF_READ_REMOVED = ["match /{coll}/{docId} {", "allow read: if coll in publicCollections() && resource.data.isActive == true;", "allow create, update, delete: if coll in publicCollections() && isStaff();", "}"]
+  const removed = diff.filter((l) => /^-[^-]/.test(l)).map(norm).filter((l) => !l.startsWith("//"))
+  for (const r of removed) assert.ok(STAFF_READ_REMOVED.includes(r), `rule line removed or changed outside the documented staff-read correction: ${r}`)
+  const STAFF_READ_ADDED = ["allow read: if coll in publicCollections()", "&& (isStaff() || resource.data.isActive == true);", "allow create, update, delete:", "if coll in publicCollections() && isStaff();", "match /{coll}/{docId} {", "}"]
+  const added = diff.filter((l) => /^\+[^+]/.test(l)).map(norm).filter((l) => l && !l.startsWith("//") && !STAFF_READ_ADDED.includes(l)).join("\n")
+  assert.ok(!/allow (read|write|get|list|create|update|delete)[^;]*:\s*if\s+(?!false)/.test(added), "every other added rule is deny-all")
 })

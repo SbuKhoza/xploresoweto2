@@ -24,6 +24,6 @@ npm --prefix security-rules test
 3. Filtered public queries (`where("isActive","==",true)`) are accepted and unfiltered ones are rejected.
 
 ## Design
-See `docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md`. In short: default deny; public content readable only when `isActive == true`
+See `docs/stage1/ARCHITECTURE_AND_DATA_MODEL.md`. In short: default deny; public content readable only when `isActive == true` (except that active platform staff may read every document in the public-content allow-list, including inactive and flag-less ones, so the CMS can show and repair them)
 (queries must filter); every sensitive write is a Cloud Function (Admin SDK bypasses rules); staff need claim + verified email +
 active record; organisation access comes from membership documents that only functions write.

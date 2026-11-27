@@ -9,8 +9,9 @@
 //    Clients can therefore not create, edit or delete them directly.
 //  * Platform staff: a custom claim ALONE grants nothing. Staff need the claim AND a verified email AND an active
 //    authoritative record (super-admin/{uid} or platform-editors/{uid}).
-//  * Rules are not filters: public content is readable only when isActive == true, so queries MUST include
-//    where("isActive", "==", true) (the app's data layer does this). Unfiltered list queries are rejected.
+//  * Rules are not filters: for ordinary users public content is readable only when isActive == true, so queries MUST include
+//    where("isActive", "==", true) (the app's data layer does this). Unfiltered list queries are rejected. Active platform staff may read
+//    every document in the public-content allow-list (the CMS needs inactive and flag-less documents).
 //
 // Role -> permission mapping in roleGrants() mirrors functions/src/lib/constants.js (ROLE_PERMISSIONS). Keep them in sync.
 // =====================================================================================================================
@@ -78,8 +79,14 @@ service cloud.firestore {
               'xplore-menu', 'loadshedding'];
     }
     match /{coll}/{docId} {
-      allow read: if coll in publicCollections() && resource.data.isActive == true;
-      allow create, update, delete: if coll in publicCollections() && isStaff();
+      // Everyone: active documents only (queries must filter on isActive == true). Active platform STAFF (claim + verified email + active
+      // authoritative record) may read every document in the allow-list, including inactive ones and ones with no isActive field, and may run
+      // unfiltered list queries, because the CMS has to show and repair them. This does not widen anything for ordinary users.
+      allow read: if coll in publicCollections()
+        && (isStaff() || resource.data.isActive == true);
+
+      allow create, update, delete:
+        if coll in publicCollections() && isStaff();
     }
 
     // ---------------------------------------------------------------- users (private)
