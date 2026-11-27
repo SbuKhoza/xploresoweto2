@@ -20,7 +20,12 @@ export default defineConfig({
     // the app uses require("../x.png") for artwork (Metro); turn those into plain strings for Vite
     transform(code, id) { return /\.(js|jsx)$/.test(id) && !id.includes("node_modules") ? code.replace(/require\((["'][^"']+\.(?:png|jpe?g|webp)["'])\)/g, "$1") : null },
   }],
-  esbuild: { loader: "jsx", jsx: "automatic", include: /(components|screens|utils|hooks|App|tests)\/.*\.jsx?$|App\.js$/, exclude: /node_modules/ },
+  oxc: {
+    include: /\.(js|jsx)$/,
+    exclude: /node_modules/,
+    lang: "jsx",
+    jsx: { runtime: "automatic" },
+  },
   resolve: {
     alias: [
       // the app sources live outside tests/ui, so React and react-native-web must be resolved from here (one copy of React)
