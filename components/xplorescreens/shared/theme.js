@@ -1,3 +1,5 @@
+import { isObject, toFiniteNumber, toStringList, toText } from "../../../utils/listingData"
+
 // Shared design tokens + helpers for the Xplore list screens.
 // Values mirror tailwind.config.js and the Restaurants screen.
 
@@ -132,8 +134,8 @@ export const TOP_RATED_MIN_REVIEWS = 10
 export const POPULAR_MIN_REVIEWS   = 200
 
 export const getEditorialBadge = (r) => {
-  const rating  = Number(r.rating)  || 0
-  const reviews = Number(r.reviews) || 0
+  const rating  = toFiniteNumber(r?.rating)  || 0
+  const reviews = toFiniteNumber(r?.reviews) || 0
   if (rating >= TOP_RATED_MIN_RATING && reviews >= TOP_RATED_MIN_REVIEWS)
     return { label: "Top Rated", icon: "star", color: "#6D4AD8" }
   if (reviews >= POPULAR_MIN_REVIEWS)
@@ -144,10 +146,12 @@ export const getEditorialBadge = (r) => {
 // Status badge from the listing's `status` / `availability` text, falling back
 // to the opening-hours field. `ok` says whether the place is open / available.
 export const getStatusBadge = (item, now, hoursKey) => {
-  const s = item.status ?? item.availability
-  if (typeof s === "string" && s.trim()) {
-    const ok = /^(open|available)/i.test(s.trim())
-    return { label: s.trim(), color: ok ? SUCCESS : WARNING, dot: true, ok }
+  if (!isObject(item)) return null
+  // `status` wins, but only when it is usable text; a blank/invalid status falls through to `availability`, then to the hours.
+  const s = toText(item.status) || toText(item.availability)
+  if (s) {
+    const ok = /^(open|available)/i.test(s)
+    return { label: s, color: ok ? SUCCESS : WARNING, dot: true, ok }
   }
   const open = hoursKey ? isOpenNow(item[hoursKey], now) : null
   if (open === true)  return { label: "Open Now", color: SUCCESS,   dot: true, ok: true }
@@ -161,11 +165,12 @@ const SEARCH_KEYS = [
   "tags", "features", "activities", "services", "amenities", "specialties", "specialDishes",
 ]
 export const searchText = (item) => {
+  if (!isObject(item)) return ""
   const parts = []
   for (const k of SEARCH_KEYS) {
     const v = item[k]
-    if (Array.isArray(v)) v.forEach(x => parts.push(typeof x === "string" ? x : x?.name))
-    else if (typeof v === "string") parts.push(v)
+    if (Array.isArray(v)) parts.push(...toStringList(v)) // bad entries are skipped, never thrown on
+    else parts.push(toText(v))
   }
   return parts.filter(Boolean).join(" ").toLowerCase()
 }

@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons"
 import DateTimePicker from "@react-native-community/datetimepicker"
 import { callFunction, alertCallableError } from "../../utils/callable"
 import { newRequestId, toYMD } from "../../utils/requestId"
+import { formatPrice, stayEligibility, toPositiveInt, toText } from "../../utils/listingData"
 
 const ReservationForm = ({ visible, onClose, accommodation }) => {
   const [checkInDate, setCheckInDate] = useState(new Date())
@@ -81,6 +82,10 @@ const ReservationForm = ({ visible, onClose, accommodation }) => {
 
   const handleSubmitReservation = async () => {
     if (submittingRef.current) return
+    const eligible = stayEligibility(accommodation)
+    if (!eligible.ok) { Alert.alert("Can’t send request", eligible.reason); return }
+    const limit = toPositiveInt(accommodation?.maxGuests)
+    if (limit !== null && guests > limit) { Alert.alert("Too many guests", `This place sleeps up to ${limit} guests.`); return }
     if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim()) {
       Alert.alert("Missing info", "Please fill in all required fields")
       return
@@ -194,6 +199,11 @@ const ReservationForm = ({ visible, onClose, accommodation }) => {
   }
 
   if (!accommodation) return null
+  // Only what the listing really states is shown. No guest limit is invented: without one the "+" button is not capped here (the backend validates the request).
+  const maxGuests = toPositiveInt(accommodation.maxGuests)
+  const atMax = maxGuests !== null && guests >= maxGuests
+  const priceText = formatPrice(accommodation.price)
+  const eligibility = stayEligibility(accommodation)
 
   return (
     <Modal animationType="slide" transparent={false} visible={visible} onRequestClose={onClose}>
@@ -203,16 +213,17 @@ const ReservationForm = ({ visible, onClose, accommodation }) => {
           <TouchableOpacity className="w-9 h-9 rounded-full bg-bg justify-center items-center" onPress={onClose}>
             <Ionicons name="close" size={18} color="#1A1A1A" />
           </TouchableOpacity>
-          <Text className="flex-1 text-center text-[16px] font-extrabold text-ink" numberOfLines={1}>Reserve {accommodation.name}</Text>
+          <Text className="flex-1 text-center text-[16px] font-extrabold text-ink" numberOfLines={1}>Reserve {toText(accommodation.name)}</Text>
           <View className="w-9" />
         </View>
 
         <ScrollView className="flex-1 px-4 pt-4" showsVerticalScrollIndicator={false}>
           {/* Summary */}
           <View className="bg-surface rounded-2xl p-4 border border-line mb-4">
-            <Text className="text-lg font-extrabold text-ink mb-0.5">{accommodation.name}</Text>
-            <Text className="text-sm text-muted mb-2">{accommodation.location}</Text>
-            <Text className="text-base font-bold text-teal">R{accommodation.price} per night</Text>
+            <Text className="text-lg font-extrabold text-ink mb-0.5">{toText(accommodation.name)}</Text>
+            {!!toText(accommodation.location) && <Text className="text-sm text-muted mb-2">{toText(accommodation.location)}</Text>}
+            {!!priceText && <Text className="text-base font-bold text-teal">{priceText} per night</Text>}
+            {!eligibility.ok && <Text className="text-[12.5px] text-danger mt-2">{eligibility.reason}</Text>}
           </View>
 
           {/* Dates */}
@@ -267,14 +278,14 @@ const ReservationForm = ({ visible, onClose, accommodation }) => {
               </TouchableOpacity>
               <Text className="text-lg font-extrabold text-ink mx-6 min-w-[24px] text-center">{guests}</Text>
               <TouchableOpacity
-                className={`w-9 h-9 rounded-full justify-center items-center border ${guests >= accommodation.maxGuests ? "bg-bg border-line" : "bg-teal-light border-teal"}`}
-                onPress={() => guests < accommodation.maxGuests && setGuests(guests + 1)}
-                disabled={guests >= accommodation.maxGuests}
+                className={`w-9 h-9 rounded-full justify-center items-center border ${atMax ? "bg-bg border-line" : "bg-teal-light border-teal"}`}
+                onPress={() => !atMax && setGuests(guests + 1)}
+                disabled={atMax}
               >
-                <Ionicons name="add" size={17} color={guests >= accommodation.maxGuests ? "#C0C4D6" : "#1B4D5C"} />
+                <Ionicons name="add" size={17} color={atMax ? "#C0C4D6" : "#1B4D5C"} />
               </TouchableOpacity>
             </View>
-            <Text className="text-xs text-muted text-center">Maximum {accommodation.maxGuests} guests</Text>
+            {maxGuests !== null && <Text className="text-xs text-muted text-center">Maximum {maxGuests} guests</Text>}
           </View>
 
           {/* Breakfast */}

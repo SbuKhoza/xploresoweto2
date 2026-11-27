@@ -23,6 +23,7 @@ import {
   FilterSheet, DEFAULT_FILTERS, hasActiveFilters,
 } from "./shared/ui"
 import { ContactRow } from "./shared/detail"
+import { averageRating, normalizeListing, toImageUrl, toRating, toReview, toText } from "../../utils/listingData"
 import { openDirections } from "./shared/openDirections"
 
 const { width } = Dimensions.get("window")
@@ -118,8 +119,9 @@ const Business = () => {
       setDataLoading(true)
       const snapshot = await getDocs(publicCollectionRef("business"))
       const list = snapshot.docs.map((d) => {
-        const data = { id: d.id, ...d.data() }
-        data.__type = typeof data.type === "string" ? data.type.trim() : ""
+        // Normalised for the business schema (utils/listingData.js): services are objects with a name, images/galleryImages are usable URLs.
+        const data = { ...normalizeListing("business", { ...d.data(), id: d.id }), id: d.id }
+        data.__type = data.type
         return data
       })
       setBusinesses(list)
@@ -153,6 +155,7 @@ const Business = () => {
 
   const renderStars = (rating) => {
     const stars = []
+    rating = toRating(rating) ?? 0
     const full = Math.floor(rating)
     const half = rating % 1 !== 0
     for (let i = 0; i < full; i++) stars.push(<Ionicons key={i} name="star" size={14} color="#F5A524" />)
@@ -186,8 +189,8 @@ const Business = () => {
   })()
 
   const serviceList = businesses.reduce((acc, b) => {
-    ;(b.services || []).forEach((s) => {
-      const name = typeof s === "string" ? s : s?.name
+    b.services.forEach((s) => {
+      const name = s.name
       if (!name) return
       if (q && !name.toLowerCase().includes(q) && !String(b.name || "").toLowerCase().includes(q)) return
       if (!acc.find((x) => x.name === name)) acc.push({ id: `${b.id}-${name}`, name, business: b })
@@ -202,7 +205,7 @@ const Business = () => {
     const imgs = []
     businesses.forEach((b) => {
       if (q && !String(b.name || "").toLowerCase().includes(q)) return
-      ;(b.images || []).forEach((uri, i) => imgs.push({ id: `${b.id}-${i}`, uri, business: b }))
+      b.galleryImages.forEach((uri, i) => imgs.push({ id: `${b.id}-${i}`, uri, business: b }))
     })
     const rows = []
     for (let i = 0; i < imgs.length; i += 2) rows.push({ id: `row-${i}`, items: imgs.slice(i, i + 2) })
@@ -221,7 +224,7 @@ const Business = () => {
     const badge = status && !status.ok ? status : (editorial || status)
     return (
       <ListingCard
-        image={Array.isArray(item.images) ? item.images[0] : null}
+        image={toImageUrl(item.images?.[0])}
         fallbackIcon={typeIconFor(item.__type, "storefront")}
         badge={badge}
         title={item.name}
@@ -321,12 +324,8 @@ const Business = () => {
     try {
       const q = query(collection(db, "reviews"), where("businessId", "==", businessId))
       const snap = await getDocs(q)
-      const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-      const sorted = data.sort((a, b) => {
-        const dA = a.createdAt?.toDate?.() || new Date(a.createdAt)
-        const dB = b.createdAt?.toDate?.() || new Date(b.createdAt)
-        return dB - dA
-      })
+      const data = snap.docs.map((d) => toReview({ ...d.data(), id: d.id }))
+      const sorted = data.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0))
       setReviews(sorted)
       setCalculatedRating(calculateAverageRating(sorted))
       if (currentUser?.id || currentUser?.uid) {
@@ -341,7 +340,7 @@ const Business = () => {
     }
   }
 
-  const calculateAverageRating = (r) => r.length === 0 ? 0 : (r.reduce((s, x) => s + x.rating, 0) / r.length).toFixed(1)
+  const calculateAverageRating = (r) => { const avg = averageRating(r); return avg === 0 ? 0 : avg.toFixed(1) }
 
   const checkUserReviewStatus = async (businessId, userId) => {
     try {
@@ -424,7 +423,7 @@ const Business = () => {
           {/* ── Home tab ── */}
           {businessDetailTab === "home" && (
             <View>
-              {selectedBusiness.images?.length > 0 && (
+              {selectedBusiness.images.length > 0 && (
                 <View style={styles.detailCarousel}>
                   <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}
                     onScroll={(e) => setCurrentImageIndex(Math.round(e.nativeEvent.contentOffset.x / e.nativeEvent.layoutMeasurement.width))}
@@ -447,17 +446,17 @@ const Business = () => {
               {/* About card */}
               <View style={styles.infoCard}>
                 <Text style={styles.infoCardTitle}>About</Text>
-                <Text style={styles.infoCardBody}>{selectedBusiness.description}</Text>
+                <Text style={styles.infoCardBody}>{selectedBusiness.description || "No description available."}</Text>
               </View>
 
               {/* Services preview */}
-              {selectedBusiness.services?.length > 0 && (
+              {selectedBusiness.services.length > 0 && (
                 <View style={styles.infoCard}>
                   <Text style={styles.infoCardTitle}>Services</Text>
                   {selectedBusiness.services.slice(0, 3).map((s, i) => (
                     <View key={i} style={styles.serviceRow}>
                       <View style={styles.serviceDot} />
-                      <Text style={styles.serviceRowText}>{typeof s === "string" ? s : s.name || s}</Text>
+                      <Text style={styles.serviceRowText}>{s.name}</Text>
                     </View>
                   ))}
                   {selectedBusiness.services.length > 3 && (
@@ -490,12 +489,12 @@ const Business = () => {
           )}
 
           {/* ── Services tab ── */}
-          {businessDetailTab === "service" && selectedBusiness.services?.map((s, i) => (
+          {businessDetailTab === "service" && selectedBusiness.services.map((s, i) => (
             <View key={i} style={styles.serviceCard}>
               <View style={[styles.serviceIconWrap, { backgroundColor: ICON_BG_COLORS[i % ICON_BG_COLORS.length] }]}>
                 <Ionicons name="checkmark" size={18} color={ACCENT} />
               </View>
-              <Text style={styles.serviceTitle}>{typeof s === "string" ? s : s.name || s}</Text>
+              <Text style={styles.serviceTitle}>{s.name}</Text>
             </View>
           ))}
 
@@ -503,19 +502,19 @@ const Business = () => {
           {businessDetailTab === "contact" && (
             <View style={styles.infoCard}>
               <Text style={styles.infoCardTitle}>Contact Information</Text>
-              {selectedBusiness.phone && (
+              {!!selectedBusiness.phone && (
                 <TouchableOpacity style={styles.contactRow} onPress={() => Linking.openURL(`tel:${selectedBusiness.phone}`)}>
                   <View style={styles.contactRowIcon}><Ionicons name="call" size={16} color={ACCENT} /></View>
                   <Text style={styles.contactText}>{selectedBusiness.phone}</Text>
                 </TouchableOpacity>
               )}
-              {selectedBusiness.email && (
+              {!!selectedBusiness.email && (
                 <TouchableOpacity style={styles.contactRow} onPress={() => Linking.openURL(`mailto:${selectedBusiness.email}`)}>
                   <View style={styles.contactRowIcon}><Ionicons name="mail" size={16} color={ACCENT} /></View>
                   <Text style={styles.contactText}>{selectedBusiness.email}</Text>
                 </TouchableOpacity>
               )}
-              {selectedBusiness.location && (
+              {!!selectedBusiness.location && (
                 <View style={styles.contactRow}>
                   <View style={styles.contactRowIcon}><Ionicons name="location" size={16} color={ACCENT} /></View>
                   <Text style={styles.contactText}>{selectedBusiness.location}</Text>
@@ -527,7 +526,7 @@ const Business = () => {
           {/* ── Gallery tab ── */}
           {businessDetailTab === "gallery" && (
             <View style={styles.galleryGrid}>
-              {selectedBusiness.images?.map((img, i) => (
+              {selectedBusiness.galleryImages.map((img, i) => (
                 <TouchableOpacity key={i} style={styles.galleryItem} activeOpacity={0.85}>
                   <Image source={{ uri: img }} style={styles.galleryImage} />
                 </TouchableOpacity>
@@ -758,10 +757,10 @@ const Business = () => {
                       <Text style={styles.reviewAvatarLetter}>{r.reviewerName?.[0]?.toUpperCase() || "?"}</Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.reviewerName}>{r.reviewerName}</Text>
+                      <Text style={styles.reviewerName}>{r.reviewerName || "Anonymous"}</Text>
                       <View style={styles.starsRow}>{renderStars(r.rating)}</View>
                     </View>
-                    <Text style={styles.reviewDate}>{new Date(r.createdAt).toLocaleDateString()}</Text>
+                    <Text style={styles.reviewDate}>{r.createdAt ? r.createdAt.toLocaleDateString() : ""}</Text>
                   </View>
                   <Text style={styles.reviewText}>{r.comment}</Text>
                 </View>

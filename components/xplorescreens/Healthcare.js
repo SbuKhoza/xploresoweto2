@@ -1,7 +1,7 @@
 import { Text, View, Linking } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import ExploreList from "./shared/ExploreList"
-import { DetailTitle, MetaCard, Section, Chips, ContactRow, DirectionsButton } from "./shared/detail"
+import { DetailTitle, MetaCard, Section, Chips, ContactRow, DirectionsButton, ratingCell } from "./shared/detail"
 import { DANGER, SUCCESS } from "./shared/theme"
 
 const Healthcare = () => (
@@ -43,7 +43,7 @@ const Healthcare = () => (
         <MetaCard
           cells={[
             h.hours ? { icon: "time-outline", text: h.hours, label: "Hours" } : null,
-            { rating: h.rating, text: `${h.rating} (${h.reviews})`, label: "Rating" },
+            ratingCell(h) ? { ...ratingCell(h), label: "Rating" } : null,
             { icon: "shield-checkmark-outline", text: h.insurance || "Contact facility", label: "Insurance" },
           ]}
         />
@@ -59,7 +59,7 @@ const Healthcare = () => (
           </Section>
         )}
 
-        {h.specialties?.length > 0 && (
+        {h.specialties.length > 0 && (
           <Section title="Specialties & Services">
             <Chips items={h.specialties} icon="checkmark" />
           </Section>

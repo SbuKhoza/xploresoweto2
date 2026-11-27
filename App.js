@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context"
 import GlossyBackground from "./components/GlossyBackground"
+import ListingErrorBoundary from "./components/ListingErrorBoundary"
 import GlobalLoader from "./components/loader/GlobalLoader"
 import { LoadingProvider, useLoading } from "./components/context/LoadingContext"
 
@@ -129,7 +130,7 @@ const XploreWithHeader = () => (
 const SowetoTownshipsWithHeader = () => (
   <SafeScreen>
     <Header title="Townships" />
-    <SowetoTownships />
+    <ListingErrorBoundary screen="SowetoTownships"><SowetoTownships /></ListingErrorBoundary>
   </SafeScreen>
 )
 
@@ -176,7 +177,7 @@ const PoIstWithHeader = () => (
 
 const AccommodationWithoutHeader = () => (
   <SafeScreen style={{ paddingTop: 0 }}>
-    <Accommodation />
+    <ListingErrorBoundary screen="Accommodation"><Accommodation /></ListingErrorBoundary>
   </SafeScreen>
 )
 
@@ -185,51 +186,51 @@ const AccommodationWithoutHeader = () => (
 // status bar, so they get no Header component and no SafeScreen top padding.
 const RestaurantsWithoutHeader = () => (
   <SafeScreen style={{ paddingTop: 0 }}>
-    <Restaurants />
+    <ListingErrorBoundary screen="Restaurants"><Restaurants /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const EmergencyWithHeader = () => (
   <SafeScreen>
     <Header title="Emergency" />
-    <Emergency />
+    <ListingErrorBoundary screen="Emergency"><Emergency /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const RecreationWithoutHeader = () => (
   <SafeScreen style={{ paddingTop: 0 }}>
-    <Recreation />
+    <ListingErrorBoundary screen="Recreation"><Recreation /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const AttractionWithoutHeader = () => (
   <SafeScreen style={{ paddingTop: 0 }}>
-    <Attraction />
+    <ListingErrorBoundary screen="Attraction"><Attraction /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const TransportWithHeader = () => (
   <SafeScreen>
     <Header title="Transport" />
-    <Transport />
+    <ListingErrorBoundary screen="Transport"><Transport /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const BusinessWithoutHeader = () => (
   <SafeScreen style={{ paddingTop: 0 }}>
-    <Business />
+    <ListingErrorBoundary screen="Business"><Business /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const HealthcareWithoutHeader = () => (
   <SafeScreen style={{ paddingTop: 0 }}>
-    <Healthcare />
+    <ListingErrorBoundary screen="Healthcare"><Healthcare /></ListingErrorBoundary>
   </SafeScreen>
 )
 
 const PublicServiceWithoutHeader = () => (
   <SafeScreen style={{ paddingTop: 0 }}>
-    <PublicService />
+    <ListingErrorBoundary screen="PublicService"><PublicService /></ListingErrorBoundary>
   </SafeScreen>
 )
 

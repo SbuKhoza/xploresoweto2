@@ -15,6 +15,7 @@ import { publicCollectionRef } from "../../utils/publicContent"
 import { useScrollTracking, AnimatedFlatList } from "../BottomNav"
 import OfflineIndicator from "../OfflineIndicator"
 import RestaurantReservationForm from "./RestaurantReservationForm"
+import { normalizeListing, reservationEligibility, toCount, toImageUrl, toRating, toText } from "../../utils/listingData"
 
 const { width } = Dimensions.get("window")
 
@@ -175,7 +176,8 @@ const Restaurants = () => {
       const restaurants = []
       const typesSet = new Set()
       snap.forEach(doc => {
-        const data = { id: doc.id, ...doc.data() }
+        // Normalised for the restaurants schema (utils/listingData.js): arrays are arrays, images are usable URLs, numbers are numbers.
+        const data = { ...normalizeListing("restaurants", { ...doc.data(), id: doc.id }), id: doc.id }
         restaurants.push(data)
         if (data.type) typesSet.add(data.type)
       })
@@ -259,7 +261,7 @@ const Restaurants = () => {
     const n = new Set(favorites); n.has(id) ? n.delete(id) : n.add(id); setFavorites(n)
   }
   const openRestaurantDetails = (r) => { setSelectedRestaurant(r); setCurrentImageIndex(0); setModalVisible(true) }
-  const openReservationForm   = (r) => { setSelectedRestaurant(r); setModalVisible(false); setReservationModalVisible(true) }
+  const openReservationForm   = (r) => { if (!reservationEligibility(r).ok) return; setSelectedRestaurant(r); setModalVisible(false); setReservationModalVisible(true) }
 
   const renderStars = (rating, size = 12) => {
     const r = Math.max(0, Math.min(5, Math.round((Number(rating) || 0) * 2) / 2))
@@ -278,10 +280,10 @@ const Restaurants = () => {
   const renderRestaurantCard = ({ item }) => {
     const open    = isOpenNow(item.openingHours, now)
     const badge   = getBadge(item, open)
-    const img     = Array.isArray(item.images) ? item.images[0] : null
+    const img     = toImageUrl(item.images?.[0])
     const fav     = favorites.has(item.id)
-    const reviews = Number(item.reviews)
-    const hasRating = item.rating !== undefined && item.rating !== null && item.rating !== ""
+    const reviews = toCount(item.reviews)
+    const hasRating = toRating(item.rating) !== null
 
     return (
       <View className="px-4">
@@ -332,7 +334,7 @@ const Restaurants = () => {
               adjustsFontSizeToFit
               minimumFontScale={0.8}
             >
-              {item.name}
+              {toText(item.name) || "Unnamed restaurant"}
             </Text>
 
             {!!item.location && (
@@ -345,7 +347,7 @@ const Restaurants = () => {
             {hasRating && (
               <View className="flex-row items-center mt-1">
                 {renderStars(item.rating, 12)}
-                {!Number.isNaN(reviews) && item.reviews !== undefined && (
+                {reviews !== null && (
                   <Text className="text-[10.5px] text-muted ml-1" numberOfLines={1}>
                     ({reviews} {reviews === 1 ? "review" : "reviews"})
                   </Text>
@@ -386,22 +388,34 @@ const Restaurants = () => {
   // ── Image Carousel (in modal) ──────────────────────────────────────────────
   const renderCarousel = () => {
     if (!selectedRestaurant) return null
+    // Only usable image URLs reach the carousel. Without any, the same placeholder as the other listing screens is shown
+    // (this used to call `.map` on a missing `images` field and close the app).
+    const images = (Array.isArray(selectedRestaurant.images) ? selectedRestaurant.images : []).filter((u) => !!toImageUrl(u))
+    if (images.length === 0) {
+      return (
+        <View className="h-[200px] bg-teal-light justify-center items-center">
+          <MaterialCommunityIcons name={typeIcon(selectedRestaurant.type)} size={44} color={TEAL} />
+        </View>
+      )
+    }
     return (
       <View>
         <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(e) => setCurrentImageIndex(Math.round(e.nativeEvent.contentOffset.x / width))}>
-          {selectedRestaurant.images.map((img, i) => (
+          {images.map((img, i) => (
             <View key={i} className="relative">
               <Image source={{ uri: img }} style={{ width, height: 240 }} />
               <View className="absolute bottom-0 left-0 right-0 h-20 bg-black/30" />
             </View>
           ))}
         </ScrollView>
-        <View className="flex-row justify-center py-2.5 gap-1.5">
-          {selectedRestaurant.images.map((_, i) => (
-            <View key={i} className={`h-1.5 rounded-full ${i === currentImageIndex ? "w-5 bg-brand" : "w-1.5 bg-line"}`} />
-          ))}
-        </View>
+        {images.length > 1 && (
+          <View className="flex-row justify-center py-2.5 gap-1.5">
+            {images.map((_, i) => (
+              <View key={i} className={`h-1.5 rounded-full ${i === currentImageIndex ? "w-5 bg-brand" : "w-1.5 bg-line"}`} />
+            ))}
+          </View>
+        )}
       </View>
     )
   }
@@ -685,38 +699,50 @@ const Restaurants = () => {
                 {/* Title row */}
                 <View className="flex-row items-start mb-3">
                   <View className="flex-1">
-                    <Text className="text-[20px] font-extrabold text-ink -tracking-tight mb-1">{selectedRestaurant.name}</Text>
-                    <View className="flex-row items-center gap-1">
-                      <Ionicons name="location-outline" size={13} color="#7A8A8F" />
-                      <Text className="text-[13px] text-muted">{selectedRestaurant.location}</Text>
+                    <Text className="text-[20px] font-extrabold text-ink -tracking-tight mb-1">{toText(selectedRestaurant.name) || "Unnamed restaurant"}</Text>
+                    {!!selectedRestaurant.location && (
+                      <View className="flex-row items-center gap-1">
+                        <Ionicons name="location-outline" size={13} color="#7A8A8F" />
+                        <Text className="text-[13px] text-muted">{selectedRestaurant.location}</Text>
+                      </View>
+                    )}
+                  </View>
+                  {!!selectedRestaurant.availability && (
+                    <View className={`px-2.5 py-1.5 rounded-full mt-1 ${availClasses(selectedRestaurant.availability)}`}>
+                      <Text className="text-[11px] font-bold text-white">{selectedRestaurant.availability}</Text>
                     </View>
-                  </View>
-                  <View className={`px-2.5 py-1.5 rounded-full mt-1 ${availClasses(selectedRestaurant.availability)}`}>
-                    <Text className="text-[11px] font-bold text-white">{selectedRestaurant.availability}</Text>
-                  </View>
+                  )}
                 </View>
 
-                {/* Meta card */}
-                <View className="flex-row items-center bg-surface rounded-2xl p-3.5 mb-3 border border-line">
-                  <View className="flex-1 items-center gap-1.5">
-                    <View className="w-9 h-9 rounded-xl bg-teal-light justify-center items-center">
-                      <Ionicons name="restaurant-outline" size={16} color="#1B4D5C" />
+                {/* Meta card: only the facts this restaurant actually has (cuisine, opening hours, rating) */}
+                {(() => {
+                  const r = selectedRestaurant
+                  const cells = [
+                    toText(r.cuisine) && { key: "cuisine", bg: "bg-teal-light", icon: "restaurant-outline", color: "#1B4D5C", text: toText(r.cuisine) },
+                    toText(r.openingHours) && { key: "hours", bg: "bg-brand-light", icon: "time-outline", color: "#E8600A", text: toText(r.openingHours) },
+                    toRating(r.rating) !== null && { key: "rating", stars: true, text: `${toRating(r.rating)}${toCount(r.reviews) !== null ? ` (${toCount(r.reviews)})` : ""}` },
+                  ].filter(Boolean)
+                  if (cells.length === 0) return null
+                  return (
+                    <View className="flex-row items-center bg-surface rounded-2xl p-3.5 mb-3 border border-line">
+                      {cells.map((c, i) => (
+                        <View key={c.key} className="flex-1 flex-row items-center">
+                          <View className="flex-1 items-center gap-1.5">
+                            {c.stars ? (
+                              <View className="flex-row items-center gap-0.5">{renderStars(r.rating, 12)}</View>
+                            ) : (
+                              <View className={`w-9 h-9 rounded-xl justify-center items-center ${c.bg}`}>
+                                <Ionicons name={c.icon} size={16} color={c.color} />
+                              </View>
+                            )}
+                            <Text className="text-[11px] text-ink font-semibold text-center" numberOfLines={1}>{c.text}</Text>
+                          </View>
+                          {i < cells.length - 1 && <View className="w-px h-10 bg-line" />}
+                        </View>
+                      ))}
                     </View>
-                    <Text className="text-[11px] text-ink font-semibold text-center" numberOfLines={1}>{selectedRestaurant.cuisine}</Text>
-                  </View>
-                  <View className="w-px h-10 bg-line" />
-                  <View className="flex-1 items-center gap-1.5">
-                    <View className="w-9 h-9 rounded-xl bg-brand-light justify-center items-center">
-                      <Ionicons name="time-outline" size={16} color="#E8600A" />
-                    </View>
-                    <Text className="text-[11px] text-ink font-semibold text-center" numberOfLines={1}>{selectedRestaurant.openingHours}</Text>
-                  </View>
-                  <View className="w-px h-10 bg-line" />
-                  <View className="flex-1 items-center gap-1.5">
-                    <View className="flex-row items-center gap-0.5">{renderStars(selectedRestaurant.rating, 12)}</View>
-                    <Text className="text-[11px] text-ink font-semibold text-center">{selectedRestaurant.rating} ({selectedRestaurant.reviews})</Text>
-                  </View>
-                </View>
+                  )
+                })()}
 
                 {/* Tags */}
                 {selectedRestaurant.tags?.length > 0 && (
@@ -745,10 +771,12 @@ const Restaurants = () => {
                 </TouchableOpacity>
 
                 {/* Description */}
-                <View className="mb-4">
-                  <Text className="text-[11px] font-extrabold text-muted uppercase tracking-wider mb-2">About</Text>
-                  <Text className="text-[14px] text-ink leading-5">{selectedRestaurant.description}</Text>
-                </View>
+                {!!selectedRestaurant.description && (
+                  <View className="mb-4">
+                    <Text className="text-[11px] font-extrabold text-muted uppercase tracking-wider mb-2">About</Text>
+                    <Text className="text-[14px] text-ink leading-5">{selectedRestaurant.description}</Text>
+                  </View>
+                )}
 
                 {/* Signature dishes */}
                 {selectedRestaurant.specialDishes?.length > 0 && (
@@ -765,7 +793,12 @@ const Restaurants = () => {
                   </View>
                 )}
 
-                {/* Reserve button */}
+                {/* Reserve button: only when the restaurant has published table options; otherwise say why not */}
+                {!reservationEligibility(selectedRestaurant).ok ? (
+                  <View className="bg-surface rounded-2xl px-4 py-3 border border-line">
+                    <Text className="text-[13px] text-muted text-center">{reservationEligibility(selectedRestaurant).reason}</Text>
+                  </View>
+                ) : (
                 <TouchableOpacity
                   className="flex-row items-center justify-between bg-brand px-5 py-3 rounded-2xl"
                   onPress={() => openReservationForm(selectedRestaurant)}
@@ -776,6 +809,7 @@ const Restaurants = () => {
                     <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
                   </View>
                 </TouchableOpacity>
+                )}
               </View>
             )}
           </ScrollView>

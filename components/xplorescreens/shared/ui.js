@@ -11,10 +11,11 @@ import {
   TEAL, BRAND, MUTED, STAR, ALL, HERO_IMAGE, HERO_RATIO, HERO_BODY_H,
   cardShadow, softShadow,
 } from "./theme"
+import { isObject, toCount, toFiniteNumber, toImageUrl, toRating, toText } from "../../../utils/listingData"
 
 // ── Stars ────────────────────────────────────────────────────────────────────
 export const Stars = ({ rating, size = 12 }) => {
-  const r = Math.max(0, Math.min(5, Math.round((Number(rating) || 0) * 2) / 2))
+  const r = Math.max(0, Math.min(5, Math.round((toFiniteNumber(rating) || 0) * 2) / 2))
   const full = Math.floor(r), half = r % 1 !== 0, empty = 5 - full - (half ? 1 : 0)
   return (
     <View className="flex-row items-center">
@@ -161,7 +162,9 @@ export const SectionHeader = ({ title, showingAll, onSeeAll }) => (
 )
 
 // ── Category chips (built from the types found in Firestore) ─────────────────
-export const CategoryChips = ({ types, active, onSelect, iconFor }) => (
+export const CategoryChips = ({ types: rawTypes, active, onSelect, iconFor }) => {
+  const types = [...new Set((Array.isArray(rawTypes) ? rawTypes : []).map(toText).filter(Boolean))]
+  return (
   <ScrollView
     horizontal
     showsHorizontalScrollIndicator={false}
@@ -188,7 +191,8 @@ export const CategoryChips = ({ types, active, onSelect, iconFor }) => (
       )
     })}
   </ScrollView>
-)
+  )
+}
 
 // ── Empty / loading state ────────────────────────────────────────────────────
 export const EmptyState = ({ icon = "shape", title, message }) => (
@@ -212,42 +216,51 @@ export const ListingCard = ({
   title, location, rating, reviews, pill, buttonLabel = "View Details", footer,
   favorite, onToggleFavorite, onPress,
 }) => {
-  const hasRating = rating !== undefined && rating !== null && rating !== ""
-  const reviewsNum = Number(reviews)
-  const showReviews = reviews !== undefined && reviews !== null && reviews !== "" && !Number.isNaN(reviewsNum)
+  // Every input is validated here: a card must render whatever a document holds (blank name, text instead of a number, object instead of text …).
+  const imageUri = toImageUrl(image)
+  const name = toText(title) || "Unnamed listing"
+  const place = toText(location)
+  const hasRating = toRating(rating) !== null
+  const reviewsNum = toCount(reviews)
+  const showReviews = reviewsNum !== null
+  const pillText = isObject(pill) ? toText(pill.text) : ""
+  const chipText = isObject(imageChip) ? toText(imageChip.text) : ""
+  const footerText = isObject(footer) ? toText(footer.text) : ""
+  const badgeLabel = isObject(badge) ? toText(badge.label) : ""
+  const extraLabel = isObject(extraBadge) ? toText(extraBadge.label) : ""
 
   return (
     <View className="px-4">
       <TouchableOpacity className="bg-surface rounded-[22px] mb-3.5 overflow-hidden" style={cardShadow} onPress={onPress} activeOpacity={0.92}>
         <View className="h-[150px] bg-teal-light justify-center items-center">
-          {image ? (
-            <Image source={{ uri: image }} className="w-full h-full" resizeMode="cover" />
+          {imageUri ? (
+            <Image source={{ uri: imageUri }} className="w-full h-full" resizeMode="cover" />
           ) : (
             <MaterialCommunityIcons name={fallbackIcon} size={34} color={TEAL} />
           )}
 
-          {badge && (
+          {!!badgeLabel && (
             <View className="absolute top-2.5 left-2.5 flex-row items-center px-2.5 py-1 rounded-full" style={{ backgroundColor: badge.color }}>
               {badge.icon ? (
                 <Ionicons name={badge.icon} size={11} color="#FFFFFF" style={{ marginRight: 4 }} />
               ) : (
                 <View className="w-[6px] h-[6px] rounded-full bg-white mr-1.5" />
               )}
-              <Text className="text-[11px] font-bold text-white">{badge.label}</Text>
+              <Text className="text-[11px] font-bold text-white">{badgeLabel}</Text>
             </View>
           )}
-          {extraBadge && (
+          {!!extraLabel && (
             <View className="absolute top-[40px] left-2.5 flex-row items-center px-2.5 py-1 rounded-full" style={{ backgroundColor: extraBadge.color }}>
               {!!extraBadge.icon && <Ionicons name={extraBadge.icon} size={11} color="#FFFFFF" style={{ marginRight: 4 }} />}
-              <Text className="text-[11px] font-bold text-white">{extraBadge.label}</Text>
+              <Text className="text-[11px] font-bold text-white">{extraLabel}</Text>
             </View>
           )}
 
-          {imageChip && (
+          {!!chipText && (
             <View className="absolute bottom-2.5 left-2.5 flex-row items-center bg-white/95 px-2.5 py-1 rounded-full">
               {!!imageChip.icon && <Ionicons name={imageChip.icon} size={12} color={TEAL} style={{ marginRight: 4 }} />}
-              <Text className="text-[12px] font-extrabold text-ink">{imageChip.text}</Text>
-              {!!imageChip.sub && <Text className="text-[10px] text-muted font-medium ml-0.5">{imageChip.sub}</Text>}
+              <Text className="text-[12px] font-extrabold text-ink">{chipText}</Text>
+              {!!toText(imageChip.sub) && <Text className="text-[10px] text-muted font-medium ml-0.5">{toText(imageChip.sub)}</Text>}
             </View>
           )}
 
@@ -264,12 +277,12 @@ export const ListingCard = ({
         <View className="flex-row items-center px-3 pt-2.5 pb-3">
           <View className="flex-1 mr-2.5">
             <Text className="text-[15px] font-extrabold text-ink -tracking-[0.2px]" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-              {title}
+              {name}
             </Text>
-            {!!location && (
+            {!!place && (
               <View className="flex-row items-center mt-1">
                 <Ionicons name="location-sharp" size={12} color={TEAL} />
-                <Text className="text-[11.5px] text-ink-soft ml-1 flex-1" numberOfLines={1}>{location}</Text>
+                <Text className="text-[11.5px] text-ink-soft ml-1 flex-1" numberOfLines={1}>{place}</Text>
               </View>
             )}
             {hasRating && (
@@ -285,11 +298,11 @@ export const ListingCard = ({
           </View>
 
           <View className="flex-row items-center">
-            {pill && (
+            {!!pillText && (
               <View className={`flex-row items-center px-2 py-1.5 rounded-full mr-1.5 ${pill.muted ? "bg-line" : "bg-teal-light"}`}>
                 <Ionicons name={pill.icon} size={12} color={pill.muted ? MUTED : TEAL} />
                 <Text className={`text-[10.5px] font-bold ml-1 ${pill.muted ? "text-muted" : "text-teal"}`} numberOfLines={1}>
-                  {pill.text}
+                  {pillText}
                 </Text>
               </View>
             )}
@@ -300,11 +313,11 @@ export const ListingCard = ({
           </View>
         </View>
 
-        {footer && (
+        {!!footerText && (
           <View className="flex-row items-center px-3 pb-3 -mt-1">
             {!!footer.icon && <Ionicons name={footer.icon} size={13} color={footer.color || MUTED} style={{ marginRight: 5 }} />}
             <Text className="text-[11.5px] flex-1" style={{ color: footer.color || MUTED }} numberOfLines={footer.lines || 1}>
-              {footer.text}
+              {footerText}
             </Text>
           </View>
         )}

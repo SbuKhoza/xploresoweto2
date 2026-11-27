@@ -1,0 +1,549 @@
+{
+  "restaurants": {
+    "collection": "restaurants",
+    "fields": {
+      "name": {
+        "type": "text",
+        "required": true
+      },
+      "cuisine": {
+        "type": "text"
+      },
+      "type": {
+        "type": "text"
+      },
+      "description": {
+        "type": "textarea"
+      },
+      "location": {
+        "type": "text"
+      },
+      "openingHours": {
+        "type": "text"
+      },
+      "price": {
+        "type": "text"
+      },
+      "availability": {
+        "type": "select"
+      },
+      "rating": {
+        "type": "number"
+      },
+      "reviews": {
+        "type": "number"
+      },
+      "specialDishes": {
+        "type": "strings"
+      },
+      "tableOptions": {
+        "type": "numbers"
+      },
+      "tags": {
+        "type": "strings"
+      },
+      "images": {
+        "type": "images"
+      },
+      "coordinates": {
+        "type": "coords"
+      },
+      "organisationId": {
+        "type": "text"
+      }
+    },
+    "defaults": {
+      "isActive": true,
+      "tableOptions": [
+        2,
+        4,
+        6,
+        8
+      ],
+      "images": [
+        ""
+      ],
+      "specialDishes": [
+        ""
+      ],
+      "tags": []
+    }
+  },
+  "accommodations": {
+    "collection": "accommodations",
+    "fields": {
+      "name": {
+        "type": "text",
+        "required": true
+      },
+      "type": {
+        "type": "text"
+      },
+      "price": {
+        "type": "text"
+      },
+      "description": {
+        "type": "textarea"
+      },
+      "location": {
+        "type": "text"
+      },
+      "maxGuests": {
+        "type": "number"
+      },
+      "availability": {
+        "type": "text"
+      },
+      "rating": {
+        "type": "number"
+      },
+      "reviews": {
+        "type": "number"
+      },
+      "amenities": {
+        "type": "strings"
+      },
+      "images": {
+        "type": "images"
+      },
+      "coordinates": {
+        "type": "coords"
+      },
+      "organisationId": {
+        "type": "text"
+      }
+    },
+    "defaults": {
+      "isActive": true,
+      "amenities": [
+        ""
+      ],
+      "images": [
+        ""
+      ]
+    }
+  },
+  "recreation": {
+    "collection": "recreation",
+    "fields": {
+      "name": {
+        "type": "text",
+        "required": true
+      },
+      "category": {
+        "type": "text"
+      },
+      "type": {
+        "type": "text"
+      },
+      "description": {
+        "type": "textarea"
+      },
+      "location": {
+        "type": "text"
+      },
+      "entryFee": {
+        "type": "text"
+      },
+      "duration": {
+        "type": "text"
+      },
+      "ageRestriction": {
+        "type": "text"
+      },
+      "status": {
+        "type": "select"
+      },
+      "rating": {
+        "type": "number"
+      },
+      "reviews": {
+        "type": "number"
+      },
+      "activities": {
+        "type": "strings"
+      },
+      "phone": {
+        "type": "text"
+      },
+      "email": {
+        "type": "text"
+      },
+      "images": {
+        "type": "images"
+      },
+      "coordinates": {
+        "type": "coords"
+      }
+    },
+    "defaults": {
+      "isActive": true,
+      "status": "Open",
+      "activities": [
+        ""
+      ],
+      "images": [
+        ""
+      ]
+    }
+  },
+  "attractions": {
+    "collection": "attractions",
+    "fields": {
+      "name": {
+        "type": "text",
+        "required": true
+      },
+      "type": {
+        "type": "text"
+      },
+      "price": {
+        "type": "text"
+      },
+      "description": {
+        "type": "textarea"
+      },
+      "location": {
+        "type": "text"
+      },
+      "duration": {
+        "type": "text"
+      },
+      "bestTime": {
+        "type": "text"
+      },
+      "status": {
+        "type": "select"
+      },
+      "rating": {
+        "type": "number"
+      },
+      "reviews": {
+        "type": "number"
+      },
+      "features": {
+        "type": "strings"
+      },
+      "images": {
+        "type": "images"
+      },
+      "coordinates": {
+        "type": "coords"
+      }
+    },
+    "defaults": {
+      "isActive": true,
+      "status": "Open",
+      "features": [
+        ""
+      ],
+      "images": [
+        ""
+      ]
+    }
+  },
+  "business": {
+    "collection": "business",
+    "fields": {
+      "name": {
+        "type": "text",
+        "required": true
+      },
+      "logo": {
+        "type": "image"
+      },
+      "useTextLogo": {
+        "type": "toggle"
+      },
+      "images": {
+        "type": "images"
+      },
+      "description": {
+        "type": "textarea"
+      },
+      "category": {
+        "type": "text"
+      },
+      "type": {
+        "type": "text"
+      },
+      "rating": {
+        "type": "number"
+      },
+      "reviews": {
+        "type": "number"
+      },
+      "services": {
+        "type": "objects"
+      },
+      "phone": {
+        "type": "text"
+      },
+      "email": {
+        "type": "text"
+      },
+      "location": {
+        "type": "text"
+      },
+      "hours": {
+        "type": "text"
+      },
+      "status": {
+        "type": "select"
+      },
+      "coordinates": {
+        "type": "coords"
+      },
+      "gallery.images": {
+        "type": "images"
+      },
+      "organisationId": {
+        "type": "text"
+      }
+    },
+    "defaults": {
+      "isActive": true,
+      "status": "Open",
+      "images": [
+        ""
+      ],
+      "services": [
+        {
+          "name": "",
+          "icon": "default"
+        }
+      ],
+      "gallery": {
+        "images": [
+          ""
+        ]
+      }
+    }
+  },
+  "healthcare": {
+    "collection": "healthcare",
+    "fields": {
+      "name": {
+        "type": "text",
+        "required": true
+      },
+      "category": {
+        "type": "text"
+      },
+      "type": {
+        "type": "text"
+      },
+      "description": {
+        "type": "textarea"
+      },
+      "location": {
+        "type": "text"
+      },
+      "hours": {
+        "type": "text"
+      },
+      "status": {
+        "type": "select"
+      },
+      "insurance": {
+        "type": "text"
+      },
+      "emergency": {
+        "type": "toggle"
+      },
+      "rating": {
+        "type": "number"
+      },
+      "reviews": {
+        "type": "number"
+      },
+      "specialties": {
+        "type": "strings"
+      },
+      "phone": {
+        "type": "text"
+      },
+      "email": {
+        "type": "text"
+      },
+      "images": {
+        "type": "images"
+      },
+      "coordinates": {
+        "type": "coords"
+      }
+    },
+    "defaults": {
+      "isActive": true,
+      "status": "Open",
+      "emergency": false,
+      "specialties": [
+        ""
+      ],
+      "images": [
+        ""
+      ]
+    }
+  },
+  "publicservice": {
+    "collection": "publicservice",
+    "fields": {
+      "name": {
+        "type": "text",
+        "required": true
+      },
+      "category": {
+        "type": "text"
+      },
+      "type": {
+        "type": "text"
+      },
+      "description": {
+        "type": "textarea"
+      },
+      "location": {
+        "type": "text"
+      },
+      "hours": {
+        "type": "text"
+      },
+      "status": {
+        "type": "select"
+      },
+      "accessibility": {
+        "type": "text"
+      },
+      "emergency": {
+        "type": "toggle"
+      },
+      "rating": {
+        "type": "number"
+      },
+      "reviews": {
+        "type": "number"
+      },
+      "services": {
+        "type": "strings"
+      },
+      "phone": {
+        "type": "text"
+      },
+      "email": {
+        "type": "text"
+      },
+      "website": {
+        "type": "text"
+      },
+      "images": {
+        "type": "images"
+      },
+      "coordinates": {
+        "type": "coords"
+      }
+    },
+    "defaults": {
+      "isActive": true,
+      "status": "Open",
+      "emergency": false,
+      "services": [
+        ""
+      ],
+      "images": [
+        ""
+      ]
+    }
+  },
+  "emergency": {
+    "collection": "emergency",
+    "fields": {
+      "name": {
+        "type": "text",
+        "required": true
+      },
+      "number": {
+        "type": "text",
+        "required": true
+      },
+      "category": {
+        "type": "text"
+      },
+      "type": {
+        "type": "select"
+      },
+      "isActive": {
+        "type": "toggle"
+      },
+      "address": {
+        "type": "text"
+      },
+      "description": {
+        "type": "textarea"
+      },
+      "additionalInfo": {
+        "type": "textarea"
+      }
+    },
+    "defaults": {
+      "isActive": true,
+      "type": "Public"
+    }
+  },
+  "transport": {
+    "collection": "transport",
+    "fields": {
+      "routeName": {
+        "type": "text",
+        "required": true
+      },
+      "mode": {
+        "type": "select"
+      },
+      "operator": {
+        "type": "text"
+      },
+      "status": {
+        "type": "select"
+      },
+      "origin": {
+        "type": "text",
+        "required": true
+      },
+      "destination": {
+        "type": "text",
+        "required": true
+      },
+      "frequency": {
+        "type": "text"
+      },
+      "fare": {
+        "type": "text"
+      },
+      "days": {
+        "type": "text"
+      },
+      "notice": {
+        "type": "text"
+      },
+      "isActive": {
+        "type": "toggle"
+      },
+      "departures": {
+        "type": "strings"
+      },
+      "stops": {
+        "type": "strings"
+      }
+    },
+    "defaults": {
+      "mode": "bus",
+      "status": "On Time",
+      "isActive": true,
+      "departures": [
+        ""
+      ],
+      "stops": [
+        ""
+      ]
+    }
+  }
+}

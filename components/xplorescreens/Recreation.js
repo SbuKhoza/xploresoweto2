@@ -1,6 +1,7 @@
 import { Text, Linking } from "react-native"
 import ExploreList from "./shared/ExploreList"
-import { DetailTitle, MetaCard, Section, Chips, InfoChip, ContactRow, DirectionsButton } from "./shared/detail"
+import { DetailTitle, MetaCard, Section, Chips, InfoChip, ContactRow, DirectionsButton, ratingCell } from "./shared/detail"
+import { formatEntryFee } from "../../utils/listingData"
 import { WARNING } from "./shared/theme"
 
 const Recreation = () => (
@@ -13,7 +14,7 @@ const Recreation = () => (
     noun={{ one: "facility", many: "facilities" }}
     emptyIcon="tennis"
     getCard={(r) => ({
-      imageChip: r.entryFee ? { text: String(r.entryFee) } : null,
+      imageChip: formatEntryFee(r.entryFee) ? { text: formatEntryFee(r.entryFee) } : null,
       pill: r.duration ? { icon: "time-outline", text: r.duration } : null,
     })}
     renderDetail={(r, { openDirections, status }) => (
@@ -22,8 +23,8 @@ const Recreation = () => (
 
         <MetaCard
           cells={[
-            r.entryFee ? { big: String(r.entryFee), label: "Entry fee" } : null,
-            { rating: r.rating, text: `${r.rating} (${r.reviews})` },
+            formatEntryFee(r.entryFee) ? { big: formatEntryFee(r.entryFee), label: "Entry fee" } : null,
+            ratingCell(r),
             r.duration ? { icon: "time-outline", text: r.duration } : null,
           ]}
         />
@@ -43,7 +44,7 @@ const Recreation = () => (
           </Section>
         )}
 
-        {r.activities?.length > 0 && (
+        {r.activities.length > 0 && (
           <Section title="Activities">
             <Chips items={r.activities} />
           </Section>

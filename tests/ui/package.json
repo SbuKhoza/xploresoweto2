@@ -1,0 +1,14 @@
+{
+  "name": "xploresoweto-ui-tests",
+  "private": true,
+  "description": "Opt-in component rendering tests for the Xplore listing screens. Isolated from the app's own dependencies: react-native is replaced by react-native-web and native-only modules by stubs (see vitest.config.mjs). Run: npm --prefix tests/ui ci && npm --prefix tests/ui test",
+  "scripts": { "test": "vitest run" },
+  "devDependencies": {
+    "@testing-library/react": "16.3.0",
+    "jsdom": "26.1.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native-web": "0.21.0",
+    "vitest": "3.2.4"
+  }
+}

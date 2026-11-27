@@ -1,11 +1,19 @@
 import { useState } from "react"
 import { Text, View } from "react-native"
 import ExploreList from "./shared/ExploreList"
-import { DetailTitle, MetaCard, Section, Chips, DirectionsButton, PrimaryButton } from "./shared/detail"
+import { DetailTitle, MetaCard, Section, Chips, DirectionsButton, PrimaryButton, ratingCell } from "./shared/detail"
 import { Stars } from "./shared/ui"
 import ReservationForm from "./ReservationForm"
+import { formatPrice, priceAmount, stayEligibility } from "../../utils/listingData"
 
-const priceNum = (a) => Number(a.price) || 0
+// Sort by the single amount a price states ("R700" or 700). A listing with no price, or a range such as "R80 - R150", sorts last in both directions.
+const byPrice = (dir) => (a, b) => {
+  const x = priceAmount(a.price), y = priceAmount(b.price)
+  if (x === null && y === null) return 0
+  if (x === null) return 1
+  if (y === null) return -1
+  return dir * (x - y)
+}
 
 const Accommodation = () => {
   const [reservationVisible, setReservationVisible] = useState(false)
@@ -29,32 +37,35 @@ const Accommodation = () => {
         emptyIcon="bed"
         openNowLabel="Available now"
         extraSorts={[
-          { label: "Price: low to high", value: "price-asc",  compare: (a, b) => priceNum(a) - priceNum(b) },
-          { label: "Price: high to low", value: "price-desc", compare: (a, b) => priceNum(b) - priceNum(a) },
+          { label: "Price: low to high", value: "price-asc",  compare: byPrice(1) },
+          { label: "Price: high to low", value: "price-desc", compare: byPrice(-1) },
         ]}
         getCard={(a) => ({
-          imageChip: a.price !== undefined && a.price !== null && a.price !== ""
-            ? { text: `R${a.price}`, sub: "/night" } : null,
+          imageChip: formatPrice(a.price) ? { text: formatPrice(a.price), sub: "/night" } : null,
           pill: a.maxGuests ? { icon: "people-outline", text: `${a.maxGuests} guests` } : null,
         })}
         renderDetail={(a, { closeDetail, openDirections, status }) => (
           <>
             <DetailTitle name={a.name} location={a.location} status={status} />
 
-            <View className="flex-row items-center justify-between bg-surface rounded-2xl p-4 mb-3 border border-line">
-              <View>
-                <Text className="text-[20px] font-extrabold text-ink">R{a.price}</Text>
-                <Text className="text-[11px] text-muted mt-0.5">per night</Text>
+            {(!!formatPrice(a.price) || !!ratingCell(a)) && (
+              <View className="flex-row items-center justify-between bg-surface rounded-2xl p-4 mb-3 border border-line">
+                <View>
+                  {!!formatPrice(a.price) && <Text className="text-[20px] font-extrabold text-ink">{formatPrice(a.price)}</Text>}
+                  {!!formatPrice(a.price) && <Text className="text-[11px] text-muted mt-0.5">per night</Text>}
+                </View>
+                {!!ratingCell(a) && (
+                  <View className="items-end">
+                    <Stars rating={a.rating} size={13} />
+                    <Text className="text-[11px] text-muted mt-1">{a.rating}{a.reviews !== null && a.reviews !== undefined ? ` · ${a.reviews} reviews` : ""}</Text>
+                  </View>
+                )}
               </View>
-              <View className="items-end">
-                <Stars rating={a.rating} size={13} />
-                <Text className="text-[11px] text-muted mt-1">{a.rating} · {a.reviews} reviews</Text>
-              </View>
-            </View>
+            )}
 
             <MetaCard
               cells={[
-                { icon: "people-outline", text: `Up to ${a.maxGuests} guests` },
+                a.maxGuests ? { icon: "people-outline", text: `Up to ${a.maxGuests} guests` } : null,
                 { icon: "calendar-outline", text: "Min. 1 night" },
               ]}
             />
@@ -67,13 +78,15 @@ const Accommodation = () => {
               </Section>
             )}
 
-            {a.amenities?.length > 0 && (
+            {a.amenities.length > 0 && (
               <Section title="Amenities">
                 <Chips items={a.amenities} icon="checkmark" />
               </Section>
             )}
 
-            <PrimaryButton label="Reserve Now" onPress={() => reserve(a, closeDetail)} />
+            {stayEligibility(a).ok
+              ? <PrimaryButton label="Reserve Now" onPress={() => reserve(a, closeDetail)} />
+              : <Text className="text-[12.5px] text-muted text-center">{stayEligibility(a).reason}</Text>}
           </>
         )}
       />

@@ -7,6 +7,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons"
 import { useScrollTracking, AnimatedFlatList } from "../BottomNav"
 import { useOfflineData } from "../../hooks/useOfflineData"
 import OfflineIndicator from "../OfflineIndicator"
+import { normalizeListings } from "../../utils/listingData"
 
 // ── Status → color mapping ───────────────────────────────────────────────────
 const STATUS_STYLES = {
@@ -20,6 +21,9 @@ const DEFAULT_STATUS_STYLE = { bg: "bg-teal-light", text: "text-teal", dot: "bg-
 // these just provide nicer labels/icons/ordering for the common ones.
 const MODE_ICON = { bus: "bus", train: "train", taxi: "taxi", tram: "tram" }
 const MODE_ORDER = ["bus", "train", "taxi"]
+// A route with no (or an invalid) mode is NOT assumed to be a bus: it is listed under "Other" so nothing is invented.
+const NO_MODE = "other"
+const routeMode = (r) => r.mode || NO_MODE
 const modeLabel = (m) => m.charAt(0).toUpperCase() + m.slice(1)
 
 const Transport = () => {
@@ -32,7 +36,7 @@ const Transport = () => {
 
   // Fully dynamic: only active routes from Firestore, ordered by the CMS `order` field
   const routes = useMemo(
-    () => (data || [])
+    () => normalizeListings("transport", data)
       .filter(r => r.isActive !== false && r.routeName)
       .sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.routeName).localeCompare(String(b.routeName))),
     [data]
@@ -40,7 +44,7 @@ const Transport = () => {
 
   // Tabs = the modes that actually have routes
   const modes = useMemo(() => {
-    const found = [...new Set(routes.map(r => (r.mode || "bus").toLowerCase()))]
+    const found = [...new Set(routes.map(routeMode))]
     return found.sort((a, b) => {
       const ia = MODE_ORDER.indexOf(a), ib = MODE_ORDER.indexOf(b)
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b)
@@ -49,7 +53,7 @@ const Transport = () => {
   const mode = modes.includes(selectedMode) ? selectedMode : modes[0]
 
   const filteredRoutes = useMemo(
-    () => routes.filter(r => (r.mode || "bus").toLowerCase() === mode),
+    () => routes.filter(r => routeMode(r) === mode),
     [routes, mode]
   )
 
@@ -60,23 +64,25 @@ const Transport = () => {
   const RouteCard = useCallback(({ item }) => {
     const isExpanded = expandedId === item.id
     const statusStyle = STATUS_STYLES[item.status] || DEFAULT_STATUS_STYLE
-    const nextDepartures = (item.departures || []).slice(0, 4)
+    const nextDepartures = item.departures.slice(0, 4)
 
     return (
       <View className={`bg-surface rounded-2xl mb-3 overflow-hidden border border-line ${isExpanded ? "shadow-md" : "shadow-sm"}`}>
         <TouchableOpacity className="p-4" activeOpacity={0.85} onPress={() => toggleExpand(item.id)}>
           <View className="flex-row items-center gap-3">
             <View className="w-12 h-12 rounded-2xl bg-teal-light justify-center items-center">
-              <MaterialCommunityIcons name={MODE_ICON[(item.mode || "bus").toLowerCase()] || "bus-multiple"} size={24} color="#1B4D5C" />
+              <MaterialCommunityIcons name={MODE_ICON[routeMode(item)] || "bus-multiple"} size={24} color="#1B4D5C" />
             </View>
             <View className="flex-1">
               <Text className="text-[15px] font-extrabold text-ink -tracking-tight" numberOfLines={1}>{item.routeName}</Text>
               <Text className="text-xs text-muted font-medium mt-0.5" numberOfLines={1}>{item.operator}</Text>
             </View>
+            {!!item.status && (
             <View className={`px-2.5 py-1 rounded-full flex-row items-center gap-1 ${statusStyle.bg}`}>
               <View className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
               <Text className={`text-[10px] font-extrabold uppercase tracking-wide ${statusStyle.text}`}>{item.status}</Text>
             </View>
+            )}
           </View>
 
           <View className="flex-row items-center mt-3 gap-2">
@@ -121,7 +127,7 @@ const Transport = () => {
 
         {isExpanded && (
           <View className="px-4 pb-4 pt-1 border-t border-line gap-3">
-            {item.stops?.length > 0 && (
+            {item.stops.length > 0 && (
               <View>
                 <Text className="text-[11px] font-extrabold text-muted uppercase tracking-wider mb-2">Stops along the route</Text>
                 {item.stops.map((s, i) => (
@@ -132,7 +138,7 @@ const Transport = () => {
                 ))}
               </View>
             )}
-            {item.departures?.length > 0 && (
+            {item.departures.length > 0 && (
               <View>
                 <Text className="text-[11px] font-extrabold text-muted uppercase tracking-wider mb-2">All departures today</Text>
                 <View className="flex-row flex-wrap gap-2">

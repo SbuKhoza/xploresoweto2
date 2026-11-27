@@ -22,8 +22,8 @@ const APPLY = argv.includes("--apply")
 const S = (o) => ({ ...o, synthetic: true, isActive: true })
 const DATA = {
   restaurants: [
-    S({ name: "Test Kasi Kitchen (synthetic)", description: "Fictional home cooking: kota and pap for testing.", location: "Test Street, Orlando West", cuisine: "Traditional", price: "R80 - R150", hours: "08:00 - 20:00", rating: 4.5, reviews: 12 }),
-    S({ name: "Test Braai Corner (synthetic)", description: "Fictional shisa nyama spot for testing.", location: "Test Road, Diepkloof", cuisine: "Braai", hours: "Mon-Fri 9-17", rating: 3.9, reviews: 5 }),
+    S({ name: "Test Kasi Kitchen (synthetic)", description: "Fictional home cooking: kota and pap for testing.", location: "Test Street, Orlando West", cuisine: "Traditional", price: "R80 - R150", openingHours: "08:00 - 20:00", rating: 4.5, reviews: 12 }),
+    S({ name: "Test Braai Corner (synthetic)", description: "Fictional shisa nyama spot for testing.", location: "Test Road, Diepkloof", cuisine: "Braai", openingHours: "Mon-Fri 9-17", rating: 3.9, reviews: 5 }),
     S({ name: "Test Steakhouse (synthetic)", description: "Fictional fine dining for price-filter tests.", location: "Test Avenue, Maponya", price: "R900", rating: 4.8, reviews: 60 }),
     { name: "Test Inactive Diner (synthetic)", description: "Must never be shown.", location: "Orlando", synthetic: true, isActive: false },
   ],

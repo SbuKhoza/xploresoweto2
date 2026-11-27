@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons"
 import DateTimePicker from "@react-native-community/datetimepicker"
 import { callFunction, alertCallableError } from "../../utils/callable"
 import { newRequestId, toYMD } from "../../utils/requestId"
+import { formatPrice, reservationEligibility, toTableOptions, toText } from "../../utils/listingData"
 
 const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
   const [reservationDate, setReservationDate] = useState(new Date())
@@ -82,8 +83,15 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
 
   const handleSubmitReservation = async () => {
     if (submittingRef.current) return
+    // No request is ever sent for a restaurant that has no id or publishes no table options (nothing is guessed).
+    const eligible = reservationEligibility(restaurant)
+    if (!eligible.ok) { Alert.alert("Can’t send request", eligible.reason); return }
     if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim() || !selectedTable) {
       Alert.alert("Missing info", "Please fill in all required fields and select a table")
+      return
+    }
+    if (!toTableOptions(restaurant.tableOptions).includes(selectedTable) || guests > selectedTable) {
+      Alert.alert("Table too small", "Please choose a table that seats your party.")
       return
     }
 
@@ -172,6 +180,9 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
   }
 
   if (!restaurant) return null
+  const tableOptions = toTableOptions(restaurant.tableOptions)
+  const eligibility = reservationEligibility(restaurant)
+  const priceText = formatPrice(restaurant.price)
 
   return (
     <Modal animationType="slide" transparent={false} visible={visible} onRequestClose={onClose}>
@@ -181,16 +192,17 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
           <TouchableOpacity className="w-9 h-9 rounded-full bg-bg justify-center items-center" onPress={onClose}>
             <Ionicons name="close" size={18} color="#1A1A1A" />
           </TouchableOpacity>
-          <Text className="flex-1 text-center text-[16px] font-extrabold text-ink" numberOfLines={1}>Reserve at {restaurant.name}</Text>
+          <Text className="flex-1 text-center text-[16px] font-extrabold text-ink" numberOfLines={1}>Reserve at {toText(restaurant.name)}</Text>
           <View className="w-9" />
         </View>
 
         <ScrollView className="flex-1 px-4 pt-4" showsVerticalScrollIndicator={false}>
           {/* Summary */}
           <View className="bg-surface rounded-2xl p-4 border border-line mb-4">
-            <Text className="text-lg font-extrabold text-ink mb-0.5">{restaurant.name}</Text>
-            <Text className="text-sm text-muted mb-2">{restaurant.location}</Text>
-            <Text className="text-[15px] font-semibold text-teal">{restaurant.cuisine} · {restaurant.price}</Text>
+            <Text className="text-lg font-extrabold text-ink mb-0.5">{toText(restaurant.name)}</Text>
+            {!!toText(restaurant.location) && <Text className="text-sm text-muted mb-2">{toText(restaurant.location)}</Text>}
+            {!!(toText(restaurant.cuisine) || priceText) && <Text className="text-[15px] font-semibold text-teal">{[toText(restaurant.cuisine), priceText].filter(Boolean).join(" · ")}</Text>}
+            {!eligibility.ok && <Text className="text-[12.5px] text-danger mt-2">{eligibility.reason}</Text>}
           </View>
 
           {/* Date & Time */}
@@ -238,8 +250,9 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
             </View>
 
             <Text className="text-xs font-semibold text-muted mb-2">Select Table</Text>
+            {tableOptions.length === 0 && <Text className="text-[12.5px] text-muted">No table options are published for this restaurant.</Text>}
             <View className="flex-row flex-wrap gap-2">
-              {(restaurant.tableOptions || []).map((size) => {
+              {tableOptions.map((size) => {
                 const isDisabled = guests > size
                 const isSelected = selectedTable === size
                 return (
@@ -324,7 +337,11 @@ const RestaurantReservationForm = ({ visible, onClose, restaurant }) => {
           </View>
 
           {/* Submit — deliberately modest size, not a giant CTA */}
-          <TouchableOpacity className="bg-teal py-3 rounded-2xl items-center mb-8" onPress={handleSubmitReservation} activeOpacity={0.88}>
+          <TouchableOpacity
+            className={`py-3 rounded-2xl items-center mb-8 ${eligibility.ok ? "bg-teal" : "bg-line"}`}
+            onPress={handleSubmitReservation} activeOpacity={0.88}
+            disabled={!eligibility.ok} accessibilityState={{ disabled: !eligibility.ok }}
+          >
             <Text className="text-surface text-[15px] font-bold">Confirm Reservation</Text>
           </TouchableOpacity>
         </ScrollView>

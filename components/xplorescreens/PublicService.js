@@ -1,6 +1,6 @@
 import { Text, Linking } from "react-native"
 import ExploreList from "./shared/ExploreList"
-import { DetailTitle, MetaCard, Section, Chips, InfoChip, ContactRow, DirectionsButton } from "./shared/detail"
+import { DetailTitle, MetaCard, Section, Chips, InfoChip, ContactRow, DirectionsButton, ratingCell } from "./shared/detail"
 import { SUCCESS } from "./shared/theme"
 
 const PublicService = () => (
@@ -24,8 +24,8 @@ const PublicService = () => (
         <MetaCard
           cells={[
             s.hours ? { icon: "time-outline", text: s.hours } : null,
-            { rating: s.rating, text: `${s.rating} (${s.reviews})` },
-            { icon: "business-outline", text: s.category || s.type },
+            ratingCell(s),
+            (s.category || s.type) ? { icon: "business-outline", text: s.category || s.type } : null,
           ]}
         />
 
@@ -47,7 +47,7 @@ const PublicService = () => (
           </Section>
         )}
 
-        {s.services?.length > 0 && (
+        {s.services.length > 0 && (
           <Section title="Services Offered">
             <Chips items={s.services} />
           </Section>

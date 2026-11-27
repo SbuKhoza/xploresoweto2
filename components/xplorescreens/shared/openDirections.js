@@ -1,13 +1,16 @@
 import { Linking, Alert, ActionSheetIOS, Platform } from "react-native"
+import { toCoordinates, toText } from "../../../utils/listingData"
 
 // One shared "open in maps" helper (previously copy-pasted in every screen).
-export const openDirections = async (coordinates, name) => {
-  if (!coordinates?.latitude || !coordinates?.longitude) {
+export const openDirections = async (rawCoordinates, rawName) => {
+  const coordinates = toCoordinates(rawCoordinates) // finite, in-range numbers only; anything else means "no location"
+  if (!coordinates) {
     Alert.alert("Error", "Location coordinates not available.")
     return
   }
-  const lat = parseFloat(coordinates.latitude)
-  const lng = parseFloat(coordinates.longitude)
+  const name = toText(rawName) || "this place"
+  const lat = coordinates.latitude
+  const lng = coordinates.longitude
   const opts = [
     { name: "Apple Maps",          url: `http://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`, available: Platform.OS === "ios" },
     { name: "Google Maps",         url: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, available: true },

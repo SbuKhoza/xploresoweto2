@@ -17,6 +17,7 @@ import {
   FilterSheet, DEFAULT_FILTERS, hasActiveFilters,
 } from "./ui"
 import { openDirections } from "./openDirections"
+import { normalizeListing, toFiniteNumber, toImageUrl } from "../../../utils/listingData"
 
 /**
  * One list screen for every Xplore category (Stay, Attractions, Recreation,
@@ -75,9 +76,10 @@ const ExploreList = ({
       const list = []
       const typeSet = new Set()
       snap.forEach(d => {
-        const data = { id: d.id, ...d.data() }
-        const t = typeof data.type === "string" ? data.type.trim() : ""
-        data.__type = t || fallbackType || ""
+        // Normalised for this collection's schema (utils/listingData.js): arrays are real arrays, images are usable URLs only,
+        // numbers are numbers, text is text. The document id always wins over any `id` field stored inside the document.
+        const data = { ...normalizeListing(collectionName, { ...d.data(), id: d.id }), id: d.id }
+        data.__type = data.type || fallbackType || ""
         if (data.__type) typeSet.add(data.__type)
         list.push(data)
       })
@@ -102,8 +104,8 @@ const ExploreList = ({
 
   const sortFns = useMemo(() => {
     const m = {
-      rating:  (a, b) => (Number(b.rating)  || 0) - (Number(a.rating)  || 0),
-      reviews: (a, b) => (Number(b.reviews) || 0) - (Number(a.reviews) || 0),
+      rating:  (a, b) => (toFiniteNumber(b.rating)  || 0) - (toFiniteNumber(a.rating)  || 0),
+      reviews: (a, b) => (toFiniteNumber(b.reviews) || 0) - (toFiniteNumber(a.reviews) || 0),
     }
     extraSorts.forEach(s => { m[s.value] = s.compare })
     return m
@@ -117,7 +119,7 @@ const ExploreList = ({
       } else if (activeTab !== ALL && r.__type !== activeTab) {
         return false
       }
-      if (filters.minRating && (Number(r.rating) || 0) < filters.minRating) return false
+      if (filters.minRating && (toFiniteNumber(r.rating) || 0) < filters.minRating) return false
       if (filters.openNow) {
         const s = getStatusBadge(r, now, hoursKey)
         if (!s || !s.ok) return false
@@ -146,7 +148,7 @@ const ExploreList = ({
     const card  = getCard ? getCard(item) || {} : {}
     return (
       <ListingCard
-        image={Array.isArray(item.images) ? item.images[0] : null}
+        image={toImageUrl(item.images?.[0])}
         fallbackIcon={iconFor(item.__type)}
         badge={badge}
         extraBadge={card.extraBadge}
@@ -217,7 +219,7 @@ const ExploreList = ({
     </View>
   )
 
-  const images = Array.isArray(selected?.images) ? selected.images : []
+  const images = Array.isArray(selected?.images) ? selected.images.filter((u) => !!toImageUrl(u)) : []
   const detailStatus = selected ? getStatusBadge(selected, now, hoursKey) : null
 
   return (

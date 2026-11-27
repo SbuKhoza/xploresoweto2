@@ -1,8 +1,9 @@
 import { Text } from "react-native"
 import ExploreList from "./shared/ExploreList"
-import { DetailTitle, MetaCard, Section, Chips, InfoChip, DirectionsButton } from "./shared/detail"
+import { DetailTitle, MetaCard, Section, Chips, InfoChip, DirectionsButton, ratingCell } from "./shared/detail"
+import { formatEntryFee } from "../../utils/listingData"
 
-const fmtPrice = (p) => (p === undefined || p === null || p === "" ? null : Number(p) === 0 ? "Free" : `R${p}`)
+const fmtPrice = formatEntryFee
 
 const Attraction = () => (
   <ExploreList
@@ -24,8 +25,8 @@ const Attraction = () => (
 
         <MetaCard
           cells={[
-            { big: fmtPrice(a.price) ?? "—", label: "Entry" },
-            { rating: a.rating, text: `${a.rating} (${a.reviews})` },
+            fmtPrice(a.price) ? { big: fmtPrice(a.price), label: "Entry" } : null,
+            ratingCell(a),
             a.duration ? { icon: "time-outline", text: a.duration } : null,
           ]}
         />
@@ -40,7 +41,7 @@ const Attraction = () => (
           </Section>
         )}
 
-        {a.features?.length > 0 && (
+        {a.features.length > 0 && (
           <Section title="Features">
             <Chips items={a.features} />
           </Section>

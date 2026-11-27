@@ -24,12 +24,14 @@ export const TOWNSHIP_COLORS = [
   ["#0E8F94", "#145A6B"],
 ]
 
+import { toImageUrl, toText } from "./listingData.js"
+
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim()
 
 const toHistory = (v) => {
   if (Array.isArray(v)) {
     return v
-      .map((x) => (typeof x === "string" ? { text: x } : { year: x?.year, text: x?.text || x?.description }))
+      .map((x) => (typeof x === "string" ? { text: toText(x) } : { year: toText(x?.year) || undefined, text: toText(x?.text) || toText(x?.description) }))
       .filter((x) => x.text)
   }
   if (typeof v === "string") return v.split(/\n+/).map((t) => t.trim()).filter(Boolean).map((text) => ({ text }))
@@ -37,15 +39,15 @@ const toHistory = (v) => {
 }
 const toLines = (v) =>
   (Array.isArray(v) ? v : typeof v === "string" ? v.split(/\n+/) : [])
-    .map((x) => (typeof x === "string" ? x.trim() : x?.text || ""))
+    .map((x) => (typeof x === "string" ? x.trim() : toText(x?.text)))
     .filter(Boolean)
 const toPeople = (v) =>
   (Array.isArray(v) ? v : [])
-    .map((p) => (typeof p === "string" ? { name: p } : { name: p?.name, role: p?.role || p?.knownFor, note: p?.note || p?.description }))
+    .map((p) => (typeof p === "string" ? { name: p } : { name: toText(p?.name), role: toText(p?.role) || toText(p?.knownFor), note: toText(p?.note) || toText(p?.description) }))
     .filter((p) => p.name)
 const toLandmarks = (v) =>
   (Array.isArray(v) ? v : [])
-    .map((l) => (typeof l === "string" ? { name: l } : { name: l?.name, text: l?.text || l?.description, icon: l?.icon }))
+    .map((l) => (typeof l === "string" ? { name: l } : { name: toText(l?.name), text: toText(l?.text) || toText(l?.description), icon: toText(l?.icon) || undefined }))
     .filter((l) => l.name)
 
 /** Sort order used everywhere: CMS `order` first, then A–Z. */
@@ -60,22 +62,23 @@ export const compareTownships = (a, b) => {
  * ({ id, name, ...fields }) or just a name string (e.g. from a search result).
  */
 export const getTownshipInfo = (t, index = 0) => {
-  const doc = typeof t === "string" ? { name: t } : t || {}
+  const doc = typeof t === "string" ? { name: t } : t && typeof t === "object" ? t : {}
+  const name = toText(doc.name)
   const fallbackColors = TOWNSHIP_COLORS[index % TOWNSHIP_COLORS.length]
   return {
-    key: doc.id || norm(doc.name) || `township-${index}`,
-    name: doc.name || "Township",
-    area: doc.area || "",
-    tagline: doc.tagline || `${doc.name || "This township"} is part of greater Soweto.`,
-    established: doc.established || null,
-    namedAfter: doc.namedAfter || null,
-    overview: doc.overview || doc.description || doc.about || "",
-    imageUrl: doc.imageUrl || doc.image || null,
-    colors: [doc.colorFrom || fallbackColors[0], doc.colorTo || fallbackColors[1]],
+    key: toText(doc.id) || norm(name) || `township-${index}`,
+    name: name || "Township",
+    area: toText(doc.area),
+    tagline: toText(doc.tagline) || `${name || "This township"} is part of greater Soweto.`,
+    established: toText(doc.established) || null,
+    namedAfter: toText(doc.namedAfter) || null,
+    overview: toText(doc.overview) || toText(doc.description) || toText(doc.about),
+    imageUrl: toImageUrl(doc.imageUrl) || toImageUrl(doc.image) || null,
+    colors: [toText(doc.colorFrom) || fallbackColors[0], toText(doc.colorTo) || fallbackColors[1]],
     history: toHistory(doc.history),
     people: toPeople(doc.people || doc.celebrities || doc.notablePeople),
     landmarks: toLandmarks(doc.landmarks),
     facts: toLines(doc.facts || doc.funFacts),
-    aliases: Array.isArray(doc.aliases) ? doc.aliases : [],
+    aliases: (Array.isArray(doc.aliases) ? doc.aliases : []).map(toText).filter(Boolean),
   }
 }

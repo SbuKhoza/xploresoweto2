@@ -7,6 +7,7 @@ import {
 import { useState, useEffect, useMemo } from "react"
 import { useScrollTracking, AnimatedFlatList } from "../BottomNav"
 import { useOfflineData } from "../../hooks/useOfflineData"
+import { normalizeListings } from "../../utils/listingData"
 import { Ionicons } from "@expo/vector-icons"
 import OfflineIndicator from "../OfflineIndicator"
 
@@ -44,7 +45,9 @@ const Emergency = () => {
 
   const offlineOptions = useMemo(() => ({ maxAgeMinutes: 60, enableBackgroundRefresh: true }), [])
 
-  const { data: allContacts, loading, error, isOffline, lastUpdated, refresh } = useOfflineData("emergency", offlineOptions)
+  const { data: rawContacts, loading, error, isOffline, lastUpdated, refresh } = useOfflineData("emergency", offlineOptions)
+  // Normalised for the emergency schema (utils/listingData.js): text is text, `order` is a number or null.
+  const allContacts = useMemo(() => normalizeListings("emergency", rawContacts), [rawContacts])
 
   const getFilteredContacts = useMemo(() => {
     if (!allContacts || allContacts.length === 0) return []
@@ -70,6 +73,7 @@ const Emergency = () => {
   }, [])
 
   const makePhoneCall = useCallback(async (phoneNumber) => {
+    if (!phoneNumber) { Alert.alert("No number", "This contact has no phone number yet."); return }
     const phoneUrl = `tel:${phoneNumber}`
     try {
       const supported = await Linking.canOpenURL(phoneUrl)
