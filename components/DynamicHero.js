@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Image, View, useWindowDimensions } from "react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { useHomeContent } from "../hooks/useHomeContent"
@@ -14,6 +14,7 @@ export const CREAM = "#FFF8F0"
 export default function DynamicHero({ height, topInset = 0, children, curve = 44, background = CREAM }) {
   const { hero } = useHomeContent()
   const [failed, setFailed] = useState(false)
+  useEffect(() => { setFailed(false) }, [hero?.imageUrl])
   const uri = hero?.imageUrl && !failed ? hero.imageUrl : null
   const h = Math.max(160, height)
   const { width: W } = useWindowDimensions()

@@ -19,7 +19,7 @@ import { toExternalUrl, openExternalUrl } from "../../utils/externalLink"
 import { resolveTownshipResult } from "../../utils/townshipSearch"
 
 const root = path.resolve(__dirname, "../..")
-const read = (f) => fs.readFileSync(path.join(root, f), "utf8")
+const read = (f) => fs.readFileSync(path.join(root, f), "utf8").replace(/\r\n/g, "\n")
 const HERO = "https://cms.test/banners/hero-current.jpg"
 const hero = (extra = {}) => ({ id: "hero", type: "hero", imageUrl: HERO, isActive: true, ...extra })
 const township = (id, name, extra = {}) => ({ id, type: "township", name, isActive: true, ...extra })
