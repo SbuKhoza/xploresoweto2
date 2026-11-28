@@ -1,4 +1,5 @@
 <resources>
   <!-- The staging build is labelled so it cannot be mistaken for the real app on a device. Overrides src/main. -->
   <string name="app_name">XploreSoweto STAGING</string>
+    <string name="expo_runtime_version">staging-1</string>
 </resources>

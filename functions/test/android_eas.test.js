@@ -36,11 +36,61 @@ test("a staging profile can carry no production identifier and a production prof
   for (const p of ["staging", "staging-dev"]) for (const v of Object.values(eas.build[p].env)) assert.ok(!prod.includes(v), `${p} carries a production value`)
   for (const p of ["development", "preview", "production", "local"]) for (const v of Object.values(eas.build[p].env)) assert.ok(!/staging/.test(v), `${p} carries a staging value`)
 })
-test("OTA updates are NOT enabled: no channel, no expo-updates dependency, updates stay disabled in the manifest", () => {
-  for (const p of Object.values(eas.build)) { assert.ok(!("channel" in p)); assert.ok(!("runtimeVersion" in p)) }
-  const pkg = JSON.parse(read("package.json")); assert.ok(!("expo-updates" in { ...pkg.dependencies, ...pkg.devDependencies }))
-  assert.match(read("android/app/src/main/AndroidManifest.xml"), /expo\.modules\.updates\.ENABLED" android:value="false"/)
-  assert.ok(!("updates" in JSON.parse(read("app.json")).expo)); assert.ok(!("runtimeVersion" in JSON.parse(read("app.json")).expo))
+test("OTA is configured for staging only; production remains disabled in native configuration", () => {
+  for (const [name, profile] of Object.entries(eas.build)) {
+    if (name === "staging") {
+      assert.equal(profile.channel, "staging")
+      assert.equal(profile.android.gradleCommand, ":app:assembleStagingRelease")
+    } else {
+      assert.ok(!("channel" in profile), name + " must not have an OTA channel")
+    }
+    assert.ok(!("runtimeVersion" in profile))
+  }
+
+  const pkg = JSON.parse(read("package.json"))
+  assert.ok(pkg.dependencies["expo-updates"])
+  assert.equal(
+    pkg.scripts["update:staging"],
+    "node scripts/staging/publish-update.js"
+  )
+
+  const app = JSON.parse(read("app.json")).expo
+  assert.equal(app.runtimeVersion, "staging-1")
+  assert.equal(
+    app.updates.url,
+    "https://u.expo.dev/9ca91ae0-7d47-40c4-8299-80b8595e5f27"
+  )
+  assert.equal(app.updates.checkAutomatically, "ON_LOAD")
+  assert.equal(app.updates.fallbackToCacheTimeout, 0)
+
+  const main = read("android/app/src/main/AndroidManifest.xml")
+  assert.match(
+    main,
+    /expo\.modules\.updates\.ENABLED"\s+android:value="false"/
+  )
+
+  const staging = read("android/app/src/staging/AndroidManifest.xml")
+  assert.match(
+    staging,
+    /expo\.modules\.updates\.ENABLED"\s+android:value="true"/
+  )
+  assert.match(
+    staging,
+    /expo\.modules\.updates\.EXPO_UPDATE_URL"\s+android:value="https:\/\/u\.expo\.dev\/9ca91ae0-7d47-40c4-8299-80b8595e5f27"/
+  )
+  assert.match(
+    staging,
+    /expo\.modules\.updates\.EXPO_RUNTIME_VERSION"\s+android:value="@string\/expo_runtime_version"/
+  )
+  assert.match(
+    staging,
+    /expo\.modules\.updates\.UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY"\s+android:value="\{&quot;expo-channel-name&quot;:&quot;staging&quot;\}"/
+  )
+
+  assert.match(
+    read("android/app/src/staging/res/values/strings.xml"),
+    /<string name="expo_runtime_version">staging-1<\/string>/
+  )
 })
 test("the EAS pre-install hook runs the environment check", () => assert.equal(JSON.parse(read("package.json")).scripts["eas-build-pre-install"], "node scripts/verify-env.js"))
 

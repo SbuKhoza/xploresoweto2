@@ -1,0 +1,19 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <meta-data
+            android:name="expo.modules.updates.ENABLED"
+            android:value="true"
+            tools:replace="android:value" />
+        <meta-data
+            android:name="expo.modules.updates.EXPO_UPDATE_URL"
+            android:value="https://u.expo.dev/9ca91ae0-7d47-40c4-8299-80b8595e5f27" />
+        <meta-data
+            android:name="expo.modules.updates.EXPO_RUNTIME_VERSION"
+            android:value="@string/expo_runtime_version" />
+        <meta-data
+            android:name="expo.modules.updates.UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY"
+            android:value="{&quot;expo-channel-name&quot;:&quot;staging&quot;}"
+            tools:replace="android:value" />
+    </application>
+</manifest>

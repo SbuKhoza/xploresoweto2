@@ -81,7 +81,8 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleStagingRelease"
-      }
+      },
+      "channel": "staging"
     },
     "staging-dev": {
       "developmentClient": true,
